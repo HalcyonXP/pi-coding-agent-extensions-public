@@ -1,0 +1,10 @@
+.pi/
+**/node_modules/
+*.tsbuildinfo
+**/native/bin/
+auth.json
+credentials.json
+.env
+.env.*
+*.pem
+*.p12
