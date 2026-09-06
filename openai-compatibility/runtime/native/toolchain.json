@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "packages": {
+    "compiler": {
+      "id": "Microsoft.Net.Compilers.Toolset",
+      "version": "4.14.0",
+      "directory": "roslyn-4.14.0",
+      "archive": "toolset.nupkg",
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.net.compilers.toolset/4.14.0/microsoft.net.compilers.toolset.4.14.0.nupkg",
+      "sha256": "941a9cf3ea618d88d01a3dd6b1a45a06bcf07716a9f81ce4031caa3edd24a845",
+      "source": "https://github.com/dotnet/roslyn/commit/8edf7bcd4f1594c3d68a6a567469f41dbd33dd1b",
+      "treeSha256": "4ea0162ff52a7d1ba03c1d89c71fabeb1c28d4ea92bb32a81656dd7f88cd6e46"
+    },
+    "references": {
+      "id": "Microsoft.NETFramework.ReferenceAssemblies.net48",
+      "version": "1.0.3",
+      "directory": "net48-1.0.3",
+      "archive": "references.nupkg",
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.netframework.referenceassemblies.net48/1.0.3/microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg",
+      "sha256": "8a7e348538e7eb91351696911689f49e3d4f63f8bab517432bbe159b8b1104a2",
+      "treeSha256": "fe7b6b86f166cb17ed557324e0296748ddd9c0673f380112c399636372da4ef5"
+    }
+  }
+}

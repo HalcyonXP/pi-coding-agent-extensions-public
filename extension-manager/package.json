@@ -1,0 +1,19 @@
+{
+  "name": "extension-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Globally enable or disable Pi extensions from the active TUI",
+  "keywords": [
+    "pi-extension",
+    "extension-manager"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test core.test.mjs"
+  }
+}

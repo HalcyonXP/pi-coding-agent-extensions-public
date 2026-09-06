@@ -1,0 +1,32 @@
+name: Publication privacy
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy:
+    name: publication privacy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Privacy checker adversarial fixtures (offline)
+        run: node --test .github/test/publication.test.mjs
+      - name: Fetch published branch/tag/PR head and test-merge refs and check metadata/blobs
+        run: node .github/scripts/check-publication.mjs --remote-refs
+      - name: Checksum-pinned Gitleaks history and decompressed-blob scans
+        run: node .github/scripts/scan-secrets.mjs
+      # No credentials, raw findings, executables, private receipts or deployment uploads.

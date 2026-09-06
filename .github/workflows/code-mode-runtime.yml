@@ -1,0 +1,54 @@
+name: Code mode runtime spike
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: runtime spike (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: experiments/code-mode-runtime
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: openai-compatibility/package-lock.json
+      - name: Install cohesive runtime dependencies only, without lifecycle scripts
+        run: npm ci --omit=dev --ignore-scripts --prefix ../../openai-compatibility
+      - name: Acquire hash-pinned private build tools (no global SDK installation)
+        if: runner.os == 'Windows'
+        run: node ../../.github/scripts/prepare-native-compiler.mjs
+      - name: Reproduce/verify native containment helper offline with pinned Roslyn and references
+        if: runner.os == 'Windows'
+        run: node native/build.mjs
+      - name: Check host source syntax
+        run: npm run check
+      - name: Offline real-engine and process-lifecycle tests
+        run: npm test
+      - name: Retain native build provenance (not a deployment artifact)
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-provenance
+          path: openai-compatibility/runtime/native/bin/*/manifest.json
+          retention-days: 14
+          if-no-files-found: error

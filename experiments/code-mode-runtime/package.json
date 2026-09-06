@@ -1,0 +1,16 @@
+{
+  "name": "pi-code-mode-runtime-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline regression fixtures consuming the cohesive internal runtime; no independent engine implementation",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build:windows": "node native/build.mjs",
+    "check": "node ../../openai-compatibility/runtime/check.mjs"
+  }
+}

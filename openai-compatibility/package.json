@@ -1,0 +1,38 @@
+{
+  "name": "pi-openai-compatibility",
+  "version": "0.3.0-private.1",
+  "private": true,
+  "type": "module",
+  "description": "Subscription-backed OpenAI capabilities and model compatibility for Pi",
+  "license": "Apache-2.0",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "codex",
+    "image-generation"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --import ./test/offline.mjs --test index.test.mjs test/*.test.ts",
+    "check": "tsc --noEmit -p tsconfig.json && npm run check:runtime",
+    "check:runtime": "node runtime/check.mjs",
+    "build:runtime": "node runtime/native/build.mjs"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
+    "pi-host-model-baseline": "npm:@earendil-works/pi-ai@0.85.0",
+    "@types/node": "22.19.19",
+    "typebox": "^1.3.7",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "quickjs-emscripten-core": "0.32.0"
+  }
+}
