@@ -1,0 +1,8 @@
+{
+  "name": "pi-codex-imagegen-retired",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Inactive migration notice; imagegen lives in openai-compatibility",
+  "pi": { "extensions": ["./index.ts"] }
+}

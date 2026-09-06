@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/earendil-works/pi.git",
+  "tag": "v0.85.1",
+  "commit": "d981de1229ef899957bbe968bc8dcda02a21f477",
+  "npmVersion": "0.85.1",
+  "patch": "parent-bound-invocation.patch",
+  "patchSha256": "b5c4aa39ee32e3c6a4bde47c3f4600ff55bc111a1c38d6d0bbc581e71fa3dd22",
+  "license": "LICENSE.pi",
+  "status": "private-native-host-not-installed",
+  "licenseSha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+  "modelDataManifestSha256": "30e7f58cc33d5901dbcb64f0e00d0133620005737ffb73553b358ca23572bac8",
+  "modelDataNpmIntegrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ=="
+}

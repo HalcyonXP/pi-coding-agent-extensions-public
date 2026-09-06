@@ -1,0 +1,10 @@
+# Preserve exact patch bytes; diff context prefixes are not source whitespace.
+# CI checks the applied source separately.
+host-patches/**/*.patch -text whitespace=-blank-at-eol,-space-before-tab
+# Runtime helper digest is verified before launch on both development and CI checkouts.
+experiments/code-mode-runtime/native/*.cs text eol=lf
+experiments/code-mode-runtime/native/*.mjs text eol=lf
+openai-compatibility/runtime/native/*.cs text eol=lf
+openai-compatibility/runtime/native/*.mjs text eol=lf
+host-patches/pi-0.85.1/LICENSE.pi text eol=lf
+openai-compatibility/runtime/native/*.json text eol=lf

@@ -1,0 +1,60 @@
+name: Pi host gateway
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: host gateway (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: openai-compatibility/package-lock.json
+      - name: Install pinned release data without lifecycle scripts
+        run: npm ci --ignore-scripts --prefix openai-compatibility
+      - name: Verify provenance and apply patch to a new source checkout
+        run: node .github/scripts/prepare-pi-host.mjs
+      - name: Install locked host dependencies without lifecycle scripts
+        working-directory: .pi/host-gateway-checkout
+        run: npm ci --ignore-scripts
+      - name: Verify release model-data provenance
+        working-directory: .pi/host-gateway-checkout
+        run: npm run check:model-data
+      - name: Acquire hash-pinned private build tools (no global SDK installation)
+        if: runner.os == 'Windows'
+        run: node .github/scripts/prepare-native-compiler.mjs
+      - name: Reproduce/verify native containment helper offline
+        if: runner.os == 'Windows'
+        run: node openai-compatibility/runtime/native/build.mjs
+      - name: Real restricted-engine RPC through AgentSession (offline fixtures only)
+        run: node .github/scripts/test-code-mode-rpc.mjs
+      - name: Full host repository checks including RPC fixture (no live model calls)
+        working-directory: .pi/host-gateway-checkout
+        run: npm run check
+      - name: Real agent-core gateway and direct-path regressions
+        working-directory: .pi/host-gateway-checkout/packages/agent
+        run: node ../../node_modules/vitest/dist/cli.js --run test/tool-scopes.test.ts test/tool-invocation.test.ts test/agent-loop.test.ts test/agent.test.ts
+      - name: Real AgentSession hooks, normalization and reload races
+        working-directory: .pi/host-gateway-checkout/packages/coding-agent
+        env:
+          PI_OFFLINE: '1'
+        run: node ../../node_modules/vitest/dist/cli.js --run test/suite/tool-invocation.test.ts test/tool-result-images.test.ts test/suite/agent-session-model-extension.test.ts

@@ -1,0 +1,3118 @@
+diff --git a/packages/agent/src/agent-loop.ts b/packages/agent/src/agent-loop.ts
+index 193e3fa..da58233 100644
+--- a/packages/agent/src/agent-loop.ts
++++ b/packages/agent/src/agent-loop.ts
+@@ -8,6 +8,7 @@ import {
+ 	type Context,
+ 	EventStream,
+ 	type ToolResultMessage,
++	uuidv7,
+ 	validateToolArguments,
+ } from "@earendil-works/pi-ai";
+ import { getDefaultStreamFn } from "./stream-fn.ts";
+@@ -18,7 +19,12 @@ import type {
+ 	AgentMessage,
+ 	AgentTool,
+ 	AgentToolCall,
++	AgentToolEvidence,
++	AgentToolInvocation,
++	AgentToolResourceScope,
+ 	AgentToolResult,
++	AgentToolScope,
++	AgentToolScopeOptions,
+ 	PrepareNextTurnContext,
+ 	StreamFn,
+ } from "./types.ts";
+@@ -456,14 +462,13 @@ async function executeToolCallsSequential(
+ 				isError: preparation.isError,
+ 			};
+ 		} else {
+-			const executed = await executePreparedToolCall(preparation, signal, emit);
+-			finalized = await finalizeExecutedToolCall(
++			finalized = await executePreparedAndFinalize(
+ 				currentContext,
+ 				assistantMessage,
+ 				preparation,
+-				executed,
+ 				config,
+ 				signal,
++				emit,
+ 			);
+ 		}
+ 
+@@ -527,14 +532,13 @@ async function executeToolCallsParallel(
+ 				await emitToolExecutionEnd(finalized, emit);
+ 				return finalized;
+ 			}
+-			const executed = await executePreparedToolCall(preparation, signal, emit);
+-			const finalized = await finalizeExecutedToolCall(
++			const finalized = await executePreparedAndFinalize(
+ 				currentContext,
+ 				assistantMessage,
+ 				preparation,
+-				executed,
+ 				config,
+ 				signal,
++				emit,
+ 			);
+ 			await emitToolExecutionEnd(finalized, emit);
+ 			return finalized;
+@@ -565,6 +569,7 @@ type PreparedToolCall = {
+ 	toolCall: AgentToolCall;
+ 	tool: AgentTool<any>;
+ 	args: unknown;
++	revision?: number;
+ };
+ 
+ type ImmediateToolCallOutcome = {
+@@ -611,7 +616,8 @@ async function prepareToolCall(
+ 	config: AgentLoopConfig,
+ 	signal: AbortSignal | undefined,
+ ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
+-	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
++	const executionState = config.getToolExecutionState?.();
++	const tool = (executionState?.tools ?? currentContext.tools)?.find((t) => t.name === toolCall.name);
+ 	if (!tool) {
+ 		return {
+ 			kind: "immediate",
+@@ -659,11 +665,21 @@ async function prepareToolCall(
+ 				isError: true,
+ 			};
+ 		}
++		if (
++			config.getToolExecutionState &&
++			(config.getToolExecutionState().tools.find((entry) => entry.name === tool.name) !== tool ||
++				config.getToolExecutionState().revision !== executionState?.revision ||
++				config.getToolExecutionState().signal.aborted)
++		) {
++			throw new Error("Tool was disabled or replaced during approval");
++		}
++		const checkedArgs = validateToolArguments(tool, { ...toolCall, arguments: validatedArgs });
+ 		return {
+ 			kind: "prepared",
+ 			toolCall,
+ 			tool,
+-			args: validatedArgs,
++			args: checkedArgs,
++			revision: executionState?.revision,
+ 		};
+ 	} catch (error) {
+ 		return {
+@@ -674,6 +690,307 @@ async function prepareToolCall(
+ 	}
+ }
+ 
++type InvocationBudget = { calls: number; active: number; terminate: boolean };
++
++function createInvocationScope(
++	context: AgentContext,
++	assistant: AssistantMessage,
++	prepared: PreparedToolCall,
++	config: AgentLoopConfig,
++	signal: AbortSignal | undefined,
++	emit: AgentEventSink,
++	ancestors: string[],
++	budget: InvocationBudget,
++	owningScope?: AgentToolResourceScope,
++) {
++	const state = config.getToolExecutionState?.();
++	const controller = new AbortController();
++	const gatewaySignal = AbortSignal.any([
++		controller.signal,
++		...(signal ? [signal] : []),
++		...(state ? [state.signal] : []),
++	]);
++	let open = true;
++	const createdScopes: AgentToolScope[] = [];
++	const pending = new Set<Promise<unknown>>();
++	let serialBarrier: Promise<unknown> = Promise.resolve();
++	const lineage = [...ancestors, prepared.tool.name];
++	const assertParent = () => {
++		if (owningScope) {
++			if (!state?.scopes) throw new Error("Durable scope host is unavailable");
++			state.scopes.assertActiveResource(owningScope);
++		}
++		if (
++			!open ||
++			gatewaySignal.aborted ||
++			budget.terminate ||
++			!state ||
++			config.getToolExecutionState?.().revision !== state.revision
++		) {
++			throw new Error("Nested tool invocation is expired, cancelled, or belongs to a stale session");
++		}
++	};
++	const invocation: AgentToolInvocation = Object.freeze({
++		origin: ancestors.length === 0 ? "direct" : "nested",
++		contextSignal: state?.signal ?? AbortSignal.abort(),
++		parentToolCallId: prepared.toolCall.id,
++		signal: gatewaySignal,
++		scope: owningScope,
++		openScope(options?: AgentToolScopeOptions) {
++			assertParent();
++			if (
++				options &&
++				(Object.keys(options).some((key) => !["onResult", "resolveImageReference"].includes(key)) ||
++					(options.resolveImageReference !== undefined && typeof options.resolveImageReference !== "function") ||
++					typeof options.onResult !== "function" ||
++					!state?.publishEvidence)
++			)
++				throw new Error("Protected result publication requires a supported native host");
++			if (ancestors.length || owningScope || !state?.scopes || !state.getContext || !state.emitScopeEvent)
++				throw new Error("Durable scopes require a direct native Agent invocation");
++			const scope = state.scopes.open(
++				state.signal,
++				(resource) => {
++					const native = createInvocationScope(
++						state.getContext!(),
++						assistant,
++						prepared,
++						config,
++						resource.signal,
++						(event) => state.emitScopeEvent!({ ...event, scopeId: resource.id }, resource),
++						ancestors,
++						{ calls: 0, active: 0, terminate: false },
++						resource,
++					);
++					return {
++						invoke: native.invocation.invoke,
++						close: native.close,
++						publishEvidence: state.publishEvidence
++							? (evidence: AgentToolEvidence) => state.publishEvidence!(evidence, resource, state.signal)
++							: undefined,
++					};
++				},
++				options,
++			);
++			createdScopes.push(scope);
++			return scope;
++		},
++		hasProtectedResults() {
++			assertParent();
++			return Boolean(owningScope && state?.scopes?.hasProtectedResults(owningScope));
++		},
++		resolveImageReference(ref: string) {
++			assertParent();
++			if (!owningScope || !state?.scopes) throw new Error("Protected image references require a native scope");
++			return state.scopes.resolveImageReference(owningScope, ref);
++		},
++		adoptScope(scope: AgentToolScope) {
++			assertParent();
++			if (ancestors.length || owningScope || !state?.scopes)
++				throw new Error("Scope adoption requires a direct native Agent invocation");
++			return state.scopes.adopt(scope, state.signal);
++		},
++		invoke(name: string, args: Record<string, unknown>, options?: { signal?: AbortSignal }) {
++			// Sequential calls wait for preceding siblings and become a barrier for following siblings.
++			const serial =
++				config.toolExecution === "sequential" ||
++				state?.tools.find((tool) => tool.name === name)?.executionMode === "sequential";
++			const predecessor = serial ? Promise.allSettled([...pending]) : serialBarrier;
++			// Return a rejected promise, not a synchronous exception, for a consistent RPC boundary.
++			const task = (async () => {
++				assertParent();
++				options?.signal?.throwIfAborted();
++				if (!name || lineage.includes(name) || lineage.length >= 4)
++					throw new Error("Nested tool recursion is not allowed");
++				if (budget.calls >= 64 || budget.active >= 4) throw new Error("Nested tool invocation limit reached");
++				const input = structuredClone(args);
++				if (new TextEncoder().encode(JSON.stringify(input)).byteLength > 64 * 1024)
++					throw new Error("Nested tool arguments exceed 64 KiB");
++				budget.calls++;
++				budget.active++;
++				try {
++					const childSignal = options?.signal ? AbortSignal.any([gatewaySignal, options.signal]) : gatewaySignal;
++					const toolCall: AgentToolCall = {
++						type: "toolCall",
++						id: `${prepared.toolCall.id}/nested-${uuidv7()}`,
++						name,
++						arguments: input,
++					};
++					const current = config.getToolExecutionState?.();
++					const childContext: AgentContext = {
++						...(owningScope ? current!.getContext!() : context),
++						tools: [...(current?.tools ?? [])],
++					};
++					const childEmit: AgentEventSink = (event) => {
++						if (event.type === "tool_execution_update") {
++							if (!open || gatewaySignal.aborted || childSignal.aborted) return;
++							assertParent();
++						}
++						return emit(event);
++					};
++					let finalized: FinalizedToolCallOutcome;
++					let started = false;
++					try {
++						await predecessor;
++						assertParent();
++						childSignal.throwIfAborted();
++						started = true;
++						await emit({ type: "tool_execution_start", toolCallId: toolCall.id, toolName: name, args: input });
++						assertParent();
++						childSignal.throwIfAborted();
++						const preparation = await prepareToolCall(childContext, assistant, toolCall, config, childSignal);
++						assertParent();
++						childSignal.throwIfAborted();
++						if (preparation.kind === "immediate")
++							finalized = { toolCall, result: preparation.result, isError: preparation.isError };
++						else
++							finalized = await executePreparedAndFinalize(
++								childContext,
++								assistant,
++								preparation,
++								config,
++								childSignal,
++								childEmit,
++								lineage,
++								budget,
++								owningScope,
++							);
++						assertParent();
++						childSignal.throwIfAborted();
++					} catch (error) {
++						finalized = {
++							toolCall,
++							result: createErrorToolResult(error instanceof Error ? error.message : "Nested tool failed"),
++							isError: true,
++						};
++					}
++					// No orphan events for queued work cancelled before its genuine start.
++					// Child calls are never synthetic model transcript turns.
++					if (started) await emitToolExecutionEnd(finalized, emit);
++					assertParent();
++					childSignal.throwIfAborted();
++					if (owningScope)
++						await state!.scopes!.publishFinalized(owningScope, {
++							toolName: name,
++							toolCallId: toolCall.id,
++							scopeId: owningScope.id,
++							result: finalized.result,
++							isError: finalized.isError,
++						});
++					assertParent();
++					childSignal.throwIfAborted();
++					if (finalized.result.terminate) budget.terminate = true;
++					return { result: structuredClone(finalized.result), isError: finalized.isError };
++				} finally {
++					budget.active--;
++				}
++			})();
++			pending.add(task);
++			if (serial)
++				serialBarrier = task.then(
++					() => {},
++					() => {},
++				);
++			// Observe abandoned promises and retain ownership until cleanup finishes.
++			void task.then(
++				() => pending.delete(task),
++				() => pending.delete(task),
++			);
++			return task;
++		},
++	});
++	return {
++		invocation,
++		createdScopes,
++		close: async () => {
++			open = false;
++			controller.abort();
++			await Promise.allSettled([...pending]);
++		},
++	};
++}
++
++/** Direct and nested execution share the same handler/finalization pipeline. */
++async function executePreparedAndFinalize(
++	context: AgentContext,
++	assistant: AssistantMessage,
++	prepared: PreparedToolCall,
++	config: AgentLoopConfig,
++	signal: AbortSignal | undefined,
++	emit: AgentEventSink,
++	ancestors: string[] = [],
++	budget: InvocationBudget = { calls: 0, active: 0, terminate: false },
++	owningScope?: AgentToolResourceScope,
++): Promise<FinalizedToolCallOutcome> {
++	const state = config.getToolExecutionState?.();
++	if (
++		state &&
++		(state.signal.aborted ||
++			state.revision !== prepared.revision ||
++			state.tools.find((tool) => tool.name === prepared.tool.name) !== prepared.tool)
++	) {
++		return {
++			toolCall: prepared.toolCall,
++			result: createErrorToolResult("Tool was disabled or replaced before execution"),
++			isError: true,
++		};
++	}
++
++	const native = createInvocationScope(
++		context,
++		assistant,
++		prepared,
++		config,
++		signal,
++		emit,
++		ancestors,
++		budget,
++		owningScope,
++	);
++	let retainScopes = false;
++	let finalized: FinalizedToolCallOutcome | undefined;
++	let failed = false;
++	let failure: unknown;
++	try {
++		let executed: ExecutedToolCallOutcome;
++		try {
++			const bound =
++				state && prepared.tool.withInvocation ? prepared.tool.withInvocation(native.invocation) : prepared.tool;
++			executed = await executePreparedToolCall({ ...prepared, tool: bound }, signal, emit);
++		} finally {
++			await native.close();
++		}
++		if (budget.terminate) executed.result = { ...executed.result, terminate: true };
++		finalized = await finalizeExecutedToolCall(context, assistant, prepared, executed, config, signal);
++		retainScopes =
++			!executed.isError &&
++			!finalized.isError &&
++			!finalized.result.terminate &&
++			!signal?.aborted &&
++			!state?.signal.aborted;
++	} catch (error) {
++		failed = true;
++		failure = error;
++	}
++	if (!retainScopes) {
++		await Promise.allSettled(native.createdScopes.map((scope) => scope.close()));
++		const scopes = native.createdScopes
++			.filter((scope) => scope.state !== "closed")
++			.map((scope) => ({ id: scope.id, state: scope.state }));
++		if (scopes.length)
++			return {
++				toolCall: prepared.toolCall,
++				result: {
++					content: [{ type: "text", text: "Durable scope cleanup could not be confirmed." }],
++					details: { scopeCleanup: "unconfirmed", scopes },
++				},
++				isError: true,
++			};
++	}
++	if (failed) throw failure;
++	return finalized!;
++}
++
+ async function executePreparedToolCall(
+ 	prepared: PreparedToolCall,
+ 	signal: AbortSignal | undefined,
+@@ -759,7 +1076,7 @@ async function finalizeExecutedToolCall(
+ 
+ 	return {
+ 		toolCall: prepared.toolCall,
+-		result,
++		result: { ...result, content: result.content ?? [] },
+ 		isError,
+ 	};
+ }
+diff --git a/packages/agent/src/agent.ts b/packages/agent/src/agent.ts
+index 0de7edd..526ce19 100644
+--- a/packages/agent/src/agent.ts
++++ b/packages/agent/src/agent.ts
+@@ -9,6 +9,7 @@ import type {
+ } from "@earendil-works/pi-ai";
+ import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
+ import { getDefaultStreamFn } from "./stream-fn.ts";
++import { ToolScopeRegistry } from "./tool-scopes.ts";
+ import type {
+ 	AfterToolCallContext,
+ 	AfterToolCallResult,
+@@ -19,6 +20,9 @@ import type {
+ 	AgentMessage,
+ 	AgentState,
+ 	AgentTool,
++	AgentToolEvidence,
++	AgentToolGatewayInfo,
++	AgentToolResourceScope,
+ 	BeforeToolCallContext,
+ 	BeforeToolCallResult,
+ 	PrepareNextTurnContext,
+@@ -66,26 +70,38 @@ type MutableAgentState = Omit<AgentState, "isStreaming" | "streamingMessage" | "
+ };
+ 
+ function createMutableAgentState(
+-	initialState?: Partial<Omit<AgentState, "pendingToolCalls" | "isStreaming" | "streamingMessage" | "errorMessage">>,
++	initialState:
++		| Partial<Omit<AgentState, "pendingToolCalls" | "isStreaming" | "streamingMessage" | "errorMessage">>
++		| undefined,
++	invalidateInvocations: () => void,
+ ): MutableAgentState {
++	let model = initialState?.model ?? DEFAULT_MODEL;
+ 	let tools = initialState?.tools?.slice() ?? [];
+ 	let messages = initialState?.messages?.slice() ?? [];
+ 
+ 	return {
+ 		systemPrompt: initialState?.systemPrompt ?? "",
+-		model: initialState?.model ?? DEFAULT_MODEL,
++		get model() {
++			return model;
++		},
++		set model(nextModel) {
++			model = nextModel;
++			invalidateInvocations();
++		},
+ 		thinkingLevel: initialState?.thinkingLevel ?? "off",
+ 		get tools() {
+ 			return tools;
+ 		},
+ 		set tools(nextTools: AgentTool<any>[]) {
+ 			tools = nextTools.slice();
++			invalidateInvocations();
+ 		},
+ 		get messages() {
+ 			return messages;
+ 		},
+ 		set messages(nextMessages: AgentMessage[]) {
+ 			messages = nextMessages.slice();
++			invalidateInvocations();
+ 		},
+ 		isStreaming: false,
+ 		streamingMessage: undefined,
+@@ -172,10 +188,33 @@ type ActiveRun = {
+  */
+ export class Agent {
+ 	private _state: MutableAgentState;
++	private invocationRevision = 0;
++	private invocationController = new AbortController();
++	private readonly toolScopes = new ToolScopeRegistry();
++	private readonly scopedToolCalls = new Set<string>();
++	private invocationSuspensions = 0;
+ 	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
+ 	private readonly steeringQueue: PendingMessageQueue;
+ 	private readonly followUpQueue: PendingMessageQueue;
+ 
++	/** Informational only. Actual invocation/scopes still require native identity checks. */
++	getToolGatewayInfo(): AgentToolGatewayInfo {
++		const status = this.toolScopes.status;
++		return Object.freeze({
++			version: 1,
++			protectedResults: typeof this.publishToolEvidence === "function",
++			activeScopes: status.active,
++			drainingScopes: status.draining,
++			maxScopes: 2,
++		});
++	}
++
++	/** Bound by a native host with genuine persistence/presentation, never a guest option. */
++	public publishToolEvidence?: (
++		evidence: AgentToolEvidence,
++		scope: AgentToolResourceScope,
++		contextSignal: AbortSignal,
++	) => Promise<void>;
+ 	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
+ 	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+ 	public streamFunction: StreamFn;
+@@ -216,7 +255,7 @@ export class Agent {
+ 	constructor(options: AgentOptions) {
+ 		// Older compiled consumers may omit options or streamFn even though the current API requires them.
+ 		const runtimeOptions: Partial<AgentOptions> = options ?? {};
+-		this._state = createMutableAgentState(runtimeOptions.initialState);
++		this._state = createMutableAgentState(runtimeOptions.initialState, () => this.invalidateToolInvocations());
+ 		this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
+ 		this.transformContext = runtimeOptions.transformContext;
+ 		this.streamFunction = runtimeOptions.streamFn ?? getDefaultStreamFn();
+@@ -315,8 +354,30 @@ export class Agent {
+ 		return this.activeRun?.abortController.signal;
+ 	}
+ 
++	/** Host lifecycle boundary: revoke every issued nested invocation. */
++	invalidateToolInvocations(): void {
++		this.invocationRevision++;
++		this.invocationController.abort();
++		this.invocationController = new AbortController();
++		if (this.invocationSuspensions > 0) this.invocationController.abort();
++	}
++
++	/** Suspend tool execution during a host reload, including its asynchronous shutdown hooks. */
++	suspendToolInvocations(): () => void {
++		this.invocationSuspensions++;
++		this.invalidateToolInvocations();
++		let resumed = false;
++		return () => {
++			if (resumed) return;
++			resumed = true;
++			this.invocationSuspensions--;
++			this.invalidateToolInvocations();
++		};
++	}
++
+ 	/** Abort the current run, if one is active. */
+ 	abort(): void {
++		this.invalidateToolInvocations();
+ 		this.activeRun?.abortController.abort();
+ 	}
+ 
+@@ -338,7 +399,8 @@ export class Agent {
+ 		this._state.messages = [];
+ 		this._state.isStreaming = false;
+ 		this._state.streamingMessage = undefined;
+-		this._state.pendingToolCalls = new Set<string>();
++		// Message replacement revokes scopes; retain any still-draining native work.
++		this._state.pendingToolCalls = new Set(this.scopedToolCalls);
+ 		this._state.errorMessage = undefined;
+ 		this.clearFollowUpQueue();
+ 		this.clearSteeringQueue();
+@@ -455,8 +517,25 @@ export class Agent {
+ 			thinkingBudgets: this.thinkingBudgets,
+ 			maxRetryDelayMs: this.maxRetryDelayMs,
+ 			toolExecution: this.toolExecution,
+-			beforeToolCall: this.beforeToolCall,
+-			afterToolCall: this.afterToolCall,
++			beforeToolCall: (context, signal) => this.beforeToolCall?.(context, signal) ?? Promise.resolve(undefined),
++			afterToolCall: (context, signal) => this.afterToolCall?.(context, signal) ?? Promise.resolve(undefined),
++			getToolExecutionState: () => ({
++				tools: this._state.tools,
++				revision: this.invocationRevision,
++				signal: this.invocationController.signal,
++				scopes: this.toolScopes,
++				publishEvidence: this.publishToolEvidence,
++				getContext: () => this.createContextSnapshot(),
++				emitScopeEvent: async (event, scope) => {
++					const scopeSignal = this.toolScopes.eventSignal(scope);
++					if (
++						event.scopeId !== scope.id ||
++						!["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(event.type)
++					)
++						throw new Error("Invalid durable scope event");
++					await this.processEvents(event, scopeSignal);
++				},
++			}),
+ 			shouldStopAfterTurn: shouldStopAfterTurn
+ 				? async (context) => await shouldStopAfterTurn(context, this.signal)
+ 				: undefined,
+@@ -529,7 +608,7 @@ export class Agent {
+ 	private finishRun(): void {
+ 		this._state.isStreaming = false;
+ 		this._state.streamingMessage = undefined;
+-		this._state.pendingToolCalls = new Set<string>();
++		this._state.pendingToolCalls = new Set(this.scopedToolCalls);
+ 		this.activeRun?.resolve();
+ 		this.activeRun = undefined;
+ 	}
+@@ -541,7 +620,7 @@ export class Agent {
+ 	 * considered idle later, after all awaited listeners for `agent_end` finish
+ 	 * and `finishRun()` clears runtime-owned state.
+ 	 */
+-	private async processEvents(event: AgentEvent): Promise<void> {
++	private async processEvents(event: AgentEvent, scopeSignal?: AbortSignal): Promise<void> {
+ 		switch (event.type) {
+ 			case "message_start":
+ 				this._state.streamingMessage = event.message;
+@@ -557,6 +636,7 @@ export class Agent {
+ 				break;
+ 
+ 			case "tool_execution_start": {
++				if (event.scopeId) this.scopedToolCalls.add(event.toolCallId);
+ 				const pendingToolCalls = new Set(this._state.pendingToolCalls);
+ 				pendingToolCalls.add(event.toolCallId);
+ 				this._state.pendingToolCalls = pendingToolCalls;
+@@ -564,6 +644,7 @@ export class Agent {
+ 			}
+ 
+ 			case "tool_execution_end": {
++				if (event.scopeId) this.scopedToolCalls.delete(event.toolCallId);
+ 				const pendingToolCalls = new Set(this._state.pendingToolCalls);
+ 				pendingToolCalls.delete(event.toolCallId);
+ 				this._state.pendingToolCalls = pendingToolCalls;
+@@ -581,7 +662,7 @@ export class Agent {
+ 				break;
+ 		}
+ 
+-		const signal = this.activeRun?.abortController.signal;
++		const signal = scopeSignal ?? this.activeRun?.abortController.signal;
+ 		if (!signal) {
+ 			throw new Error("Agent listener invoked outside active run");
+ 		}
+diff --git a/packages/agent/src/tool-scopes.ts b/packages/agent/src/tool-scopes.ts
+new file mode 100644
+index 0000000..5927ed4
+--- /dev/null
++++ b/packages/agent/src/tool-scopes.ts
+@@ -0,0 +1,310 @@
++import { uuidv7 } from "@earendil-works/pi-ai";
++import type {
++	AgentScopedResult,
++	AgentToolEvidence,
++	AgentToolInvocation,
++	AgentToolResourceScope,
++	AgentToolScope,
++	AgentToolScopeOptions,
++} from "./types.ts";
++
++type Backend = {
++	invoke: AgentToolInvocation["invoke"];
++	close(): Promise<void>;
++	publishEvidence?: (evidence: AgentToolEvidence) => Promise<void>;
++};
++type Resource = { close: () => Promise<void> };
++type RecordState = {
++	id: string;
++	deadline: number;
++	epoch?: AbortSignal;
++	controller: AbortController;
++	resources: Set<Resource>;
++	backend?: Backend;
++	backendClosed: boolean;
++	cleanupPending: number;
++	state: "active" | "draining" | "closed";
++	closing?: Promise<void>;
++	timer?: ReturnType<typeof setTimeout>;
++	revoke: () => void;
++	api?: AgentToolScope;
++	onResult?: AgentToolScopeOptions["onResult"];
++	resolveImageReference?: AgentToolScopeOptions["resolveImageReference"];
++	publicationCalls: number;
++	publicationPending: number;
++};
++
++/** Native Agent-owned admission, not extension/module-owned quota or caller-ID authority.
++ * A shorter test lifetime is allowed; a caller cannot expand the six-minute ceiling.
++ */
++export class ToolScopeRegistry {
++	private readonly records = new Map<AgentToolScope, RecordState>();
++	private readonly resourceScopes = new WeakMap<AgentToolResourceScope, RecordState>();
++	private readonly lifetimeMs: number;
++	constructor(lifetimeMs = 360_000) {
++		this.lifetimeMs = lifetimeMs;
++		if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < 1 || lifetimeMs > 360_000)
++			throw new Error("Invalid host scope lifetime");
++	}
++	get size(): number {
++		return this.records.size;
++	}
++	/** Passive snapshot: does not issue a capability, reset quota or trigger work. */
++	get status(): { readonly active: number; readonly draining: number } {
++		let active = 0,
++			draining = 0;
++		for (const record of this.records.values()) {
++			if (record.state === "active") active++;
++			else if (record.state === "draining") draining++;
++		}
++		return Object.freeze({ active, draining });
++	}
++
++	private expire(record: RecordState): void {
++		if (record.state === "active" && (record.epoch?.aborted || performance.now() >= record.deadline)) record.revoke();
++	}
++
++	open(
++		epoch: AbortSignal,
++		create: (scope: AgentToolResourceScope) => Backend,
++		options?: AgentToolScopeOptions,
++	): AgentToolScope {
++		for (const record of this.records.values()) this.expire(record);
++		if (
++			epoch.aborted ||
++			this.records.size >= 2 ||
++			[...this.records.values()].some((record) => record.state !== "active")
++		) {
++			throw new Error("Durable scope admission unavailable or prior cleanup incomplete");
++		}
++		const record: RecordState = {
++			id: uuidv7(),
++			deadline: performance.now() + this.lifetimeMs,
++			epoch,
++			controller: new AbortController(),
++			resources: new Set(),
++			backendClosed: false,
++			cleanupPending: 0,
++			state: "active",
++			onResult: options?.onResult,
++			resolveImageReference: options?.resolveImageReference,
++			publicationCalls: 0,
++			publicationPending: 0,
++			revoke: () => {},
++		};
++		const expire = () => this.expire(record);
++		const assertCurrent = () => {
++			expire();
++			if (
++				record.state !== "active" ||
++				record.controller.signal.aborted ||
++				record.epoch?.aborted ||
++				performance.now() >= record.deadline
++			)
++				throw new Error("Durable tool scope is expired or revoked");
++		};
++		const finish = () => {
++			if (record.state !== "draining" || !record.backendClosed || record.cleanupPending || record.resources.size)
++				return;
++			record.state = "closed";
++			record.epoch?.removeEventListener("abort", record.revoke);
++			record.epoch = undefined;
++			record.onResult = undefined;
++			record.resolveImageReference = undefined;
++			this.resourceScopes.delete(resourceScope);
++			if (record.api) this.records.delete(record.api);
++		};
++		const ownResource = (close: () => Promise<void>) => {
++			assertCurrent();
++			if (typeof close !== "function" || record.resources.size >= 16)
++				throw new Error("Invalid or excessive scope resources");
++			const resource: Resource = { close };
++			record.resources.add(resource);
++			// Only a native tool receives this release closure, never generated JavaScript.
++			return () => {
++				record.resources.delete(resource);
++				finish();
++			};
++		};
++		const resourceScope: AgentToolResourceScope = Object.freeze({
++			id: record.id,
++			get signal() {
++				expire();
++				return record.controller.signal;
++			},
++			ownResource,
++		});
++		this.resourceScopes.set(resourceScope, record);
++		const close = (): Promise<void> => {
++			if (record.state === "closed") return Promise.resolve();
++			if (record.closing) return record.closing;
++			let resolve!: () => void;
++			let reject!: (error: unknown) => void;
++			record.closing = new Promise<void>((done, fail) => {
++				resolve = done;
++				reject = fail;
++			});
++			record.state = "draining";
++			clearTimeout(record.timer);
++			record.controller.abort();
++			void (async () => {
++				const drain = Promise.resolve()
++					.then(() => record.backend?.close())
++					.then(() => {
++						record.backendClosed = true;
++						record.backend = undefined;
++					});
++				const resources = [...record.resources].map((resource) => {
++					record.cleanupPending++;
++					return Promise.resolve()
++						.then(() => resource.close())
++						.then(() => {
++							record.resources.delete(resource);
++						})
++						.finally(() => {
++							record.cleanupPending--;
++							finish();
++						});
++				});
++				await Promise.allSettled([drain, ...resources]);
++				finish();
++				if (record.state !== "closed") throw new Error("Durable scope cleanup could not be confirmed");
++			})().then(resolve, reject);
++			return record.closing;
++		};
++		const api: AgentToolScope = Object.freeze({
++			...resourceScope,
++			get signal() {
++				expire();
++				return record.controller.signal;
++			},
++			get state() {
++				expire();
++				return record.state;
++			},
++			invoke: (...args: Parameters<AgentToolInvocation["invoke"]>) => {
++				try {
++					assertCurrent();
++					return record.backend!.invoke(...args).then((outcome) => {
++						assertCurrent();
++						if (outcome.result.terminate) void close().catch(() => {});
++						return outcome;
++					});
++				} catch {
++					return Promise.reject(new Error("Durable tool scope is expired or unavailable"));
++				}
++			},
++			close,
++			async publishEvidence(evidence: AgentToolEvidence) {
++				assertCurrent();
++				if (!record.onResult || !record.backend?.publishEvidence)
++					throw new Error("Protected presentation is unavailable");
++				if (record.publicationCalls >= 64 || record.publicationPending >= 4)
++					throw new Error("Protected publication budget exceeded");
++				let task: Promise<void>;
++				const release = ownResource(async () => {
++					await task;
++				});
++				record.publicationCalls++;
++				record.publicationPending++;
++				task = Promise.resolve().then(() => {
++					assertCurrent();
++					return record.backend!.publishEvidence!(structuredClone(evidence));
++				});
++				let confirmed = false;
++				try {
++					await task;
++					confirmed = true;
++					assertCurrent();
++				} catch {
++					throw new Error("Protected presentation failed");
++				} finally {
++					record.publicationPending--;
++					// A rejected publisher has no successful receipt. Keep its failed
++					// cleanup resource even for an explicit image(ref) helper call.
++					if (confirmed) release();
++				}
++			},
++		});
++		record.api = api;
++		this.records.set(api, record);
++		try {
++			record.backend = create(resourceScope);
++		} catch {
++			record.backendClosed = true;
++			void close().catch(() => {});
++			throw new Error("Durable scope initialization failed");
++		}
++		record.revoke = () => {
++			void close().catch(() => {});
++		};
++		epoch.addEventListener("abort", record.revoke, { once: true });
++		record.timer = setTimeout(record.revoke, Math.max(0, record.deadline - performance.now()));
++		record.timer.unref?.();
++		this.expire(record);
++		return api;
++	}
++
++	hasProtectedResults(scope: AgentToolResourceScope): boolean {
++		this.assertActiveResource(scope);
++		const record = this.resourceScopes.get(scope)!;
++		return Boolean(record.onResult && record.backend?.publishEvidence);
++	}
++	resolveImageReference(scope: AgentToolResourceScope, ref: string) {
++		this.assertActiveResource(scope);
++		const record = this.resourceScopes.get(scope)!;
++		if (
++			!record.onResult ||
++			!record.resolveImageReference ||
++			typeof ref !== "string" ||
++			!/^img_[a-f0-9-]{36}$/.test(ref)
++		)
++			throw new Error("Unknown or unavailable protected image reference");
++		try {
++			const image = structuredClone(record.resolveImageReference(ref));
++			this.assertActiveResource(scope);
++			return image;
++		} catch {
++			throw new Error("Unknown or unavailable protected image reference");
++		}
++	}
++	async publishFinalized(scope: AgentToolResourceScope, event: AgentScopedResult): Promise<void> {
++		this.assertActiveResource(scope);
++		const record = this.resourceScopes.get(scope)!;
++		if (!record.onResult) return;
++		if (!record.backend?.publishEvidence || event.scopeId !== scope.id)
++			throw new Error("Protected result owner is unavailable");
++		try {
++			await record.onResult(structuredClone(event));
++		} catch {
++			throw new Error("Protected result publication failed");
++		}
++		this.assertActiveResource(scope);
++	}
++	assertActiveResource(scope: AgentToolResourceScope): void {
++		const record = this.resourceScopes.get(scope);
++		if (record) this.expire(record);
++		if (
++			!record ||
++			record.state !== "active" ||
++			record.controller.signal.aborted ||
++			performance.now() >= record.deadline
++		)
++			throw new Error("Durable tool scope is expired or revoked");
++	}
++
++	/** Native event-sink ownership, including cancellation events during drain. */
++	eventSignal(scope: AgentToolResourceScope): AbortSignal {
++		const record = this.resourceScopes.get(scope);
++		if (!record || record.state === "closed") throw new Error("Unknown or closed scope event owner");
++		return record.controller.signal;
++	}
++
++	adopt(scope: AgentToolScope, epoch: AbortSignal): AgentToolScope {
++		const record = this.records.get(scope);
++		if (record) this.expire(record);
++		if (!record || record.epoch !== epoch || epoch.aborted || record.state !== "active")
++			throw new Error("Unknown, foreign or stale durable tool scope");
++		return scope;
++	}
++}
+diff --git a/packages/agent/src/types.ts b/packages/agent/src/types.ts
+index eebb5dc..20f1a2d 100644
+--- a/packages/agent/src/types.ts
++++ b/packages/agent/src/types.ts
+@@ -14,6 +14,7 @@ import type {
+ 	Usage,
+ } from "@earendil-works/pi-ai";
+ import type { Static, TSchema } from "typebox";
++import type { ToolScopeRegistry } from "./tool-scopes.ts";
+ 
+ /**
+  * Stream function used by the agent loop. `Models.streamSimple` satisfies
+@@ -148,6 +149,21 @@ export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
+ 
+ export interface AgentLoopConfig extends SimpleStreamOptions {
+ 	model: Model<any>;
++	/** Live host registry/lifecycle. Required to provision nested invocation capabilities. */
++	getToolExecutionState?: () => {
++		tools: readonly AgentTool[];
++		revision: number;
++		signal: AbortSignal;
++		/** Native Agent services; absent on unidentified/low-level hosts. */
++		scopes?: ToolScopeRegistry;
++		getContext?: () => AgentContext;
++		emitScopeEvent?: (event: AgentEvent, scope: AgentToolResourceScope) => Promise<void>;
++		publishEvidence?: (
++			evidence: AgentToolEvidence,
++			scope: AgentToolResourceScope,
++			contextSignal: AbortSignal,
++		) => Promise<void>;
++	};
+ 
+ 	/**
+ 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
+@@ -383,10 +399,83 @@ export interface AgentToolResult<T> {
+  */
+ export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
+ 
++/** Passive native-host compatibility/admission information, never invocation authority. */
++export interface AgentToolGatewayInfo {
++	readonly version: 1;
++	readonly protectedResults: boolean;
++	readonly activeScopes: number;
++	readonly drainingScopes: number;
++	readonly maxScopes: 2;
++}
++
++/** Host-issued capability available only while its parent handler is executing. */
++export interface AgentToolResourceScope {
++	readonly id: string;
++	readonly signal: AbortSignal;
++	/** Register before launching a resource. Resolve only after confirmed cleanup.
++	 * The returned native-only release closure reports a natural/independently confirmed close.
++	 */
++	ownResource(close: () => Promise<void>): () => void;
++}
++
++export interface AgentToolEvidence {
++	content: (TextContent | ImageContent)[];
++	details?: Record<string, unknown>;
++}
++export interface AgentScopedResult {
++	toolName: string;
++	toolCallId: string;
++	scopeId: string;
++	result: AgentToolResult<unknown>;
++	isError: boolean;
++}
++export interface AgentToolScopeOptions {
++	/** Native composition only. Runs for every finalized descendant, before caller release. */
++	onResult: (event: AgentScopedResult) => Promise<void>;
++	/** Optional native-context reference resolver. Never a guest callback or path fallback. */
++	resolveImageReference?: (ref: string) => ImageContent;
++}
++export interface AgentToolScope extends AgentToolResourceScope {
++	readonly state: "active" | "draining" | "closed";
++	invoke: AgentToolInvocation["invoke"];
++	/** Genuine host persistence/presentation service, absent on unprotected scopes. */
++	publishEvidence(evidence: AgentToolEvidence): Promise<void>;
++	close(): Promise<void>;
++}
++
++export interface AgentToolInvocation {
++	/** Host-derived ancestry, never a caller argument or an interpretation of call-ID text. */
++	readonly origin: "direct" | "nested";
++	/** Native Agent/context epoch identity and revocation only, not execution authority.
++	 * Survives handler return; aborts on registry/model/transcript/session invalidation.
++	 */
++	readonly contextSignal: AbortSignal;
++	readonly parentToolCallId: string;
++	readonly signal: AbortSignal;
++	readonly scope?: AgentToolResourceScope;
++	/** Direct-only, host-issued independent lifetime. Never retain this invocation to emulate one. */
++	openScope(options?: AgentToolScopeOptions): AgentToolScope;
++	/** Ancestry/native-record derived, not a caller flag or parsed ID. */
++	hasProtectedResults(): boolean;
++	resolveImageReference(ref: string): ImageContent;
++	/** Direct-only identity/Agent/generation validation of a previously issued native capability. */
++	adoptScope(scope: AgentToolScope): AgentToolScope;
++	invoke(
++		name: string,
++		args: Record<string, unknown>,
++		options?: { signal?: AbortSignal },
++	): Promise<{
++		result: AgentToolResult<unknown>;
++		isError: boolean;
++	}>;
++}
++
+ /** Tool definition used by the agent runtime. */
+ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> {
+ 	/** Human-readable label for UI display. */
+ 	label: string;
++	/** Host adapter: bind a scoped invocation without exposing handlers to generated code. */
++	withInvocation?: (invocation: AgentToolInvocation) => AgentTool<TParameters, TDetails>;
+ 	/**
+ 	 * Optional compatibility shim for raw tool-call arguments before schema validation.
+ 	 * Must return an object that matches `TParameters`.
+@@ -428,7 +517,8 @@ export interface AgentContext {
+  * listeners for that event are still part of run settlement. The agent becomes
+  * idle only after those listeners finish.
+  */
+-export type AgentEvent =
++export type AgentEvent = AgentRuntimeEvent & { readonly scopeId?: string };
++type AgentRuntimeEvent =
+ 	// Agent lifecycle
+ 	| { type: "agent_start" }
+ 	| { type: "agent_end"; messages: AgentMessage[] }
+diff --git a/packages/agent/test/agent-loop.test.ts b/packages/agent/test/agent-loop.test.ts
+index d3255df..1334304 100644
+--- a/packages/agent/test/agent-loop.test.ts
++++ b/packages/agent/test/agent-loop.test.ts
+@@ -441,7 +441,7 @@ describe("agentLoop with AgentMessage", () => {
+ 		expect(messages[messages.length - 1].role).toBe("assistant");
+ 	});
+ 
+-	it("should execute mutated beforeToolCall args without revalidation", async () => {
++	it("should revalidate and normalize mutated beforeToolCall args", async () => {
+ 		const toolSchema = Type.Object({ value: Type.String() });
+ 		const executed: Array<string | number> = [];
+ 		const tool: AgentTool<typeof toolSchema, { value: string | number }> = {
+@@ -500,7 +500,7 @@ describe("agentLoop with AgentMessage", () => {
+ 			// consume
+ 		}
+ 
+-		expect(executed).toEqual([123]);
++		expect(executed).toEqual(["123"]);
+ 	});
+ 
+ 	it("should prepare tool arguments for validation", async () => {
+diff --git a/packages/agent/test/tool-invocation.test.ts b/packages/agent/test/tool-invocation.test.ts
+new file mode 100644
+index 0000000..08397a6
+--- /dev/null
++++ b/packages/agent/test/tool-invocation.test.ts
+@@ -0,0 +1,723 @@
++// Native scoped invocation regression fixtures.
++import { type AssistantMessage, type AssistantMessageEvent, EventStream } from "@earendil-works/pi-ai";
++import { Type } from "typebox";
++import { describe, expect, it } from "vitest";
++import {
++	Agent,
++	type AgentEvent,
++	type AgentTool,
++	type AgentToolInvocation,
++	type AgentToolResult,
++	type AgentToolScope,
++} from "../src/index.ts";
++
++function text(value: string): AgentToolResult<unknown> {
++	return { content: [{ type: "text", text: value }], details: {} };
++}
++
++function deferred() {
++	let resolve = () => {};
++	const promise = new Promise<void>((done) => {
++		resolve = done;
++	});
++	return { promise, resolve };
++}
++
++function fixture(body: (scope: AgentToolInvocation) => Promise<void>, childExecute?: AgentTool["execute"]) {
++	let executed = 0;
++	const events: AgentEvent[] = [];
++	const child: AgentTool = {
++		name: "child",
++		label: "Child",
++		description: "Harmless fixture",
++		parameters: Type.Object({ value: Type.Literal("allowed") }),
++		execute:
++			childExecute ??
++			(async () => {
++				executed++;
++				return text("raw");
++			}),
++	};
++	const parent: AgentTool = {
++		name: "parent",
++		label: "Parent",
++		description: "Host capability receiver",
++		parameters: Type.Object({}),
++		execute: async () => {
++			throw new Error("Missing host invocation");
++		},
++		withInvocation: (scope) => ({
++			...parent,
++			execute: async () => {
++				await body(scope);
++				return text("parent completed");
++			},
++		}),
++	};
++	let calls = 0;
++	let generation = 0;
++	const agent = new Agent({
++		initialState: { tools: [parent, child] },
++		streamFn: () => {
++			const stream = new EventStream<AssistantMessageEvent, AssistantMessage>(
++				(event) => event.type === "done" || event.type === "error",
++				(event) => {
++					if (event.type === "done") return event.message;
++					throw new Error("Unexpected stream failure");
++				},
++			);
++			const first = calls++ === 0;
++			const message: AssistantMessage = {
++				role: "assistant",
++				content: first
++					? [
++							{
++								type: "toolCall",
++								id: generation ? `host-parent-${generation}` : "host-parent",
++								name: "parent",
++								arguments: {},
++							},
++						]
++					: [{ type: "text", text: "done" }],
++				api: "mock",
++				provider: "mock",
++				model: "mock",
++				timestamp: Date.now(),
++				stopReason: first ? "toolUse" : "stop",
++				usage: {
++					input: 0,
++					output: 0,
++					cacheRead: 0,
++					cacheWrite: 0,
++					totalTokens: 0,
++					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++				},
++			};
++			queueMicrotask(() => stream.push({ type: "done", reason: message.stopReason as "stop" | "toolUse", message }));
++			return stream;
++		},
++	});
++	agent.subscribe((event) => {
++		events.push(event);
++	});
++	return {
++		agent,
++		events,
++		executed: () => executed,
++		async again() {
++			calls = 0;
++			generation++;
++			await agent.prompt("later offline fixture");
++		},
++		async run() {
++			await agent.prompt("offline fixture");
++			const result = agent.state.messages.find(
++				(message) => message.role === "toolResult" && message.toolCallId === "host-parent",
++			);
++			expect(result).toMatchObject({ isError: false, content: [{ type: "text", text: "parent completed" }] });
++		},
++	};
++}
++
++describe("parent-bound tool invocation", () => {
++	it("derives immutable direct/nested origin from host lineage, not copied caller metadata", async () => {
++		const origins: string[] = [];
++		const f = fixture(async (scope) => {
++			origins.push(scope.origin);
++			expect(Reflect.set(scope, "origin", "nested")).toBe(false);
++			await { ...scope, origin: "direct" }.invoke("child", { value: "allowed" });
++		});
++		const child = f.agent.state.tools.find((tool) => tool.name === "child")!;
++		child.withInvocation = (scope) => {
++			origins.push(scope.origin);
++			expect(Reflect.set(scope, "origin", "direct")).toBe(false);
++			return { ...child, execute: async () => text("nested") };
++		};
++		await f.run();
++		expect(origins).toEqual(["direct", "nested"]);
++	});
++	it("validates, approves, executes, finalizes, then returns without synthetic child transcript turns", async () => {
++		let received: unknown;
++		const trace: string[] = [];
++		const f = fixture(async (scope) => {
++			received = await scope.invoke("child", { value: "allowed" });
++			trace.push("returned");
++		});
++		f.agent.beforeToolCall = async ({ toolCall }) => {
++			trace.push(`before:${toolCall.name}`);
++			return undefined;
++		};
++		f.agent.afterToolCall = async ({ toolCall }) => {
++			trace.push(`after:${toolCall.name}`);
++			return toolCall.name === "child" ? text("filtered") : undefined;
++		};
++		await f.run();
++		expect(f.executed()).toBe(1);
++		expect(received).toMatchObject({ isError: false, result: text("filtered") });
++		expect(trace).toEqual(["before:parent", "before:child", "after:child", "returned", "after:parent"]);
++		expect(f.events.filter((e) => e.type === "tool_execution_start")).toHaveLength(2);
++		expect(f.events.filter((e) => e.type === "tool_execution_end")).toHaveLength(2);
++		expect(f.agent.state.messages.filter((m) => m.role === "toolResult")).toHaveLength(1);
++	});
++
++	it.each(["invalid", "denied", "mutated", "disabled"])("does not execute %s child calls", async (mode) => {
++		let received: { isError: boolean } | undefined;
++		const f = fixture(async (scope) => {
++			received = await scope.invoke(mode === "disabled" ? "missing" : "child", {
++				value: mode === "invalid" ? "bad" : "allowed",
++			});
++		});
++		f.agent.beforeToolCall = async ({ toolCall, args }) => {
++			if (toolCall.name === "child") {
++				if (mode === "denied") return { block: true, reason: "denied by approval policy" };
++				if (mode === "mutated") (args as Record<string, unknown>).value = "bad";
++			}
++			return undefined;
++		};
++		await f.run();
++		expect(f.executed()).toBe(0);
++		expect(received?.isError).toBe(true);
++	});
++
++	it("uses current hooks for each child rather than a captured approval callback", async () => {
++		const f = fixture(async (scope) => {
++			f.agent.beforeToolCall = async () => ({ block: true, reason: "new approval policy" });
++			expect(await scope.invoke("child", { value: "allowed" })).toMatchObject({ isError: true });
++		});
++		await f.run();
++		expect(f.executed()).toBe(0);
++	});
++
++	it.each(["registry", "model", "messages"])(
++		"revokes pending approval on %s generation changes, even if switched back",
++		async (mode) => {
++			const f = fixture(async (scope) => {
++				await expect(scope.invoke("child", { value: "allowed" })).rejects.toThrow(/stale/);
++			});
++			f.agent.beforeToolCall = async ({ toolCall }) => {
++				if (toolCall.name === "child") {
++					if (mode === "registry") {
++						const tools = f.agent.state.tools;
++						f.agent.state.tools = [];
++						f.agent.state.tools = tools;
++					}
++					if (mode === "model") {
++						const model = f.agent.state.model;
++						f.agent.state.model = { ...model, provider: "different" };
++						f.agent.state.model = model;
++					}
++					if (mode === "messages") {
++						f.agent.state.messages = [...f.agent.state.messages];
++					}
++				}
++				return undefined;
++			};
++			await f.run();
++			expect(f.executed()).toBe(0);
++		},
++	);
++
++	it("withholds late results after result-hook generation changes", async () => {
++		let received = false;
++		const f = fixture(async (scope) => {
++			await expect(
++				scope.invoke("child", { value: "allowed" }).then(() => {
++					received = true;
++				}),
++			).rejects.toThrow(/stale/);
++		});
++		f.agent.afterToolCall = async ({ toolCall }) => {
++			if (toolCall.name === "child") f.agent.state.tools = [...f.agent.state.tools];
++			return undefined;
++		};
++		await f.run();
++		expect(received).toBe(false);
++		const ends = f.events.filter((e) => e.type === "tool_execution_end" && e.toolName === "child");
++		expect(JSON.stringify(ends)).not.toContain('"raw"');
++	});
++
++	it("expires captured handles when the parent returns", async () => {
++		let captured: AgentToolInvocation | undefined;
++		const f = fixture(async (scope) => {
++			captured = scope;
++		});
++		await f.run();
++		expect(captured?.signal.aborted).toBe(true);
++		await expect(captured?.invoke("child", { value: "allowed" })).rejects.toThrow(/expired/);
++		expect(f.executed()).toBe(0);
++	});
++
++	it("rejects recursion and oversized arguments before execution", async () => {
++		const f = fixture(async (scope) => {
++			await expect(scope.invoke("parent", {})).rejects.toThrow(/recursion/);
++			await expect(scope.invoke("child", { value: "x".repeat(65537) })).rejects.toThrow(/64 KiB/);
++		});
++		await f.run();
++		expect(f.executed()).toBe(0);
++	});
++
++	it("limits concurrent children and drains cancelled abandoned work before parent finalization", async () => {
++		const started = deferred();
++		let running = 0;
++		let cancelled = 0;
++		const f = fixture(
++			async (scope) => {
++				for (let i = 0; i < 4; i++) void scope.invoke("child", { value: "allowed" });
++				await started.promise;
++				await expect(scope.invoke("child", { value: "allowed" })).rejects.toThrow(/limit/);
++			},
++			async (_id, _args, signal) => {
++				if (++running === 4) started.resolve();
++				await new Promise<void>((resolve) =>
++					signal?.addEventListener(
++						"abort",
++						() => {
++							cancelled++;
++							resolve();
++						},
++						{ once: true },
++					),
++				);
++				return text("late raw");
++			},
++		);
++		f.agent.afterToolCall = async ({ toolCall }) => {
++			if (toolCall.name === "parent") expect(cancelled).toBe(4);
++			return undefined;
++		};
++		await f.run();
++		expect(cancelled).toBe(4);
++	});
++
++	it("propagates caller cancellation to the child and rejects its late return", async () => {
++		const started = deferred();
++		let cancelled = false;
++		const f = fixture(
++			async (scope) => {
++				const controller = new AbortController();
++				const task = scope.invoke("child", { value: "allowed" }, { signal: controller.signal });
++				await started.promise;
++				controller.abort();
++				await expect(task).rejects.toThrow();
++			},
++			async (_id, _args, signal) => {
++				started.resolve();
++				await new Promise<void>((resolve) =>
++					signal?.addEventListener(
++						"abort",
++						() => {
++							cancelled = true;
++							resolve();
++						},
++						{ once: true },
++					),
++				);
++				return text("late raw");
++			},
++		);
++		await f.run();
++		expect(cancelled).toBe(true);
++	});
++
++	it.each(["config", "tool"])("honors %s sequential execution constraints between siblings", async (mode) => {
++		const trace: string[] = [];
++		let count = 0;
++		const f = fixture(
++			async (scope) => {
++				await Promise.all([
++					scope.invoke("child", { value: "allowed" }),
++					scope.invoke("child", { value: "allowed" }),
++				]);
++			},
++			async () => {
++				const id = ++count;
++				trace.push(`start:${id}`);
++				await new Promise<void>((resolve) => setTimeout(resolve, 5));
++				trace.push(`end:${id}`);
++				return text("done");
++			},
++		);
++		if (mode === "config") f.agent.toolExecution = "sequential";
++		else f.agent.state.tools.find((tool) => tool.name === "child")!.executionMode = "sequential";
++		await f.run();
++		expect(trace).toEqual(["start:1", "end:1", "start:2", "end:2"]);
++	});
++
++	it("suppresses progress emitted by an uncooperative child after revocation", async () => {
++		const f = fixture(
++			async (scope) => {
++				await expect(scope.invoke("child", { value: "allowed" })).rejects.toThrow(/stale/);
++			},
++			async (_id, _args, _signal, update) => {
++				f.agent.invalidateToolInvocations();
++				update?.(text("late private progress"));
++				return text("late private result");
++			},
++		);
++		await f.run();
++		expect(JSON.stringify(f.events)).not.toContain("late private");
++	});
++
++	it("rejects a pre-aborted child without emitting unmatched events", async () => {
++		const f = fixture(async (scope) => {
++			await expect(scope.invoke("child", { value: "allowed" }, { signal: AbortSignal.abort() })).rejects.toThrow();
++		});
++		await f.run();
++		expect(f.events.filter((event) => event.type === "tool_execution_start")).toHaveLength(1);
++		expect(f.events.filter((event) => event.type === "tool_execution_end")).toHaveLength(1);
++	});
++
++	it("propagates denying termination to the enclosing direct tool batch", async () => {
++		const f = fixture(async (scope) => {
++			expect(await scope.invoke("child", { value: "allowed" })).toMatchObject({
++				isError: true,
++				result: { terminate: true },
++			});
++			await expect(scope.invoke("child", { value: "allowed" })).rejects.toThrow();
++		});
++		f.agent.beforeToolCall = async ({ toolCall }) =>
++			toolCall.name === "child" ? { block: true, terminate: true } : undefined;
++		await f.run();
++		expect(f.executed()).toBe(0);
++		expect(f.agent.state.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
++	});
++
++	it.each(["before", "after"])("fails closed on %s hook exceptions", async (phase) => {
++		let result: unknown;
++		const f = fixture(async (scope) => {
++			result = await scope.invoke("child", { value: "allowed" });
++		});
++		if (phase === "before")
++			f.agent.beforeToolCall = async ({ toolCall }) => {
++				if (toolCall.name === "child") throw new Error("approval failed");
++				return undefined;
++			};
++		else
++			f.agent.afterToolCall = async ({ toolCall }) => {
++				if (toolCall.name === "child") throw new Error("result filtering failed");
++				return undefined;
++			};
++		await f.run();
++		expect(result).toMatchObject({ isError: true });
++		expect(JSON.stringify(result)).not.toContain('"raw"');
++		expect(f.executed()).toBe(phase === "before" ? 0 : 1);
++	});
++
++	it("does not grant a fresh parent capability if direct approval changes the model", async () => {
++		let ran = false;
++		const f = fixture(async () => {
++			ran = true;
++		});
++		f.agent.beforeToolCall = async () => {
++			f.agent.state.model = { ...f.agent.state.model };
++			return undefined;
++		};
++		await f.agent.prompt("offline direct approval race");
++		expect(ran).toBe(false);
++		expect(f.agent.state.messages.find((message) => message.role === "toolResult")).toMatchObject({ isError: true });
++	});
++
++	it("caps total child calls per parent", async () => {
++		const f = fixture(async (scope) => {
++			for (let i = 0; i < 64; i++) await scope.invoke("child", { value: "allowed" });
++			await expect(scope.invoke("child", { value: "allowed" })).rejects.toThrow(/limit/);
++		});
++		await f.run();
++		expect(f.executed()).toBe(64);
++	});
++});
++
++describe("genuine host-issued durable invocation", () => {
++	it("survives its initiating handler and adopts through a later real handler with fresh approval context", async () => {
++		let cell!: AgentToolScope,
++			expired!: AgentToolInvocation,
++			turn = 0;
++		const trace: string[] = [];
++		const f = fixture(async (invocation) => {
++			if (turn++ === 0) {
++				expired = invocation;
++				cell = invocation.openScope();
++				return;
++			}
++			expect(invocation).not.toBe(expired);
++			expect(invocation.parentToolCallId).toBe("host-parent-1");
++			const adopted = invocation.adoptScope(cell);
++			expect(adopted).toBe(cell);
++			const result = await adopted.invoke("child", { value: "allowed" });
++			expect(result.result.content).toEqual([{ type: "text", text: "final" }]);
++		});
++		f.agent.beforeToolCall = async ({ toolCall, context }) => {
++			if (toolCall.name === "child") {
++				expect(JSON.stringify(context.messages)).toContain("later offline fixture");
++				trace.push("approval");
++			}
++			return undefined;
++		};
++		f.agent.afterToolCall = async ({ toolCall }) => {
++			if (toolCall.name === "child") {
++				trace.push("finalization");
++				return { content: [{ type: "text", text: "final" }] };
++			}
++			return undefined;
++		};
++		try {
++			await f.run();
++			expect(cell.state).toBe("active");
++			expect(cell.signal).not.toBe(expired.signal);
++			expect(expired.signal.aborted).toBe(true);
++			await expect(expired.invoke("child", { value: "allowed" })).rejects.toThrow(/expired/);
++			expect(() => expired.adoptScope(cell)).toThrow(/expired/);
++			await f.again();
++			expect(trace).toEqual(["approval", "finalization"]);
++			expect(f.executed()).toBe(1);
++			expect(f.agent.state.messages.filter((m) => m.role === "toolResult")).toHaveLength(2);
++			const nested = f.events.filter((e) => e.type === "tool_execution_end" && e.toolName === "child");
++			expect(nested).toHaveLength(1);
++			expect(nested[0].scopeId).toBe(cell.id);
++		} finally {
++			await cell?.close();
++		}
++	});
++	it.each(["model", "idle-abort", "messages", "reset", "reload"])(
++		"revokes durable admission on %s after parent return",
++		async (boundary) => {
++			let cell!: AgentToolScope;
++			const f = fixture(async (invocation) => {
++				cell = invocation.openScope();
++			});
++			await f.run();
++			let resume: (() => void) | undefined;
++			if (boundary === "model") {
++				const model = f.agent.state.model;
++				f.agent.state.model = { ...model, id: "away" };
++				f.agent.state.model = model;
++			}
++			if (boundary === "idle-abort") f.agent.abort();
++			if (boundary === "messages") f.agent.state.messages = [...f.agent.state.messages];
++			if (boundary === "reset") f.agent.reset();
++			if (boundary === "reload") resume = f.agent.suspendToolInvocations();
++			await expect(cell.invoke("child", { value: "allowed" })).rejects.toThrow(/expired/);
++			await cell.close();
++			resume?.();
++			expect(f.executed()).toBe(0);
++			expect(cell.state).toBe("closed");
++		},
++	);
++	it.each(["approval", "mutation"])(
++		"runs durable calls through real %s denial before handler entry",
++		async (phase) => {
++			let cell!: AgentToolScope;
++			const f = fixture(async (invocation) => {
++				cell = invocation.openScope();
++			});
++			f.agent.beforeToolCall = async ({ toolCall, args }) => {
++				if (toolCall.name === "child") {
++					if (phase === "approval") return { block: true, reason: "denied" };
++					if (!args || typeof args !== "object") throw new Error("Expected validated arguments");
++					Object.assign(args, { value: "forbidden" });
++				}
++				return undefined;
++			};
++			try {
++				await f.run();
++				expect((await cell.invoke("child", { value: "allowed" })).isError).toBe(true);
++				expect(f.executed()).toBe(0);
++			} finally {
++				await cell?.close();
++			}
++		},
++	);
++	it("propagates host resource ownership and immutable nested origin without permitting detached descendant scopes", async () => {
++		let cell!: AgentToolScope,
++			cleaned = 0;
++		const f = fixture(async (invocation) => {
++			cell = invocation.openScope();
++		});
++		const child = f.agent.state.tools.find((tool) => tool.name === "child")!;
++		child.withInvocation = (invocation) => ({
++			...child,
++			execute: async () => {
++				expect(invocation.origin).toBe("nested");
++				expect(Reflect.set(invocation, "origin", "direct")).toBe(false);
++				expect(invocation.scope?.id).toBe(cell.id);
++				expect(() => invocation.openScope()).toThrow(/direct/);
++				expect(() => invocation.adoptScope(cell)).toThrow(/direct/);
++				invocation.scope!.ownResource(async () => {
++					cleaned++;
++				});
++				return text("owned");
++			},
++		});
++		try {
++			await f.run();
++			await cell.invoke("child", { value: "allowed" });
++			expect(cleaned).toBe(0);
++		} finally {
++			await cell?.close();
++		}
++		expect(cleaned).toBe(1);
++	});
++	it("closes newly issued scopes when parent finalization fails", async () => {
++		let cell!: AgentToolScope,
++			cleaned = 0;
++		const f = fixture(async (invocation) => {
++			cell = invocation.openScope();
++			cell.ownResource(async () => {
++				cleaned++;
++			});
++		});
++		f.agent.afterToolCall = async ({ toolCall }) => (toolCall.name === "parent" ? { isError: true } : undefined);
++		await f.agent.prompt("offline rejected parent");
++		expect(cell.state).toBe("closed");
++		expect(cleaned).toBe(1);
++	});
++	it("keeps detached scope work owned after agent idle, and quarantines late output while draining", async () => {
++		let cell!: AgentToolScope,
++			call!: Promise<unknown>,
++			turn = 0;
++		const entered = deferred(),
++			gate = deferred();
++		const f = fixture(
++			async (invocation) => {
++				if (turn++ === 0) {
++					cell = invocation.openScope();
++					call = cell.invoke("child", { value: "allowed" });
++					void call.catch(() => {});
++				} else expect(() => invocation.openScope()).toThrow(/cleanup/);
++			},
++			async () => {
++				entered.resolve();
++				await gate.promise;
++				return text("PRIVATE_LATE_FIXTURE");
++			},
++		);
++		try {
++			await f.run();
++			await entered.promise;
++			expect(f.agent.state.isStreaming).toBe(false);
++			expect(f.agent.state.pendingToolCalls.size).toBe(1);
++			f.agent.abort();
++			const rejected = expect(call).rejects.toThrow(/expired/);
++			expect(cell.state).toBe("draining");
++			await f.again();
++			gate.resolve();
++			await rejected;
++			await cell.close();
++			expect(f.agent.state.pendingToolCalls.size).toBe(0);
++			expect(JSON.stringify(f.events)).not.toContain("PRIVATE_LATE_FIXTURE");
++		} finally {
++			gate.resolve();
++			await Promise.allSettled([call, cell?.close()]);
++		}
++	});
++	it("keeps the same invocation budget across durable calls", async () => {
++		let cell!: AgentToolScope;
++		const f = fixture(async (invocation) => {
++			cell = invocation.openScope();
++		});
++		try {
++			await f.run();
++			for (let i = 0; i < 64; i++) await cell.invoke("child", { value: "allowed" });
++			await expect(cell.invoke("child", { value: "allowed" })).rejects.toThrow(/limit/);
++			expect(f.executed()).toBe(64);
++		} finally {
++			await cell?.close();
++		}
++	});
++	it("does not emit orphan starts or ends for a cancelled queued durable call", async () => {
++		let cell!: AgentToolScope;
++		const entered = deferred(),
++			gate = deferred();
++		let handlers = 0;
++		const f = fixture(
++			async (invocation) => {
++				cell = invocation.openScope();
++			},
++			async () => {
++				handlers++;
++				entered.resolve();
++				await gate.promise;
++				return text("late queued fixture");
++			},
++		);
++		f.agent.state.tools.find((tool) => tool.name === "child")!.executionMode = "sequential";
++		const tasks: Promise<unknown>[] = [];
++		try {
++			await f.run();
++			tasks.push(cell.invoke("child", { value: "allowed" }));
++			await entered.promise;
++			tasks.push(cell.invoke("child", { value: "allowed" }));
++			for (const task of tasks) void task.catch(() => {});
++			const closing = cell.close();
++			gate.resolve();
++			await Promise.allSettled([...tasks, closing]);
++			expect(handlers).toBe(1);
++			expect(
++				f.events.filter((event) => event.type === "tool_execution_start" && event.toolName === "child"),
++			).toHaveLength(1);
++			expect(
++				f.events.filter((event) => event.type === "tool_execution_end" && event.toolName === "child"),
++			).toHaveLength(1);
++		} finally {
++			gate.resolve();
++			await Promise.allSettled([...tasks, cell?.close()]);
++		}
++	});
++	it("counts calls awaiting actual finalized-event listeners against concurrency admission", async () => {
++		let cell!: AgentToolScope,
++			count = 0;
++		const entered = deferred(),
++			gate = deferred();
++		const calls: Promise<unknown>[] = [];
++		const f = fixture(async (invocation) => {
++			cell = invocation.openScope();
++		});
++		f.agent.subscribe(async (event) => {
++			if (event.type === "tool_execution_end" && event.toolName === "child") {
++				if (++count === 4) entered.resolve();
++				await gate.promise;
++			}
++		});
++		try {
++			await f.run();
++			for (let i = 0; i < 4; i++) calls.push(cell.invoke("child", { value: "allowed" }));
++			await entered.promise;
++			const fifth = cell.invoke("child", { value: "allowed" });
++			calls.push(fifth);
++			const verdict = fifth.then(
++				() => "accepted",
++				(error) => (/limit/.test(String(error)) ? "limited" : "other error"),
++			);
++			expect(
++				await Promise.race([verdict, new Promise((resolve) => setTimeout(() => resolve("still admitted"), 25))]),
++			).toBe("limited");
++		} finally {
++			gate.resolve();
++			await Promise.allSettled(calls);
++			await cell?.close();
++		}
++	});
++	it("reports failed scope cleanup as a finalized root tool error without losing owned state", async () => {
++		let cell!: AgentToolScope,
++			release = () => {};
++		const f = fixture(async (invocation) => {
++			cell = invocation.openScope();
++			release = cell.ownResource(async () => {
++				throw new Error("PRIVATE_CLEANUP_FIXTURE");
++			});
++		});
++		f.agent.afterToolCall = async ({ toolCall }) => (toolCall.name === "parent" ? { isError: true } : undefined);
++		try {
++			await f.agent.prompt("offline failed cleanup");
++			expect(f.agent.state.messages.find((message) => message.role === "toolResult")).toMatchObject({
++				isError: true,
++				details: { scopeCleanup: "unconfirmed", scopes: [{ id: cell.id, state: "draining" }] },
++			});
++			expect(cell.state).toBe("draining");
++			expect(JSON.stringify(f.agent.state.messages)).not.toContain("PRIVATE_CLEANUP_FIXTURE");
++		} finally {
++			release();
++			await cell?.close();
++		}
++	});
++});
+diff --git a/packages/agent/test/tool-scopes.test.ts b/packages/agent/test/tool-scopes.test.ts
+new file mode 100644
+index 0000000..317db63
+--- /dev/null
++++ b/packages/agent/test/tool-scopes.test.ts
+@@ -0,0 +1,385 @@
++import { describe, expect, it, vi } from "vitest";
++import { ToolScopeRegistry } from "../src/tool-scopes.ts";
++import type { AgentToolResourceScope } from "../src/types.ts";
++
++const outcome = { result: { content: [{ type: "text" as const, text: "bounded" }], details: {} }, isError: false };
++const backend = () => ({ invoke: async () => outcome, close: async () => {} });
++function deferred() {
++	let resolve!: () => void;
++	const promise = new Promise<void>((done) => {
++		resolve = done;
++	});
++	return { promise, resolve };
++}
++
++describe("native durable scope admission and drain", () => {
++	it("reports passive immutable admission snapshots without minting or releasing authority", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController(),
++			gate = deferred();
++		expect(registry.status).toEqual({ active: 0, draining: 0 });
++		const scope = registry.open(epoch.signal, () => ({ invoke: async () => outcome, close: () => gate.promise }));
++		const snapshot = registry.status;
++		expect(snapshot).toEqual({ active: 1, draining: 0 });
++		expect(Object.isFrozen(snapshot)).toBe(true);
++		const close = scope.close();
++		expect(registry.status).toEqual({ active: 0, draining: 1 });
++		expect(snapshot).toEqual({ active: 1, draining: 0 });
++		expect(() => registry.open(epoch.signal, backend)).toThrow(/cleanup/);
++		gate.resolve();
++		await close;
++		expect(registry.status).toEqual({ active: 0, draining: 0 });
++	});
++	it("checks monotonic expiry even before a delayed timer callback runs", async () => {
++		for (const boundary of ["invoke", "adopt", "resource", "host-guard", "signal", "admission"]) {
++			const clock = vi.spyOn(performance, "now");
++			const registry = new ToolScopeRegistry(),
++				epoch = new AbortController();
++			let view!: AgentToolResourceScope;
++			const scope = registry.open(epoch.signal, (resource) => {
++				view = resource;
++				return backend();
++			});
++			try {
++				clock.mockReturnValue(performance.now() + 360_001);
++				if (boundary === "invoke") await expect(scope.invoke("child", {})).rejects.toThrow(/expired/);
++				if (boundary === "adopt") expect(() => registry.adopt(scope, epoch.signal)).toThrow(/stale/);
++				if (boundary === "resource") expect(() => scope.ownResource(async () => {})).toThrow(/expired/);
++				if (boundary === "host-guard") expect(() => registry.assertActiveResource(view)).toThrow(/expired/);
++				if (boundary === "signal") expect(scope.signal.aborted).toBe(true);
++				if (boundary === "admission") expect(() => registry.open(epoch.signal, backend)).toThrow(/cleanup/);
++				await scope.close();
++				expect(registry.size).toBe(0);
++			} finally {
++				clock.mockRestore();
++				await scope.close();
++			}
++		}
++	});
++	it("brands native event owners, not scope IDs or copied resource metadata", async () => {
++		const registry = new ToolScopeRegistry();
++		let resource!: AgentToolResourceScope;
++		const scope = registry.open(new AbortController().signal, (view) => {
++			resource = view;
++			return backend();
++		});
++		expect(registry.eventSignal(resource)).toBe(scope.signal);
++		expect(() => registry.eventSignal({ ...resource })).toThrow(/Unknown/);
++		expect(() => new ToolScopeRegistry().eventSignal(resource)).toThrow(/Unknown/);
++		await scope.close();
++		expect(() => registry.eventSignal(resource)).toThrow(/closed/);
++	});
++	it("rejects invalid or expanded lifetimes and already-aborted epochs", () => {
++		for (const ms of [0, -1, NaN, Infinity, 360001]) expect(() => new ToolScopeRegistry(ms)).toThrow(/lifetime/);
++		const registry = new ToolScopeRegistry();
++		const epoch = new AbortController();
++		epoch.abort();
++		expect(() => registry.open(epoch.signal, backend)).toThrow(/admission/);
++		expect(registry.size).toBe(0);
++	});
++	it("requires the original capability, Agent registry and epoch, not copied metadata", async () => {
++		const registry = new ToolScopeRegistry(),
++			other = new ToolScopeRegistry(),
++			epoch = new AbortController();
++		const scope = registry.open(epoch.signal, backend);
++		expect(Object.isFrozen(scope)).toBe(true);
++		expect(Reflect.set(scope, "id", "spoof")).toBe(false);
++		expect(registry.adopt(scope, epoch.signal)).toBe(scope);
++		expect(() => registry.adopt({ ...scope }, epoch.signal)).toThrow(/foreign/);
++		expect(() => other.adopt(scope, epoch.signal)).toThrow(/foreign/);
++		expect(() => registry.adopt(scope, new AbortController().signal)).toThrow(/stale/);
++		await scope.close();
++		expect(() => registry.adopt(scope, epoch.signal)).toThrow(/stale/);
++	});
++	it("caps scopes at two and releases only a closed slot", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController();
++		const a = registry.open(epoch.signal, backend),
++			b = registry.open(epoch.signal, backend);
++		expect(() => registry.open(epoch.signal, backend)).toThrow(/admission/);
++		await a.close();
++		const c = registry.open(epoch.signal, backend);
++		expect(registry.size).toBe(2);
++		await Promise.all([b.close(), c.close()]);
++		expect(registry.size).toBe(0);
++	});
++	it("retains old-generation admission while an uncooperative backend drains", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController(),
++			gate = deferred();
++		const scope = registry.open(epoch.signal, () => ({ ...backend(), close: () => gate.promise }));
++		epoch.abort();
++		expect(scope.signal.aborted).toBe(true);
++		expect(scope.state).toBe("draining");
++		const next = new AbortController();
++		expect(() => registry.open(next.signal, backend)).toThrow(/cleanup/);
++		let closed = false;
++		const closing = scope.close().then(() => {
++			closed = true;
++		});
++		await Promise.resolve();
++		expect(closed).toBe(false);
++		gate.resolve();
++		await closing;
++		const fresh = registry.open(next.signal, backend);
++		await fresh.close();
++	});
++	it("does not return a late backend result after revocation", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController(),
++			gate = deferred();
++		const scope = registry.open(epoch.signal, () => ({
++			invoke: async () => {
++				await gate.promise;
++				return outcome;
++			},
++			close: () => gate.promise,
++		}));
++		const call = scope.invoke("child", {});
++		const denied = expect(call).rejects.toThrow(/revoked/);
++		epoch.abort();
++		gate.resolve();
++		await denied;
++		await scope.close();
++	});
++	it("retains failed resource cleanup without exposing its private error", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController(),
++			scope = registry.open(epoch.signal, backend);
++		const release = scope.ownResource(async () => {
++			throw new Error("private-resource-token-fixture");
++		});
++		await expect(scope.close()).rejects.toThrow(/^Durable scope cleanup could not be confirmed$/);
++		expect(scope.state).toBe("draining");
++		expect(registry.size).toBe(1);
++		expect(() => registry.open(new AbortController().signal, backend)).toThrow(/cleanup/);
++		release();
++		release();
++		await scope.close();
++		expect(scope.state).toBe("closed");
++		expect(registry.size).toBe(0);
++	});
++	it("does not mistake native release for completion of an already-running closer", async () => {
++		const registry = new ToolScopeRegistry(),
++			scope = registry.open(new AbortController().signal, backend),
++			gate = deferred(),
++			entered = deferred();
++		const release = scope.ownResource(async () => {
++			entered.resolve();
++			await gate.promise;
++		});
++		const closing = scope.close();
++		await entered.promise;
++		release();
++		expect(scope.state).toBe("draining");
++		expect(registry.size).toBe(1);
++		gate.resolve();
++		await closing;
++		expect(registry.size).toBe(0);
++	});
++	it("skips cleanup for a naturally released resource and closes idempotently", async () => {
++		let cleaned = 0,
++			drained = 0;
++		const registry = new ToolScopeRegistry(),
++			scope = registry.open(new AbortController().signal, () => ({
++				...backend(),
++				close: async () => {
++					drained++;
++				},
++			}));
++		const release = scope.ownResource(async () => {
++			cleaned++;
++		});
++		release();
++		const a = scope.close(),
++			b = scope.close();
++		expect(a).toBe(b);
++		await a;
++		await scope.close();
++		expect(cleaned).toBe(0);
++		expect(drained).toBe(1);
++		const independent = registry.open(new AbortController().signal, backend);
++		const confirmed = independent.ownResource(async () => {
++			confirmed();
++			throw new Error("closer failed after native confirmation");
++		});
++		await independent.close();
++		expect(independent.state).toBe("closed");
++	});
++	it("caps native resource registrations and refuses them after close", async () => {
++		let cleaned = 0;
++		const registry = new ToolScopeRegistry(),
++			scope = registry.open(new AbortController().signal, backend);
++		for (let i = 0; i < 16; i++)
++			scope.ownResource(async () => {
++				cleaned++;
++			});
++		expect(() => scope.ownResource(async () => {})).toThrow(/excessive/);
++		await scope.close();
++		expect(cleaned).toBe(16);
++		expect(() => scope.ownResource(async () => {})).toThrow(/revoked/);
++	});
++	it("does not duplicate cleanup when close re-enters through the abort event", async () => {
++		let cleaned = 0,
++			reentered: Promise<void> | undefined;
++		const registry = new ToolScopeRegistry(),
++			scope = registry.open(new AbortController().signal, backend);
++		scope.ownResource(async () => {
++			cleaned++;
++		});
++		scope.signal.addEventListener("abort", () => {
++			reentered = scope.close();
++		});
++		const closing = scope.close();
++		expect(reentered).toBe(closing);
++		await closing;
++		expect(cleaned).toBe(1);
++	});
++	it("expires a scope through its independent host timer", async () => {
++		const registry = new ToolScopeRegistry(10),
++			scope = registry.open(new AbortController().signal, backend);
++		await new Promise<void>((resolve) => scope.signal.addEventListener("abort", () => resolve(), { once: true }));
++		await scope.close();
++		expect(scope.state).toBe("closed");
++		expect(registry.size).toBe(0);
++	});
++	it("closes on a finalized termination result", async () => {
++		const registry = new ToolScopeRegistry(),
++			scope = registry.open(new AbortController().signal, () => ({
++				...backend(),
++				invoke: async () => ({ ...outcome, result: { ...outcome.result, terminate: true } }),
++			}));
++		expect((await scope.invoke("child", {})).result.terminate).toBe(true);
++		await scope.close();
++		expect(scope.state).toBe("closed");
++	});
++	it("sanitizes initialization failure and releases its empty record", async () => {
++		const registry = new ToolScopeRegistry();
++		expect(() =>
++			registry.open(new AbortController().signal, () => {
++				throw new Error("private-constructor-fixture");
++			}),
++		).toThrow(/^Durable scope initialization failed$/);
++		// Initialization owns no external work; wait for the same asynchronous drain, not a quota reset.
++		for (let i = 0; i < 20 && registry.size; i++) await Promise.resolve();
++		expect(registry.size).toBe(0);
++	});
++});
++
++describe("native protected scope ownership", () => {
++	it("brands every finalized observer and clones its view", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController();
++		let resource!: AgentToolResourceScope;
++		let calls = 0;
++		const scope = registry.open(
++			epoch.signal,
++			(view) => {
++				resource = view;
++				return { ...backend(), publishEvidence: async () => {} };
++			},
++			{
++				onResult: async (event) => {
++					calls++;
++					event.result.content = [];
++				},
++			},
++		);
++		const event = { toolName: "target", toolCallId: "native-call", scopeId: scope.id, ...outcome };
++		expect(registry.hasProtectedResults(resource)).toBe(true);
++		expect(() => registry.hasProtectedResults({ ...resource })).toThrow(/revoked/);
++		await expect(registry.publishFinalized(resource, { ...event, scopeId: "forged" })).rejects.toThrow(/owner/);
++		await registry.publishFinalized(resource, event);
++		expect(calls).toBe(1);
++		expect(outcome.result.content).toHaveLength(1);
++		await scope.close();
++		await expect(registry.publishFinalized(resource, event)).rejects.toThrow(/revoked/);
++	});
++	it("retains uncooperative publication across revocation until its actual settlement", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController(),
++			gate = deferred(),
++			started = deferred();
++		const scope = registry.open(
++			epoch.signal,
++			() => ({
++				...backend(),
++				publishEvidence: async () => {
++					started.resolve();
++					await gate.promise;
++				},
++			}),
++			{ onResult: async () => {} },
++		);
++		const publish = scope.publishEvidence({ content: [] });
++		void publish.catch(() => {});
++		await started.promise;
++		epoch.abort();
++		let closed = false;
++		const closing = scope.close().then(() => {
++			closed = true;
++		});
++		await Promise.resolve();
++		expect(scope.state).toBe("draining");
++		expect(closed).toBe(false);
++		expect(registry.size).toBe(1);
++		expect(() => registry.open(new AbortController().signal, backend)).toThrow(/cleanup/);
++		gate.resolve();
++		await expect(publish).rejects.toThrow(/Protected presentation failed/);
++		await closing;
++		expect(registry.size).toBe(0);
++	});
++	it("bounds publication admission independently of tool calls", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController(),
++			gate = deferred();
++		let entered = 0;
++		const scope = registry.open(
++			epoch.signal,
++			() => ({
++				...backend(),
++				publishEvidence: async () => {
++					entered++;
++					await gate.promise;
++				},
++			}),
++			{ onResult: async () => {} },
++		);
++		try {
++			const pending = Array.from({ length: 4 }, () => scope.publishEvidence({ content: [] }));
++			await expect(scope.publishEvidence({ content: [] })).rejects.toThrow(/budget/);
++			expect(entered).toBe(4);
++			gate.resolve();
++			await Promise.all(pending);
++			for (let i = 4; i < 64; i++) await scope.publishEvidence({ content: [] });
++			await expect(scope.publishEvidence({ content: [] })).rejects.toThrow(/budget/);
++			expect(entered).toBe(64);
++		} finally {
++			gate.resolve();
++			await scope.close();
++		}
++	});
++});
++
++describe("explicit protected helper failure ownership", () => {
++	it("retains a rejected publisher even without a finalized-result observer failure", async () => {
++		const registry = new ToolScopeRegistry(),
++			epoch = new AbortController();
++		const scope = registry.open(
++			epoch.signal,
++			() => ({
++				...backend(),
++				publishEvidence: async () => {
++					throw Error("private-publisher-diagnostic");
++				},
++			}),
++			{ onResult: async () => {} },
++		);
++		await expect(scope.publishEvidence({ content: [] })).rejects.toThrow(/^Protected presentation failed$/);
++		await expect(scope.close()).rejects.toThrow(/cleanup/);
++		expect(scope.state).toBe("draining");
++		expect(registry.size).toBe(1);
++		expect(() => registry.open(new AbortController().signal, backend)).toThrow(/cleanup/);
++		epoch.abort();
++	});
++});
+diff --git a/packages/agent/vitest.config.ts b/packages/agent/vitest.config.ts
+index 379c3c7..c9df7de 100644
+--- a/packages/agent/vitest.config.ts
++++ b/packages/agent/vitest.config.ts
+@@ -1,27 +1,14 @@
+-import { fileURLToPath } from "node:url";
+-import { defineConfig } from "vitest/config";
++import { defineConfig, mergeConfig } from "vitest/config";
++import baseConfig from "../../vitest.base.ts";
+ 
+-const telemetrySrcIndex = fileURLToPath(new URL("../telemetry/src/index.ts", import.meta.url));
+-const aiSrcIndex = fileURLToPath(new URL("../ai/src/index.ts", import.meta.url));
+-const aiSrcCompat = fileURLToPath(new URL("../ai/src/compat.ts", import.meta.url));
+-const agentSrcIndex = fileURLToPath(new URL("./src/index.ts", import.meta.url));
+-
+-export default defineConfig({
++export default mergeConfig(baseConfig, defineConfig({
+ 	test: {
+ 		globals: true,
+ 		environment: "node",
+-		testTimeout: 30000, // 30 seconds for API calls
++		testTimeout: 30000,
+ 		reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
+ 		silent: "passed-only",
+ 	},
+-	resolve: {
+-		conditions: ["source"],
+-		alias: [
+-			{ find: /^@earendil-works\/pi-telemetry$/, replacement: telemetrySrcIndex },
+-			{ find: /^@earendil-works\/pi-agent-core$/, replacement: agentSrcIndex },
+-			{ find: /^@earendil-works\/pi-ai$/, replacement: aiSrcIndex },
+-			{ find: /^@earendil-works\/pi-ai\/compat$/, replacement: aiSrcCompat },
+-		],
+-	},
++	resolve: { conditions: ["source"] },
+ 	ssr: { resolve: { conditions: ["source"] } },
+-});
++}));
+diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
+index ac2bd4b..64db2e5 100644
+--- a/packages/coding-agent/src/core/agent-session.ts
++++ b/packages/coding-agent/src/core/agent-session.ts
+@@ -22,6 +22,8 @@ import type {
+ 	AgentMessage,
+ 	AgentState,
+ 	AgentTool,
++	AgentToolEvidence,
++	AgentToolResourceScope,
+ 	PrepareNextTurnContext,
+ 	ThinkingLevel,
+ } from "@earendil-works/pi-agent-core";
+@@ -329,6 +331,14 @@ export class AgentSession {
+ 	private _pendingNextTurnMessages: CustomMessage[] = [];
+ 	/** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
+ 	private _pendingCustomMessages: CustomMessage[] = [];
++	private _pendingProtectedMessages: {
++		message: CustomMessage;
++		signal: AbortSignal;
++		bytes: number;
++		failed?: boolean;
++	}[] = [];
++	private _protectedForContext: { message: CustomMessage; signal: AbortSignal }[] = [];
++	private _protectedContextBytes = 0;
+ 
+ 	// Compaction state
+ 	private _compactionAbortController: AbortController | undefined = undefined;
+@@ -401,6 +411,9 @@ export class AgentSession {
+ 		// (session persistence, extensions, auto-compaction, retry logic)
+ 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
+ 		this._installAgentToolHooks();
++		if (this.agent.publishToolEvidence) this.agent.invalidateToolInvocations();
++		this.agent.publishToolEvidence = (evidence, scope, contextSignal) =>
++			this._publishToolEvidence(evidence, scope, contextSignal);
+ 		this._installAgentNextTurnRefresh();
+ 
+ 		this._buildRuntime({
+@@ -568,11 +581,20 @@ export class AgentSession {
+ 			const context = await this._compactBeforeNextAssistantResponse(turn.context);
+ 			const previousSnapshot = await previousPrepareNextTurnWithContext?.({ ...turn, context }, signal);
+ 			const nextContext = previousSnapshot?.context ?? context;
++			// Protected messages were committed only at safe tool-turn boundaries.
++			// Add them to this running loop as well as state/history, before its next request.
++			const protectedMessages = this._protectedForContext;
++			this._protectedForContext = [];
++			this._protectedContextBytes = 0;
++			const messages = nextContext.messages.slice();
++			for (const { message, signal } of protectedMessages)
++				if (!signal.aborted && !messages.includes(message)) messages.push(message);
+ 
+ 			return {
+ 				...previousSnapshot,
+ 				context: {
+ 					...nextContext,
++					messages,
+ 					systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
+ 					tools: this.agent.state.tools.slice(),
+ 				},
+@@ -879,6 +901,7 @@ export class AgentSession {
+ 	 * Call this when completely done with the session.
+ 	 */
+ 	dispose(): void {
++		this.agent.invalidateToolInvocations();
+ 		try {
+ 			this.abortRetry();
+ 			this.abortCompaction();
+@@ -1513,14 +1536,74 @@ export class AgentSession {
+ 		}
+ 	}
+ 
++	/** Native protected scope service: synchronous Pi journal receipt, then safe context delivery.
++	 * Never calls a provider or starts another Agent turn. A failed write retains native ownership.
++	 */
++	private async _publishToolEvidence(
++		evidence: AgentToolEvidence,
++		scope: AgentToolResourceScope,
++		contextSignal: AbortSignal,
++	): Promise<void> {
++		scope.signal.throwIfAborted();
++		contextSignal.throwIfAborted();
++		const copy = structuredClone(evidence);
++		if (
++			!Array.isArray(copy.content) ||
++			copy.content.length > 128 ||
++			copy.content.some((block) => block.type !== "text" && block.type !== "image")
++		)
++			throw new Error("Invalid protected evidence");
++		const bytes = Buffer.byteLength(JSON.stringify(copy));
++		if (
++			bytes > 16 * 1024 * 1024 ||
++			this._pendingProtectedMessages.length + this._protectedForContext.length >= 32 ||
++			bytes +
++				this._protectedContextBytes +
++				this._pendingProtectedMessages.reduce((sum, item) => sum + item.bytes, 0) >
++				32 * 1024 * 1024
++		)
++			throw new Error("Protected evidence budget exceeded");
++		let committed = false;
++		const release = scope.ownResource(async () => {
++			if (!committed) throw new Error("Protected evidence persistence is unconfirmed");
++		});
++		const journalId = this.sessionManager.appendCustomEntry("code-mode-protected-evidence", {
++			scopeId: scope.id,
++			...copy,
++		});
++		const message: CustomMessage = {
++			role: "custom",
++			customType: "code-mode-evidence",
++			content: copy.content,
++			details: { ...copy.details, journalId, scopeId: scope.id },
++			display: true,
++			timestamp: Date.now(),
++		};
++		if (this.isStreaming) this._pendingProtectedMessages.push({ message, signal: contextSignal, bytes });
++		else {
++			try {
++				this._appendCustomMessage(message);
++			} catch {
++				this.agent.publishToolEvidence = undefined;
++				this.agent.invalidateToolInvocations();
++				throw new Error("Protected evidence delivery could not be confirmed");
++			}
++			this._protectedForContext.push({ message, signal: contextSignal });
++			this._protectedContextBytes += bytes;
++		}
++		committed = true;
++		release();
++	}
+ 	private _appendCustomMessage(appMessage: CustomMessage): void {
+-		this.agent.state.messages.push(appMessage);
++		// Persist first: a failed journal/message write must not inject an image
++		// into the continuing model context that has no accepted session receipt.
+ 		this.sessionManager.appendCustomMessageEntry(
+ 			appMessage.customType,
+ 			appMessage.content,
+ 			appMessage.display,
+ 			appMessage.details,
+ 		);
++		this.agent.state.messages.push(appMessage);
+ 		this._emit({ type: "message_start", message: appMessage });
+ 		this._emit({ type: "message_end", message: appMessage });
+ 	}
+@@ -1530,13 +1613,32 @@ export class AgentSession {
+ 	 * Called once the current turn's tool results are in agent state and session history.
+ 	 */
+ 	private _flushPendingCustomMessages(): void {
+-		if (this._pendingCustomMessages.length === 0) return;
++		if (this._pendingCustomMessages.length === 0 && this._pendingProtectedMessages.length === 0) return;
+ 
+ 		const pending = this._pendingCustomMessages;
+ 		this._pendingCustomMessages = [];
+ 		for (const appMessage of pending) {
+ 			this._appendCustomMessage(appMessage);
+ 		}
++		while (this._pendingProtectedMessages.length) {
++			const entry = this._pendingProtectedMessages[0];
++			if (entry.failed) throw new Error("Protected evidence delivery remains unconfirmed");
++			if (entry.signal.aborted) {
++				this._pendingProtectedMessages.shift();
++				continue;
++			} // preserve journal, quarantine context
++			try {
++				this._appendCustomMessage(entry.message);
++			} catch {
++				entry.failed = true; // no implicit retry of ambiguous persistence effects
++				this.agent.publishToolEvidence = undefined;
++				this.agent.invalidateToolInvocations();
++				throw new Error("Protected evidence delivery could not be confirmed");
++			}
++			this._pendingProtectedMessages.shift();
++			this._protectedForContext.push({ message: entry.message, signal: entry.signal });
++			this._protectedContextBytes += entry.bytes;
++		}
+ 	}
+ 
+ 	/**
+@@ -2637,6 +2739,7 @@ export class AgentSession {
+ 					this._extensionShutdownHandler?.();
+ 				},
+ 				getContextUsage: () => this.getContextUsage(),
++				getToolGatewayInfo: () => this.agent.getToolGatewayInfo(),
+ 				compact: (options) => {
+ 					void (async () => {
+ 						try {
+@@ -2816,29 +2919,34 @@ export class AgentSession {
+ 	}
+ 
+ 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+-		const oldRunner = this._extensionRunner;
+-		const previousFlagValues = oldRunner.getFlagValues();
+-		await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
+-		oldRunner.invalidate();
+-		await this.settingsManager.reload();
+-		this.syncQueueModesFromSettings();
+-		resetApiProviders();
+-		await this._resourceLoader.reload();
+-		this._buildRuntime({
+-			activeToolNames: this.getActiveToolNames(),
+-			flagValues: previousFlagValues,
+-			includeAllExtensionTools: true,
+-		});
++		const resumeInvocations = this.agent.suspendToolInvocations();
++		try {
++			const oldRunner = this._extensionRunner;
++			const previousFlagValues = oldRunner.getFlagValues();
++			await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
++			oldRunner.invalidate();
++			await this.settingsManager.reload();
++			this.syncQueueModesFromSettings();
++			resetApiProviders();
++			await this._resourceLoader.reload();
++			this._buildRuntime({
++				activeToolNames: this.getActiveToolNames(),
++				flagValues: previousFlagValues,
++				includeAllExtensionTools: true,
++			});
+ 
+-		const hasBindings =
+-			this._extensionUIContext ||
+-			this._extensionCommandContextActions ||
+-			this._extensionShutdownHandler ||
+-			this._extensionErrorListener;
+-		if (hasBindings) {
+-			await options?.beforeSessionStart?.();
+-			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
+-			await this.extendResourcesFromExtensions("reload");
++			const hasBindings =
++				this._extensionUIContext ||
++				this._extensionCommandContextActions ||
++				this._extensionShutdownHandler ||
++				this._extensionErrorListener;
++			if (hasBindings) {
++				await options?.beforeSessionStart?.();
++				await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
++				await this.extendResourcesFromExtensions("reload");
++			}
++		} finally {
++			resumeInvocations();
+ 		}
+ 	}
+ 
+diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
+index 3346645..1a25f71 100644
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -284,6 +284,7 @@ export class ExtensionRunner {
+ 	private abortFn: () => void = () => {};
+ 	private hasPendingMessagesFn: () => boolean = () => false;
+ 	private getContextUsageFn: () => ContextUsage | undefined = () => undefined;
++	private getToolGatewayInfoFn: ExtensionContextActions["getToolGatewayInfo"];
+ 	private compactFn: (options?: CompactOptions) => void = () => {};
+ 	private getSystemPromptFn: () => string = () => "";
+ 	private getSystemPromptOptionsFn: () => BuildSystemPromptOptions = () => ({ cwd: this.cwd });
+@@ -349,6 +350,7 @@ export class ExtensionRunner {
+ 		this.hasPendingMessagesFn = contextActions.hasPendingMessages;
+ 		this.shutdownHandler = contextActions.shutdown;
+ 		this.getContextUsageFn = contextActions.getContextUsage;
++		this.getToolGatewayInfoFn = contextActions.getToolGatewayInfo;
+ 		this.compactFn = contextActions.compact;
+ 		this.getSystemPromptFn = contextActions.getSystemPrompt;
+ 		this.getSystemPromptOptionsFn = contextActions.getSystemPromptOptions ?? (() => ({ cwd: this.cwd }));
+@@ -789,6 +791,10 @@ export class ExtensionRunner {
+ 				runner.assertActive();
+ 				return runner.getContextUsageFn();
+ 			},
++			get toolGatewayInfo() {
++				runner.assertActive();
++				return runner.getToolGatewayInfoFn?.();
++			},
+ 			compact: (options) => {
+ 				runner.assertActive();
+ 				runner.compactFn(options);
+diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
+index eaff3a8..a6a2643 100644
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -10,6 +10,8 @@
+ 
+ import type {
+ 	AgentMessage,
++	AgentToolGatewayInfo,
++	AgentToolInvocation,
+ 	AgentToolResult,
+ 	AgentToolUpdateCallback,
+ 	ThinkingLevel,
+@@ -307,6 +309,10 @@ export interface CompactOptions {
+ export type ExtensionMode = "tui" | "rpc" | "json" | "print";
+ 
+ export interface ExtensionContext {
++	/** Host-owned nested invocation, provisioned only during a tool handler; absent in ordinary events/commands. */
++	readonly tools?: AgentToolInvocation;
++	/** Passive native compatibility/admission metadata, not invocation authority. */
++	readonly toolGatewayInfo?: AgentToolGatewayInfo;
+ 	/** UI methods for user interaction */
+ 	ui: ExtensionUIContext;
+ 	/** Current run mode. Use "tui" to guard terminal-only UI such as custom components. */
+@@ -940,7 +946,7 @@ export interface CustomToolCallEvent extends ToolCallEventBase {
+  * Fired before a tool executes. Can block.
+  *
+  * `event.input` is mutable. Mutate it in place to patch tool arguments before execution.
+- * Later `tool_call` handlers see earlier mutations. No re-validation is performed after mutation.
++ * Later `tool_call` handlers see earlier mutations. Arguments are revalidated before execution.
+  */
+ export type ToolCallEvent =
+ 	| BashToolCallEvent
+@@ -1724,6 +1730,8 @@ export interface ExtensionContextActions {
+ 	hasPendingMessages: () => boolean;
+ 	shutdown: () => void;
+ 	getContextUsage: () => ContextUsage | undefined;
++	/** Native AgentSession binding only; absent on standalone/stock runners. */
++	getToolGatewayInfo?: () => AgentToolGatewayInfo;
+ 	compact: (options?: CompactOptions) => void;
+ 	getSystemPrompt: () => string;
+ 	getSystemPromptOptions?: () => BuildSystemPromptOptions;
+diff --git a/packages/coding-agent/src/core/extensions/wrapper.ts b/packages/coding-agent/src/core/extensions/wrapper.ts
+index 9084a1d..8cc7472 100644
+--- a/packages/coding-agent/src/core/extensions/wrapper.ts
++++ b/packages/coding-agent/src/core/extensions/wrapper.ts
+@@ -5,7 +5,7 @@
+  * Tool call and tool result interception is handled by AgentSession via agent-core hooks.
+  */
+ 
+-import type { AgentTool } from "@earendil-works/pi-agent-core";
++import type { AgentTool, AgentToolInvocation } from "@earendil-works/pi-agent-core";
+ import { wrapToolDefinition } from "../tools/tool-definition-wrapper.ts";
+ import type { ExtensionRunner } from "./runner.ts";
+ import type { RegisteredTool } from "./types.ts";
+@@ -14,11 +14,21 @@ import type { RegisteredTool } from "./types.ts";
+  * Wrap a RegisteredTool into an AgentTool.
+  * Uses the runner's createContext() for consistent context across tools and event handlers.
+  */
+-export function wrapRegisteredTool(registeredTool: RegisteredTool, runner: ExtensionRunner): AgentTool {
+-	const tool = wrapToolDefinition(registeredTool.definition, () => runner.createContext());
++export function wrapRegisteredTool(
++	registeredTool: RegisteredTool,
++	runner: ExtensionRunner,
++	invocation?: AgentToolInvocation,
++): AgentTool {
++	const tool = wrapToolDefinition(registeredTool.definition, () => {
++		const context = runner.createContext();
++		// Preserve live getters (notably model); spreading the context would snapshot them.
++		if (invocation) Object.defineProperty(context, "tools", { value: invocation, enumerable: true });
++		return context;
++	});
+ 	const execute = tool.execute;
+ 	return {
+ 		...tool,
++		withInvocation: (scoped) => wrapRegisteredTool(registeredTool, runner, scoped),
+ 		execute: async (toolCallId, params, signal, onUpdate) => {
+ 			const activeBefore = runner.getActiveTools();
+ 			const result = await execute(toolCallId, params, signal, onUpdate);
+diff --git a/packages/coding-agent/src/modes/interactive/components/custom-message.ts b/packages/coding-agent/src/modes/interactive/components/custom-message.ts
+index b5ee926..63c0364 100644
+--- a/packages/coding-agent/src/modes/interactive/components/custom-message.ts
++++ b/packages/coding-agent/src/modes/interactive/components/custom-message.ts
+@@ -1,6 +1,6 @@
+ import type { TextContent } from "@earendil-works/pi-ai";
+ import type { Component } from "@earendil-works/pi-tui";
+-import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
++import { Box, Container, Image, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
+ import type { MessageRenderer } from "../../../core/extensions/types.ts";
+ import type { CustomMessage } from "../../../core/messages.ts";
+ import { getMarkdownTheme, theme } from "../theme/theme.ts";
+@@ -109,5 +109,22 @@ export class CustomMessageComponent extends Container {
+ 				color: (text: string) => theme.fg("customMessageText", text),
+ 			}),
+ 		);
++		// Protected evidence remains visible on replay even without an extension
++		// renderer. Non-image terminals retain the native descriptive fallback.
++		if (this.message.customType === "code-mode-evidence" && Array.isArray(this.message.content)) {
++			for (const block of this.message.content)
++				if (block.type === "image") {
++					this.box.addChild(
++						new Image(
++							block.data,
++							block.mimeType,
++							{
++								fallbackColor: (value) => theme.fg("customMessageText", value),
++							},
++							{ maxWidthCells: 60, maxHeightCells: 30 },
++						),
++					);
++				}
++		}
+ 	}
+ }
+diff --git a/packages/coding-agent/test/suite/tool-invocation.test.ts b/packages/coding-agent/test/suite/tool-invocation.test.ts
+new file mode 100644
+index 0000000..a9cddc4
+--- /dev/null
++++ b/packages/coding-agent/test/suite/tool-invocation.test.ts
+@@ -0,0 +1,446 @@
++// Native scoped invocation regression fixtures.
++import type { AgentToolInvocation, AgentToolResult, AgentToolScope } from "@earendil-works/pi-agent-core";
++import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
++import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
++import { Type } from "typebox";
++import { afterEach, describe, expect, it } from "vitest";
++import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
++import { createHarness, type Harness } from "./harness.ts";
++
++function text(value: string): AgentToolResult<unknown> {
++	return { content: [{ type: "text", text: value }], details: {} };
++}
++
++function tinyBmp(): string {
++	const buffer = Buffer.alloc(58);
++	buffer.write("BM", 0, "ascii");
++	buffer.writeUInt32LE(buffer.length, 2);
++	buffer.writeUInt32LE(54, 10);
++	buffer.writeUInt32LE(40, 14);
++	buffer.writeInt32LE(1, 18);
++	buffer.writeInt32LE(1, 22);
++	buffer.writeUInt16LE(1, 26);
++	buffer.writeUInt16LE(24, 28);
++	buffer.writeUInt32LE(4, 34);
++	buffer[56] = 0xff;
++	return buffer.toString("base64");
++}
++
++describe("AgentSession host-owned nested invocation", () => {
++	const harnesses: Harness[] = [];
++	afterEach(() => {
++		while (harnesses.length) harnesses.pop()?.cleanup();
++	});
++
++	async function fixture(body: (ctx: ExtensionContext) => Promise<void>, hooks?: (pi: ExtensionAPI) => void) {
++		let executed = 0;
++		const harness = await createHarness({
++			tools: [],
++			extensionFactories: [
++				(pi) => {
++					pi.registerTool({
++						name: "cell",
++						label: "Cell",
++						description: "Harmless host gateway fixture",
++						parameters: Type.Object({}),
++						execute: async (_id, _args, _signal, _update, ctx) => {
++							await body(ctx);
++							return text("cell complete");
++						},
++					});
++					pi.registerTool({
++						name: "target",
++						label: "Target",
++						description: "Harmless nested fixture",
++						parameters: Type.Object({ value: Type.Literal("allowed") }),
++						execute: async () => {
++							executed++;
++							return text("raw target result");
++						},
++					});
++					hooks?.(pi);
++				},
++			],
++		});
++		harnesses.push(harness);
++		harness.setResponses([
++			fauxAssistantMessage([fauxToolCall("cell", {})], { stopReason: "toolUse" }),
++			fauxAssistantMessage("done"),
++		]);
++		return {
++			harness,
++			executed: () => executed,
++			async run() {
++				await harness.session.prompt("offline gateway fixture");
++				expect(
++					harness.session.messages.find((message) => message.role === "toolResult" && message.toolName === "cell"),
++				).toMatchObject({ isError: false, content: [{ type: "text", text: "cell complete" }] });
++			},
++		};
++	}
++
++	it("exposes native compatibility information as lazy immutable metadata, not authority", async () => {
++		let saved: ExtensionContext | undefined;
++		const f = await fixture(async (ctx) => {
++			saved = ctx;
++			expect(ctx.toolGatewayInfo).toEqual({
++				version: 1,
++				protectedResults: true,
++				activeScopes: 0,
++				drainingScopes: 0,
++				maxScopes: 2,
++			});
++			expect(Object.isFrozen(ctx.toolGatewayInfo)).toBe(true);
++			const scope = ctx.tools!.openScope();
++			try {
++				expect(ctx.toolGatewayInfo?.activeScopes).toBe(1);
++				expect(() => ctx.tools!.adoptScope(ctx.toolGatewayInfo as unknown as AgentToolScope)).toThrow(/foreign/);
++			} finally {
++				await scope.close();
++			}
++			expect(ctx.toolGatewayInfo?.activeScopes).toBe(0);
++		});
++		await f.run();
++		await f.harness.session.reload();
++		expect(() => saved!.toolGatewayInfo).toThrow(/stale|disposed|active/i);
++	});
++
++	it("runs real approval/result events and returns only filtered results", async () => {
++		const trace: string[] = [];
++		let result: unknown;
++		const f = await fixture(
++			async (ctx) => {
++				expect(ctx.tools?.parentToolCallId).toBeTruthy();
++				result = await ctx.tools?.invoke("target", { value: "allowed" });
++				trace.push("returned");
++			},
++			(pi) => {
++				pi.on("tool_call", (event, ctx) => {
++					expect(ctx.tools).toBeUndefined();
++					trace.push(`call:${event.toolName}`);
++				});
++				pi.on("tool_result", (event, ctx) => {
++					expect(ctx.tools).toBeUndefined();
++					trace.push(`result:${event.toolName}`);
++					if (event.toolName === "target") return { ...text("filtered by actual extension hook"), isError: true };
++				});
++			},
++		);
++		await f.run();
++		expect(f.executed()).toBe(1);
++		expect(result).toEqual({ result: text("filtered by actual extension hook"), isError: true });
++		expect(trace).toEqual(["call:cell", "call:target", "result:target", "returned", "result:cell"]);
++		expect(f.harness.eventsOfType("tool_execution_start").map((e) => e.toolName)).toEqual(["cell", "target"]);
++		expect(f.harness.session.messages.filter((m) => m.role === "toolResult")).toHaveLength(1);
++	});
++
++	it.each(["deny", "mutate", "invalid"])("prevents execution after actual %s handling", async (mode) => {
++		let result: { isError: boolean } | undefined;
++		const f = await fixture(
++			async (ctx) => {
++				result = await ctx.tools?.invoke("target", { value: mode === "invalid" ? "bad" : "allowed" });
++			},
++			(pi) => {
++				pi.on("tool_call", (event) => {
++					if (event.toolName === "target") {
++						if (mode === "deny") return { block: true, reason: "denied by actual extension" };
++						if (mode === "mutate") event.input.value = "bad";
++					}
++				});
++			},
++		);
++		await f.run();
++		expect(f.executed()).toBe(0);
++		expect(result?.isError).toBe(true);
++	});
++
++	it("normalizes images inserted by actual result hooks before returning to the parent", async () => {
++		let result: Awaited<ReturnType<AgentToolInvocation["invoke"]>> | undefined;
++		const f = await fixture(
++			async (ctx) => {
++				result = await ctx.tools?.invoke("target", { value: "allowed" });
++			},
++			(pi) => {
++				pi.on("tool_result", (event) => {
++					if (event.toolName === "target")
++						return { content: [{ type: "image", mimeType: "image/bmp", data: tinyBmp() }] };
++				});
++			},
++		);
++		await f.run();
++		expect(result?.result.content[0]).toMatchObject({ type: "image", mimeType: "image/png" });
++		expect(result?.result.content[1]).toMatchObject({
++			type: "text",
++			text: "[Image converted from image/bmp to image/png.]",
++		});
++	});
++
++	it("preserves live context getters instead of taking a model snapshot", async () => {
++		const f = await fixture(async (ctx) => {
++			const original = ctx.model;
++			expect(Object.getOwnPropertyDescriptor(ctx, "model")?.get).toBeTypeOf("function");
++			f.harness.session.agent.state.model = { ...f.harness.session.agent.state.model, id: "changed-for-fixture" };
++			expect(ctx.model?.id).toBe("changed-for-fixture");
++			if (original) f.harness.session.agent.state.model = original;
++			await expect(ctx.tools?.invoke("target", { value: "allowed" })).rejects.toThrow(/stale/);
++		});
++		await f.run();
++		expect(f.executed()).toBe(0);
++	});
++
++	it("revokes the parent if an approval hook changes the active registry", async () => {
++		const f = await fixture(
++			async (ctx) => {
++				await expect(ctx.tools?.invoke("target", { value: "allowed" })).rejects.toThrow(/stale/);
++			},
++			(pi) => {
++				pi.on("tool_call", (event) => {
++					if (event.toolName === "target") pi.setActiveTools(["cell"]);
++				});
++			},
++		);
++		await f.run();
++		expect(f.executed()).toBe(0);
++	});
++
++	it("withholds a target result revoked by its real result hook", async () => {
++		const f = await fixture(
++			async (ctx) => {
++				await expect(ctx.tools?.invoke("target", { value: "allowed" })).rejects.toThrow(/stale/);
++			},
++			(pi) => {
++				pi.on("tool_result", (event) => {
++					if (event.toolName === "target") pi.setActiveTools(["cell"]);
++				});
++			},
++		);
++		await f.run();
++		expect(f.executed()).toBe(1);
++		expect(JSON.stringify(f.harness.eventsOfType("tool_execution_end"))).not.toContain("raw target result");
++	});
++
++	it("revokes pending approval at reload entry, before asynchronous shutdown completes", async () => {
++		let approvalStarted = () => {};
++		const started = new Promise<void>((resolve) => {
++			approvalStarted = resolve;
++		});
++		let releaseApproval = () => {};
++		const approval = new Promise<void>((resolve) => {
++			releaseApproval = resolve;
++		});
++		let releaseShutdown = () => {};
++		const shutdown = new Promise<void>((resolve) => {
++			releaseShutdown = resolve;
++		});
++		let scope: AgentToolInvocation | undefined;
++		let oldContext: ExtensionContext | undefined;
++		let rejected = false;
++		const f = await fixture(
++			async (ctx) => {
++				scope = ctx.tools;
++				oldContext = ctx;
++				try {
++					await scope?.invoke("target", { value: "allowed" });
++				} catch {
++					rejected = true;
++				}
++			},
++			(pi) => {
++				pi.on("tool_call", async (event) => {
++					if (event.toolName === "target") {
++						approvalStarted();
++						await approval;
++					}
++				});
++				pi.on("session_shutdown", async () => {
++					await shutdown;
++				});
++			},
++		);
++		const prompt = f.harness.session.prompt("offline reload race");
++		await started;
++		const reload = f.harness.session.reload();
++		expect(scope?.signal.aborted).toBe(true);
++		await expect(scope?.invoke("target", { value: "allowed" })).rejects.toThrow(/stale/);
++		releaseApproval();
++		releaseShutdown();
++		await Promise.allSettled([reload, prompt]);
++		expect(rejected).toBe(true);
++		expect(f.executed()).toBe(0);
++		expect(() => oldContext?.model).toThrow(/stale/);
++	});
++
++	it("does not grant an invocation to a direct stale wrapper call", async () => {
++		let scoped = false;
++		const f = await fixture(async (ctx) => {
++			scoped = ctx.tools !== undefined;
++		});
++		const tool = f.harness.session.agent.state.tools.find((t) => t.name === "cell");
++		await tool?.execute("not-a-host-parent", {});
++		expect(scoped).toBe(false);
++	});
++
++	it("adopts a genuine durable scope in a later AgentSession handler and preserves real finalized normalization", async () => {
++		let cell!: AgentToolScope,
++			old!: AgentToolInvocation,
++			turn = 0,
++			received: unknown;
++		const trace: string[] = [];
++		const f = await fixture(
++			async (ctx) => {
++				if (turn++ === 0) {
++					old = ctx.tools!;
++					cell = old.openScope();
++					return;
++				}
++				expect(ctx.tools).not.toBe(old);
++				const adopted = ctx.tools!.adoptScope(cell);
++				received = await adopted.invoke("target", { value: "allowed" });
++			},
++			(pi) => {
++				pi.on("tool_call", (event) => {
++					if (event.toolName === "target") trace.push("approval");
++				});
++				pi.on("tool_result", (event) => {
++					if (event.toolName === "target") {
++						trace.push("result");
++						return { content: [{ type: "image", data: tinyBmp(), mimeType: "image/bmp" }] };
++					}
++					return undefined;
++				});
++			},
++		);
++		try {
++			await f.run();
++			expect(cell.state).toBe("active");
++			await expect(old.invoke("target", { value: "allowed" })).rejects.toThrow(/expired/);
++			f.harness.setResponses([
++				fauxAssistantMessage([fauxToolCall("cell", {})], { stopReason: "toolUse" }),
++				fauxAssistantMessage("later done"),
++			]);
++			await f.harness.session.prompt("later actual session handler");
++			expect(received).toMatchObject({
++				isError: false,
++				result: {
++					content: [
++						{ type: "image", mimeType: "image/png" },
++						{ type: "text", text: "[Image converted from image/bmp to image/png.]" },
++					],
++				},
++			});
++			expect(trace).toEqual(["approval", "result"]);
++			expect(f.executed()).toBe(1);
++			expect(f.harness.session.messages.filter((message) => message.role === "toolResult")).toHaveLength(2);
++		} finally {
++			await cell?.close();
++		}
++	});
++
++	it("delivers actual idle-session approval/result hooks without an expired run event sink", async () => {
++		let cell!: AgentToolScope;
++		const trace: string[] = [];
++		const f = await fixture(
++			async (ctx) => {
++				cell = ctx.tools!.openScope();
++			},
++			(pi) => {
++				pi.on("tool_call", (event) => {
++					if (event.toolName === "target") trace.push("approval");
++				});
++				pi.on("tool_result", (event) => (event.toolName === "target" ? text("idle finalized") : undefined));
++			},
++		);
++		try {
++			await f.run();
++			expect(f.harness.session.agent.state.isStreaming).toBe(false);
++			const result = await cell.invoke("target", { value: "allowed" });
++			expect(result.result.content).toEqual([{ type: "text", text: "idle finalized" }]);
++			expect(trace).toEqual(["approval"]);
++			const ends = f.harness.eventsOfType("tool_execution_end").filter((event) => event.toolName === "target");
++			expect(ends).toHaveLength(1);
++			expect(ends[0].scopeId).toBe(cell.id);
++		} finally {
++			await cell?.close();
++		}
++	});
++
++	it("revokes durable calls after actual active-tool replacement", async () => {
++		let cell!: AgentToolScope, api!: ExtensionAPI;
++		const f = await fixture(
++			async (ctx) => {
++				cell = ctx.tools!.openScope();
++			},
++			(pi) => {
++				api = pi;
++			},
++		);
++		await f.run();
++		api.setActiveTools(["cell"]);
++		await expect(cell.invoke("target", { value: "allowed" })).rejects.toThrow(/expired/);
++		await cell.close();
++		expect(f.executed()).toBe(0);
++	});
++
++	it("retains Agent-owned admission across an actual extension reload until resource cleanup completes", async () => {
++		let cell!: AgentToolScope,
++			turn = 0,
++			release = () => {};
++		let restored: ReturnType<typeof registerFauxProvider> | undefined;
++		const gate = new Promise<void>((resolve) => {
++			release = resolve;
++		});
++		const f = await fixture(async (ctx) => {
++			if (turn++ === 0) {
++				cell = ctx.tools!.openScope();
++				cell.ownResource(() => gate);
++			} else expect(() => ctx.tools!.openScope()).toThrow(/cleanup/);
++		});
++		try {
++			await f.run();
++			await f.harness.session.reload();
++			expect(cell.state).toBe("draining");
++			// Real reload resets compatibility providers. Re-register only the offline model fixture.
++			restored = registerFauxProvider({
++				api: f.harness.faux.api,
++				provider: f.harness.getModel().provider,
++				models: f.harness.models,
++			});
++			restored.setResponses([
++				fauxAssistantMessage([fauxToolCall("cell", {})], { stopReason: "toolUse" }),
++				fauxAssistantMessage("reload done"),
++			]);
++			await f.harness.session.prompt("after actual reload");
++			expect(
++				turn,
++				JSON.stringify(
++					f.harness.session.messages
++						.filter((message) => message.role === "assistant")
++						.map((message) => message.errorMessage),
++				),
++			).toBe(2);
++			expect(cell.signal.aborted).toBe(true);
++		} finally {
++			release();
++			await cell?.close();
++			restored?.unregister();
++		}
++	});
++
++	it("does not adopt another actual AgentSession's native scope", async () => {
++		let cell!: AgentToolScope;
++		const owner = await fixture(async (ctx) => {
++			cell = ctx.tools!.openScope();
++		});
++		await owner.run();
++		try {
++			const other = await fixture(async (ctx) => {
++				expect(() => ctx.tools!.adoptScope(cell)).toThrow(/foreign/);
++				expect(() => ctx.tools!.adoptScope({ ...cell })).toThrow(/foreign/);
++			});
++			await other.run();
++			expect(cell.state).toBe("active");
++		} finally {
++			await cell?.close();
++		}
++	});
++});
+diff --git a/vitest.base.ts b/vitest.base.ts
+index 9394bcb..4c47955 100644
+--- a/vitest.base.ts
++++ b/vitest.base.ts
+@@ -13,6 +13,7 @@ export const workspaceSourcePaths = {
+ 	aiCompat: fileURLToPath(new URL("./packages/ai/src/compat.ts", import.meta.url)),
+ 	aiOAuth: fileURLToPath(new URL("./packages/ai/src/oauth.ts", import.meta.url)),
+ 	aiProviders: fileURLToPath(new URL("./packages/ai/src/providers", import.meta.url)),
++	aiUtils: fileURLToPath(new URL("./packages/ai/src/utils", import.meta.url)),
+ 	agentIndex: fileURLToPath(new URL("./packages/agent/src/index.ts", import.meta.url)),
+ 	agentNode: fileURLToPath(new URL("./packages/agent/src/node.ts", import.meta.url)),
+ 	protocolIndex: fileURLToPath(new URL("./packages/protocol/src/index.ts", import.meta.url)),
+@@ -41,6 +42,7 @@ export default defineConfig({
+ 				find: /^@earendil-works\/pi-ai\/providers\/(.+)$/,
+ 				replacement: `${workspaceSourcePaths.aiProviders}/$1.ts`,
+ 			},
++			{ find: /^@earendil-works\/pi-ai\/utils\/(.+)$/, replacement: `${workspaceSourcePaths.aiUtils}/$1.ts` },
+ 			{ find: /^@earendil-works\/pi-agent-core$/, replacement: workspaceSourcePaths.agentIndex },
+ 			{ find: /^@earendil-works\/pi-agent-core\/node$/, replacement: workspaceSourcePaths.agentNode },
+ 			{ find: /^@earendil-works\/pi-protocol$/, replacement: workspaceSourcePaths.protocolIndex },

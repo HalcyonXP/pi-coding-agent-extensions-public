@@ -1,0 +1,66 @@
+name: Private Windows artifacts
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private:
+    name: private artifacts (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: openai-compatibility/package-lock.json
+      - name: Locked SDK/source dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --prefix openai-compatibility
+      - name: Exact private host source, patch and catalog
+        run: node .github/scripts/prepare-pi-host.mjs
+      - name: Locked native host build dependencies
+        working-directory: .pi/host-gateway-checkout
+        run: npm ci --ignore-scripts
+      - name: Acquire pinned private compiler/reference inputs
+        run: node .github/scripts/prepare-native-compiler.mjs
+      - name: Reproduce contained helper offline
+        run: node openai-compatibility/runtime/native/build.mjs
+      - name: Build two new locked private bundles
+        shell: pwsh
+        run: |
+          node distribution/build.mjs --host .pi/host-gateway-checkout --out "$pwd/.pi/bundle-a"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node distribution/build.mjs --host .pi/host-gateway-checkout --out "$pwd/.pi/bundle-b"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-FileHash .pi/bundle-a.tar.gz).Hash -ne (Get-FileHash .pi/bundle-b.tar.gz).Hash) { throw 'Bundle reproduction differs' }
+      - name: Extract with real tar into a new path containing spaces
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory '.pi/extracted artifact' | Out-Null
+          tar -xzf .pi/bundle-a.tar.gz -C '.pi/extracted artifact'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Actual installed SDK, normal entry, contained worker, protected evidence and shell
+        run: node distribution/accept.mjs '.pi/extracted artifact'
+      - name: Actual bundled CLI, isolated installation, ownership and rollback
+        run: node distribution/accept-profile.mjs '.pi/extracted artifact'
+      # No deployment, publishing, credentials or executable artifact upload.
+      - name: Retain only sanitized reproduction receipts
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-bundle-provenance
+          path: |
+            .pi/bundle-a.tar.gz.sha256
+            .pi/bundle-a/bundle.json
+          retention-days: 14
+          if-no-files-found: error

@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: openai-compatibility/package-lock.json
+      - name: Install integration dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --prefix openai-compatibility
+      - name: Test repository privacy and SDK provenance (offline)
+        run: node --test .github/test/*.test.mjs
+      - name: Test private artifact primitives (offline, no installation or deployment)
+        run: node --test distribution/test/*.test.mjs
+      - name: Test JavaScript extensions
+        run: >-
+          node --test
+          context-usage-injection/index.test.mjs
+          extension-manager/core.test.mjs
+          model-constraints/index.test.mjs
+          todays-date/index.test.mjs
+          tokens-per-second/core.test.mjs
+          tokens-per-second/index.test.mjs
+          tokens-per-second/reasoning-rates.test.mjs
+      - name: Test OpenAI integration (offline mocks)
+        run: npm test --prefix openai-compatibility
+      - name: Type-check OpenAI integration
+        run: npm run check --prefix openai-compatibility
+      - name: Verify native Pi 0.85.1 and cohesive CLI catalogs match (isolated, no network)
+        run: node .github/scripts/check-catalog.mjs
