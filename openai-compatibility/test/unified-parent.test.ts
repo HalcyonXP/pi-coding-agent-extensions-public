@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {spawn} from "node:child_process";
-import {mkdtemp,readFile,writeFile,rm} from "node:fs/promises";
+import {mkdtemp,readFile,writeFile} from "node:fs/promises";
+import {removeOwnedFixture,withFixtureCleanup} from "./fixture-cleanup.ts";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 const alive=(pid:number)=>{try{process.kill(pid,0);return true;}catch{return false;}};
@@ -18,19 +19,25 @@ for(const mode of ["before-admission","after-admission"])test(`Windows superviso
  `const launch=await nativeShell(${JSON.stringify(command)});const child=spawn(launch.executable,launch.args,{stdio:"pipe",windowsHide:true});let stderr="";child.stderr.on("data",chunk=>{stderr+=chunk;if(stderr.includes("PI_UNIFIED_READY_V1"))writeFileSync(${JSON.stringify(ownerFile)},JSON.stringify({pid:child.pid}));});child.stdout.resume();child.stdin.on("error",()=>{});`;
  await writeFile(parentFile,imports+body+'setInterval(()=>{},1000);');
  const parent=spawn(process.execPath,[parentFile],{stdio:"pipe",windowsHide:true});parent.stdout.resume();parent.stderr.resume();parent.stdin.on("error",()=>{});
- try{
-  await until(async()=>{try{supervisor=JSON.parse(await readFile(ownerFile,"utf8")).pid;return true;}catch{return false;}},20000);
+ let parentClosed=false,launchError:Error|undefined;
+ parent.once("close",()=>{parentClosed=true;});parent.once("error",error=>{launchError=error;});
+ await withFixtureCleanup(async()=>{
+  await until(async()=>{if(launchError)throw launchError;try{supervisor=JSON.parse(await readFile(ownerFile,"utf8")).pid;return true;}catch{return false;}},20000);
   if(mode==="after-admission")await until(async()=>{try{info=JSON.parse(await readFile(marker,"utf8"));return true;}catch{return false;}},20000);
   else await assert.rejects(readFile(marker),/ENOENT/);
   assert.ok(supervisor&&alive(supervisor));if(info)assert.ok(alive(info.pid)&&alive(info.child));
   parent.kill("SIGKILL"); // held fixture-parent handle, never an unrelated PID lookup
-  await until(()=>!alive(supervisor!)&&(!info||(!alive(info.pid)&&!alive(info.child))),10000);
+  // PID observations remain supplementary. Require the held parent's genuine
+  // close event within the same original post-kill deadline, not another wait budget.
+  await until(()=>parentClosed&&!alive(supervisor!)&&(!info||(!alive(info.pid)&&!alive(info.child))),10000);
   if(mode==="before-admission")await assert.rejects(readFile(marker),/ENOENT/);
- }finally{
+ },async bodyPassed=>{
   if(parent.exitCode===null&&parent.signalCode===null)parent.kill("SIGKILL");
   // Do not kill by a possibly reused PID during failure cleanup. Our synthetic
   // command/descendant self-expire; wait for their bounded safety deadlines.
-  if(supervisor)await until(()=>!alive(supervisor!)&&(!info||(!alive(info.pid)&&!alive(info.child))),70000);
-  await rm(directory,{recursive:true,force:true});
- }
+  await until(()=>parentClosed&&(!supervisor||!alive(supervisor))&&(!info||(!alive(info.pid)&&!alive(info.child))),70000);
+  // Never remove failed-fixture evidence, or let rmdir mask a native assertion.
+  // A short bounded EBUSY retry releases no lock and runs no command again.
+  if(bodyPassed)await removeOwnedFixture(directory);
+ });
 });
