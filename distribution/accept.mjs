@@ -9,7 +9,7 @@ import {mkdtemp,mkdir,readFile,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {deflateSync} from "node:zlib";
 import {verifyBundle,sha256,run} from "./lib.mjs";
-import {shellAcceptanceDiagnostic,shellReadinessCode} from "./acceptance-diagnostics.mjs";
+import {shellAcceptanceDiagnostic,shellReadinessCode,createShellObserver} from "./acceptance-diagnostics.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32"&&process.arch==="x64","Usage: node distribution/accept.mjs <private Windows bundle>");
 const bundle=resolve(process.argv[2]);await verifyBundle(bundle);
 const profile=await mkdtemp(join(tmpdir(),"pi-private-accept-")),cwd=join(profile,"workspace");await mkdir(cwd);
@@ -57,9 +57,10 @@ try{
  // A real returned shell is automatically closed when its owning cell completes,
  // independently of another wait. PID observation is supplementary, not the receipt.
  const marker=join(cwd,"shell-ready.txt"),cmd=`[IO.File]::WriteAllText('${marker.replaceAll("'","''")}',[string]$PID);Write-Output READY;Start-Sleep -Seconds 30`;
- r=outcome(await invoke("exec",{code:shellReadinessCode(cmd)}));
+ const shellObserver=createShellObserver(),unsubscribeShell=session.agent.subscribe(event=>shellObserver.observe(event));
+ try{r=outcome(await invoke("exec",{code:shellReadinessCode(cmd)}));}finally{unsubscribeShell();}
  const markerRecorded=(r.status!=="completed"||r.result?.status!=="ok")?await readFile(marker,"utf8").then(text=>/^\d+$/.test(text)).catch(()=>false):false;
- const diagnostic=shellAcceptanceDiagnostic(r,markerRecorded);
+ const diagnostic=shellAcceptanceDiagnostic(r,markerRecorded,shellObserver);
  assert.equal(r.status,"completed",diagnostic);assert.equal(r.result.status,"ok",diagnostic);assert.match(await readFile(marker,"utf8"),/^\d+$/);assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
  const oldContext=session.extensionRunner.createContext();await session.reload();faux=compat.registerFauxProvider();assert.ok(!session.getActiveToolNames().includes("exec"));assert.throws(()=>oldContext.toolGatewayInfo);
  await session.prompt("/openai-tools code_mode on");assert.equal((await invoke("wait",{cell_id:oldId})).isError,true);
