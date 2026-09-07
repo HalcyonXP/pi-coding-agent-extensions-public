@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { registerCapabilities } from "./capabilities.ts";
+import { showOpenAISettings, type SettingsRow } from "./settings-menu.ts";
 
 export const FAST_ICON = "⚡";
 export const FAST_SERVICE_TIER = "priority";
@@ -316,8 +317,9 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 	// This extension composes capability policy, Fast mode and the shared footer.
 	// D14 verified this bounded Web subset. Registration stays session opt-in
 	// and neither requests a service nor changes global/user settings.
-	registerCapabilities(pi, withFileMutationQueue, {
+	const capabilitySettings = registerCapabilities(pi, withFileMutationQueue, {
 		webSearch: { transport: fetch, profile: "verified-v1" },
+		openSettings: ctx => openSettings(ctx, "imagegen"),
 	});
 
 	const statePath = getFastModeStatePath();
@@ -435,11 +437,12 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 		}
 	};
 
-	const persistState = (enabled: boolean, ctx: ExtensionContext): boolean => {
+	type Notify = (message: string, type?: "info" | "warning" | "error") => void;
+	const persistState = (enabled: boolean, ctx: ExtensionContext, notify: Notify): boolean => {
 		try {
 			writeFastModeState(enabled, statePath);
 		} catch (error) {
-			ctx.ui.notify(`Unable to save Fast-mode preference: ${formatError(error)}`, "error");
+			notify(`Unable to save Fast-mode preference: ${formatError(error)}`, "error");
 			return false;
 		}
 
@@ -448,7 +451,7 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 		try {
 			pi.appendEntry<FastModeState>(STATE_ENTRY_TYPE, { version: 1, enabled });
 		} catch (error) {
-			ctx.ui.notify(
+			notify(
 				`Fast-mode preference was saved globally, but not recorded in this session: ${formatError(error)}`,
 				"warning",
 			);
@@ -459,46 +462,74 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 	const modelLabel = (ctx: ExtensionContext): string =>
 		ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "no model";
 
-	const reportStatus = (ctx: ExtensionContext): void => {
+	const reportStatus = (ctx: ExtensionContext, notify: Notify = (message, type) => ctx.ui.notify(message, type)): void => {
 		if (!fastEnabled) {
-			ctx.ui.notify("Fast mode: OFF", "info");
+			notify("Fast mode: OFF", "info");
 		} else if (fastActive(ctx)) {
-			ctx.ui.notify(`Fast mode: ON ${FAST_ICON} (${modelLabel(ctx)})`, "info");
+			notify(`Fast mode: ON ${FAST_ICON} (${modelLabel(ctx)})`, "info");
 		} else {
-			ctx.ui.notify(`Fast mode preference: ON, inactive for ${modelLabel(ctx)}`, "warning");
+			notify(`Fast mode preference: ON, inactive for ${modelLabel(ctx)}`, "warning");
 		}
 	};
 
-	const setFastMode = (enabled: boolean, ctx: ExtensionContext): void => {
+	const setFastMode = (enabled: boolean, ctx: ExtensionContext, notify: Notify = (message, type) => ctx.ui.notify(message, type)): boolean => {
 		const alreadyPersisted = readFastModeState(statePath)?.enabled === enabled;
 		if (fastEnabled === enabled && alreadyPersisted) {
 			syncFooter(ctx);
-			reportStatus(ctx);
-			return;
+			reportStatus(ctx, notify);
+			return true;
 		}
 
-		if (!persistState(enabled, ctx)) return;
+		if (!persistState(enabled, ctx, notify)) return false;
 		fastEnabled = enabled;
 		syncFooter(ctx);
 
 		if (enabled && !fastActive(ctx)) {
-			ctx.ui.notify(
+			notify(
 				`Fast mode preference: ON — inactive for ${modelLabel(ctx)}; it will activate automatically for a supported OpenAI model.`,
 				"warning",
 			);
-			return;
+			return true;
 		}
 
-		ctx.ui.notify(
+		notify(
 			enabled
 				? `Fast mode: ON ${FAST_ICON} — priority processing may increase usage or cost.`
 				: "Fast mode: OFF — standard processing restored.",
 			"info",
 		);
+		return true;
+	};
+
+	const openSettings = async (ctx: ExtensionContext, focus: string): Promise<void> => {
+		const version = capabilitySettings.contextVersion();
+		const isCurrent = () => capabilitySettings.contextVersion() === version;
+		const read = async (): Promise<SettingsRow[]> => {
+			const rows = await capabilitySettings.read(ctx);
+			if (!isCurrent()) throw new Error("Settings context changed. Reopen the menu.");
+			refreshSharedState(ctx);
+			return [{ id: "fast", label: "Fast mode", value: fastEnabled ? "on" : "off", values: ["off", "on"],
+				description: `Saved for this Pi profile. Priority processing may increase usage or cost. ${isFastCapableModel(ctx.model) ? fastActive(ctx) ? "Active on this model." : "Off; this model supports Fast." : `Inactive for ${modelLabel(ctx)}; the saved preference is kept.`}` }, ...rows];
+		};
+		await showOpenAISettings(ctx, {
+			read, isCurrent, onBoundary: capabilitySettings.onBoundary,
+			async change(id, value, signal) {
+				signal.throwIfAborted();
+				if (!isCurrent()) throw new Error("Settings context changed. Reopen the menu.");
+				if (id === "fast") {
+					if (!["on", "off"].includes(value)) throw new Error("Invalid Fast preference.");
+					const messages: string[] = [];
+					if (!setFastMode(value === "on", ctx, message => { messages.push(message); })) throw new Error("Could not save Fast preference. Check the displayed value before retrying.");
+					return messages.join(" ");
+				}
+				await capabilitySettings.change(id, value, ctx, signal);
+				return `${id === "unified_exec" ? "Unified exec" : id === "code_mode" ? "Code mode" : id === "web_search" ? "Web search" : "Image generation"}: ${value} for this session.`;
+			},
+		}, focus);
 	};
 
 	pi.registerCommand("fast", {
-		description: "Set OpenAI Fast mode ON or OFF",
+		description: "Open OpenAI settings at Fast mode, or set on/off/toggle/status",
 		getArgumentCompletions: (prefix) => {
 			const values = ["on", "off", "toggle", "status"];
 			const matches = values
@@ -510,13 +541,8 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 			refreshSharedState(ctx);
 			const action = args.trim().toLowerCase();
 
-			if (!action && ctx.mode === "tui") {
-				const choice = await ctx.ui.select(`Fast mode (currently ${fastEnabled ? "ON" : "OFF"})`, [
-					`ON ${FAST_ICON} — priority processing (increased usage or cost)`,
-					"OFF — standard processing",
-				]);
-				if (choice?.startsWith("ON")) setFastMode(true, ctx);
-				else if (choice?.startsWith("OFF")) setFastMode(false, ctx);
+			if (!action && ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.custom === "function") {
+				await openSettings(ctx, "fast");
 				return;
 			}
 

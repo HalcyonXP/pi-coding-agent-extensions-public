@@ -22,6 +22,8 @@ This guide describes the public source's implementation and constraints, not an 
 | Runtime payload | Manifested files delivered in the immutable archive; not every build input or upstream example |
 | Retained build inputs | Original locked host tarballs and excluded demo files preserved byte-identically beside the build output, outside the delivered archive |
 | Redistribution review | [Actual package, bundled-code and embedded-work coverage](REDISTRIBUTION.md); notice candidates and zero returned advisories are not clearance |
+| Settings value | Current saved Fast preference or applicable session tool switch; not service entitlement or native execution authority |
+| Settings availability | Passive route/ownership/preflight snapshot on open/change; unavailable rows explain why and cannot override exclusions |
 | Standing project authorization | Delegated in-scope decisions and delivery planning; never a waiver of technical/privacy gates or permission to bypass guards |
 
 Original first-party documentation in this directory is licensed under [Apache-2.0](LICENSE); see [scope and attribution](NOTICE). Other source components and third-party works retain their own terms.

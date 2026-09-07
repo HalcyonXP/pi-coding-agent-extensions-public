@@ -4,6 +4,16 @@ One Pi extension provides a persistent Fast preference/shared compact footer and
 
 The locked native catalog includes openai-codex/gpt-6-astra and openai/gpt-6-astra. Authenticate normally with /login in a new isolated profile; choose the official provider/model through /model. Stock Pi supplies models/Fast support, but production Code mode additionally requires the [compatible patched host](../host-patches/pi-0.85.1/README.md).
 
+## Settings menu
+
+In the terminal, **`/openai-tools`** opens a searchable settings list using Pi's native `SettingsList`; **`/fast`** opens the same menu focused on Fast. Values sit beside their labels, with a description for the selected row. Use Up/Down, type to filter, Enter/Space to change, or the native mouse controls. The menu stays open after changes. **Changes apply immediately; Esc closes, it does not undo them.** Narrow terminals ask you to widen the view rather than change invisible controls.
+
+Fast is saved for this Pi profile; tool switches are session-only. An inactive Fast preference remains visibly on with the reason in its description. Unavailable/excluded/conflicting capabilities are read-only and explain why; neither this menu nor on commands can bypass rollback exclusions. Route, configured OAuth and native-runtime rows are passive information, not entitlement or execution authority. Runtime preflight distinguishes ready, busy and draining. Status is checked on open and after changes, not a live job monitor.
+
+Opening the menu never refreshes credentials, launches a worker/compiler or calls a model/service. Pending updates show `applying…`, not optimistic success; failures refresh actual values, or freeze unknown state until reopened. Close/session/model changes revoke pending menu work. Tool preference changes preserve the existing cancellation behavior for running capability work. Pi's own `/settings`, model selection, ordinary tools and Fast/footer ownership are not replaced.
+
+Explicit commands remain available below. `/fast status` and `/openai-tools status` always produce text; bare commands in RPC/non-terminal contexts retain text status rather than open a modal.
+
 ## Independent controls
 
 - /fast on, off, toggle or status: persistent preference; eligible official models receive service_tier: priority. Priority usage/cost is separate from subscription capability use and ordinary conversation billing. Unsupported routes remain inactive.

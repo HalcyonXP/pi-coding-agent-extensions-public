@@ -35,9 +35,9 @@ export function harness(cwd: string, mutationQueue: MutationQueue = async (_path
 		getAllTools: () => [...tools.values()],
 		getActiveTools: () => [...active], setActiveTools: (names: string[]) => { active = [...names]; },
 	} as unknown as ExtensionAPI;
-	registerCapabilities(pi, mutationQueue, options);
+	const settings = registerCapabilities(pi, mutationQueue, options);
 	return {
-		ctx, pi, tools, commands, notices, setSessionId: (id: string) => { sessionId = id; }, active: () => active, authCalls: () => authCalls,
+		ctx, pi, tools, commands, notices, settings, setSessionId: (id: string) => { sessionId = id; }, active: () => active, authCalls: () => authCalls,
 		setConfig: (value: any) => { registeredConfig = value; }, setNative: (value: any) => { registeredNative = value; },
 		setAuth: (fn: any) => { authOverride = fn; }, setOAuth: (value: boolean) => { oauth = value; },
 		emit: async (name: string, event = {}) => { let result; for (const handler of handlers.get(name) ?? []) result = await handler(event, ctx) ?? result; return result; },

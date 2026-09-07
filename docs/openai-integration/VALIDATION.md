@@ -40,6 +40,8 @@ Use new absolute output paths and unused sibling `<output>.build-inputs` paths; 
     node distribution/accept.mjs C:/Pi-Builds/extracted
     node distribution/accept-profile.mjs C:/Pi-Builds/extracted
 
+`accept-profile.mjs` also runs the source-only `accept-settings.mjs` against the actual extracted SDK/normal extension: Pi's real SettingsList and native theme, synthetic keyboard input, persistent Fast changes, session switches, filtering, normal/excluded contexts and zero network attempts. The recorded frames are genuine component render output, not a capture of the user's terminal or profile.
+
 These installed checks are separate commands, not extra unit-test counts. Synthetic conversation/auth/HTTP seams must remain labelled synthetic. Genuine SDK/native invocation/process/publication/CLI behavior still runs. Record zero final native active/draining ownership and preserve failed outputs for inspection rather than reusing paths.
 
 Runtime test files run with `--test-concurrency=1` in both the local validator and the runtime package's `npm test`. Independent adversarial process/memory/CPU fixtures must not compete for one another's fixed wall watchdogs. Explicit in-file concurrency/admission cases, every test, and all runtime limits/expected outcomes remain unchanged. Serialization avoids harness-induced contention; it does not prove the cause of an earlier timeout or waive a current failure.
