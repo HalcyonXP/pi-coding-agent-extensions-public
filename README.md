@@ -18,7 +18,8 @@ Extensions for Pi Coding Agent, including a cohesive OpenAI compatibility layer,
 2. [Supported surface, deviations and acceptance boundaries](docs/openai-integration/FINAL-ACCEPTANCE.md).
 3. [Offline validation](docs/openai-integration/VALIDATION.md).
 4. [Isolated build/install/update/rollback](docs/openai-integration/PRIVATE-RELEASE.md).
-5. [Public-history privacy policy](PUBLICATION.md).
+5. [Redistribution and release-risk review](docs/openai-integration/REDISTRIBUTION.md): current binary-release blockers, selected unsigned Windows preview and exact remaining gates.
+6. [Public-history privacy policy](PUBLICATION.md).
 
 Use existing Node 24 or 25. Windows x64/.NET Framework 4.8 and a verified patched host/helper are required for production Code mode. Portable tests are not a production runtime fallback. Never copy this checkout over an active installation or import its credentials automatically.
 

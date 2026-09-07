@@ -17,7 +17,9 @@ This guide describes the public source's implementation and constraints, not an 
 | Public source | This repository's sanitized fresh history and implementation; not old private records, a paid entitlement guarantee or a prebuilt release |
 | Release contract | [Scope, externally trusted pins and delivery gates](RELEASE-CONTRACT.md); not authorization to publish assets |
 | Download pin verification | Offline byte/identity matching against already trusted archive/manifest/source/version pins; not signature verification, archive inspection or installation |
-| Release availability | Separately authorized assets actually uploaded and downloaded/verified; not source acceptance or an Actions provenance artifact |
+| Release availability | Authorized assets actually uploaded and downloaded/verified; not source acceptance or an Actions provenance artifact |
+| Redistribution review | [Actual package, bundled-code and embedded-work coverage](REDISTRIBUTION.md); notice candidates and zero returned advisories are not clearance |
+| Standing project authorization | Delegated in-scope decisions and delivery planning; never a waiver of technical/privacy gates or permission to bypass guards |
 
 Original first-party documentation in this directory is licensed under [Apache-2.0](LICENSE); see [scope and attribution](NOTICE). Other source components and third-party works retain their own terms.
 

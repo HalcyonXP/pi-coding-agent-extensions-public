@@ -6,6 +6,7 @@ import {readFile} from "node:fs/promises";
 import {execFileSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {shellAcceptanceDiagnostic} from "../acceptance-diagnostics.mjs";
+import {RPC_ERRORS} from "../../openai-compatibility/runtime/rpc-protocol.mjs";
 const read=path=>readFile(new URL("../../"+path,import.meta.url),"utf8");
 test("scoped Apache grants preserve the complete existing license text",async()=>{
  const canonical=execFileSync("git",["show","HEAD:openai-compatibility/LICENSE"],{cwd:fileURLToPath(new URL("../../",import.meta.url)),encoding:"utf8"});
@@ -20,6 +21,9 @@ test("shell acceptance diagnostics expose fixed status/code and marker presence 
  const result=JSON.parse(shellAcceptanceDiagnostic({status:"completed",result:{status:"error",code:"WALL_LIMIT",output:["unpublished payload"],path:"unpublished path"}},true));
  assert.deepEqual(result,{phase:"synthetic-shell-readiness",cellStatus:"completed",resultStatus:"error",code:"WALL_LIMIT",markerRecorded:true});
  const unknown=shellAcceptanceDiagnostic({status:"unpublished status",result:{status:"unpublished result",code:"unpublished code"}},"unpublished marker");assert.ok(!unknown.includes("unpublished"));assert.equal(JSON.parse(unknown).code,"UNCLASSIFIED");assert.equal(JSON.parse(shellAcceptanceDiagnostic(null)).cellStatus,"unknown");
+});
+test("shell diagnostics preserve every bounded RPC failure code without guest text",()=>{
+ for(const code of RPC_ERRORS){const text=shellAcceptanceDiagnostic({status:"completed",result:{status:"error",code,output:["unpublished output"]}},false);assert.equal(JSON.parse(text).code,code);assert.ok(!text.includes("unpublished output"));}
 });
 test("root distribution license metadata does not change the private prerelease contract",async()=>{
  const pkg=JSON.parse(await read("distribution/locks/package.json")),lock=JSON.parse(await read("distribution/locks/package-lock.json"));
