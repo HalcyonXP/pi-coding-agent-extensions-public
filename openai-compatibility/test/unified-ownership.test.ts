@@ -43,6 +43,7 @@ test("user input and EOF cannot acknowledge a pending native supervisor gate",as
  const jobs=new UnifiedExecManager(code=>({executable:process.execPath,args:["-e",code],supervised:true}));
  try{
   const r=await jobs.start("owner","process.stdin.resume();setInterval(()=>{},1000)",process.cwd(),0,64);
+  assert.equal(r.supervisor_ready,false,"No supervisor preamble has been received");
   await assert.rejects(jobs.write("owner",r.session_id!,"\u0001",0,64),/starting/);
   await assert.rejects(jobs.write("owner",r.session_id!,"\u0004",0,64),/starting/);
   assert.equal((await jobs.write("owner",r.session_id!,"\u0003",1000,64)).running,false);

@@ -15,7 +15,7 @@ for(const mode of ["before-admission","after-admission"])test(`Windows superviso
  const q=(s:string)=>`'${s.replaceAll("'","''")}'`,command=`& ${q(process.execPath)} ${q(program)} ${q(marker)}; exit $LASTEXITCODE`;
  const imports=`import {UnifiedExecManager,nativeShell} from ${JSON.stringify(new URL("../unified-exec.ts",import.meta.url).href)};import {spawn} from "node:child_process";import {writeFileSync} from "node:fs";`;
  const body=mode==="after-admission"?`const manager=new UnifiedExecManager();await manager.start("fixture",${JSON.stringify(command)},${JSON.stringify(directory)},1,64);writeFileSync(${JSON.stringify(ownerFile)},JSON.stringify({pid:manager.inspect("fixture")[0].pid}));`:
- `const launch=nativeShell(${JSON.stringify(command)});const child=spawn(launch.executable,launch.args,{stdio:"pipe",windowsHide:true});let stderr="";child.stderr.on("data",chunk=>{stderr+=chunk;if(stderr.includes("PI_UNIFIED_READY_V1"))writeFileSync(${JSON.stringify(ownerFile)},JSON.stringify({pid:child.pid}));});child.stdout.resume();child.stdin.on("error",()=>{});`;
+ `const launch=await nativeShell(${JSON.stringify(command)});const child=spawn(launch.executable,launch.args,{stdio:"pipe",windowsHide:true});let stderr="";child.stderr.on("data",chunk=>{stderr+=chunk;if(stderr.includes("PI_UNIFIED_READY_V1"))writeFileSync(${JSON.stringify(ownerFile)},JSON.stringify({pid:child.pid}));});child.stdout.resume();child.stdin.on("error",()=>{});`;
  await writeFile(parentFile,imports+body+'setInterval(()=>{},1000);');
  const parent=spawn(process.execPath,[parentFile],{stdio:"pipe",windowsHide:true});parent.stdout.resume();parent.stderr.resume();parent.stdin.on("error",()=>{});
  try{

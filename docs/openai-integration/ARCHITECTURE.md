@@ -42,7 +42,11 @@ Unified exec owns cleanup before OS launch. Returned jobs and stdin remain bound
 
 Windows holds supervisor/parent process identities and uses a private readiness/acknowledgement gate before running the command. The startup gate is bounded to ten seconds/four KiB; normal stdin/EOF cannot acknowledge it, and startup frames are not guest output. Parent death terminates the owned Job Object through held identity, not later PID lookup. No forced PID-reuse or malicious-shell-containment claim follows.
 
-The restricted coordinator's verified prebuilt helper is separate from deliberately delegated full-OS PowerShell supervision. Shell commands retain the user's OS permissions. POSIX process groups, pipes and cooperative cleanup do not establish PTY/ConPTY, hard-real-time shell quotas or Windows crash-equivalence guarantees.
+The verified prebuilt assembly contains two independent Job Object types. Its executable entry point and restricted coordinator limits are unchanged. PowerShell loads only the full-OS shell supervision type as a library; it does not run the coordinator entry point or compile C# during invocation. The parent verifies source/recipe/binary pins before launch and rechecks cancellation, generation and process capacity after asynchronous verification. Missing/corrupt helpers fail closed; no compiler, download or alternate-helper fallback is selected. Explicit build preparation precedes Windows shell tests.
+
+The optional `supervisor_ready` result (Windows supervision only) means the private preamble was received and the parent can acknowledge it. It does not prove the child read that acknowledgement, that a command produced output, or that native ownership can be released. Bounded acceptance diagnostics expose this boolean without commands, output, paths or IDs. The unchanged 30 × 300 ms readiness polls still require READY and final zero active/draining ownership. Earlier failures do not contain this new field and cannot be retroactively classified.
+
+Shell supervision remains separate in policy from coordinator containment, even though its fixed type is built into the same assembly. No unrestricted coordinator executable mode was added. Shell commands retain the user's OS permissions. POSIX process groups, pipes and cooperative cleanup do not establish PTY/ConPTY, hard-real-time shell quotas or Windows crash-equivalence guarantees.
 
 ## Artifacts and profiles
 

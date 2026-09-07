@@ -344,12 +344,16 @@ test("unrelated conversational overrides remain registered and do not disable of
 	assert.deepEqual(h.active(), ["read", "powershell", "imagegen"]);
 });
 
+const settledSettings = new WeakMap();
 async function captureSettings(h) {
  h.ctx.mode = "tui"; h.ctx.hasUI = true;
  let capture; const opened = new Promise(resolve => { capture = resolve; });
  h.ctx.ui.select = () => { throw Error("Retired action picker must not be used"); };
  h.ctx.ui.custom = async factory => new Promise(resolve => {
-  const component = factory({ requestRender() {} }, h.ctx.ui.theme, {}, () => { component.dispose?.(); resolve(); });
+  let component, settle;
+  const settled = new Promise(done => { settle = done; });
+  component = factory({ requestRender() { if (component && !component.render(80).join("\n").includes("applying…")) settle(); } }, h.ctx.ui.theme, {}, () => { component.dispose?.(); resolve(); });
+  settledSettings.set(component, settled);
   capture(component);
  });
  return opened;
@@ -361,7 +365,7 @@ test("normal installed entry exposes a shared settings menu and persists Fast wi
  const opened = captureSettings(h), finished = h.extension.commands.get("fast").handler("", h.ctx), panel = await opened;
  assert.match(panel.render(80).join("\n"), /→ Fast mode\s+off/);
  assert.match(panel.render(80).join("\n"), /Image generation/);
- panel.handleInput("\r"); await uiTick();
+ panel.handleInput("\r"); await settledSettings.get(panel);
  assert.equal(JSON.parse(readFileSync(h.statePath,"utf8")).enabled,true);
  assert.match(panel.render(80).join("\n"), /Fast mode\s+on/);
  assert.equal(h.notifications.length,0);
@@ -373,7 +377,7 @@ test("openai-tools focuses its capability rows and retains RPC/status fallback",
  const h=await createHarness(t);await h.emit("session_start");
  await h.extension.commands.get("openai-tools").handler("",h.ctx);assert.match(h.notifications.at(-1).message,/OpenAI capabilities/);
  const opened=captureSettings(h),finished=h.extension.commands.get("openai-tools").handler("",h.ctx),panel=await opened;
- assert.match(panel.render(80).join("\n"),/→ Image generation\s+on/);panel.handleInput("\r");await uiTick();assert.ok(!h.active().includes("imagegen"));
+ assert.match(panel.render(80).join("\n"),/→ Image generation\s+on/);panel.handleInput("\r");await settledSettings.get(panel);assert.ok(!h.active().includes("imagegen"));
  panel.handleInput("\x1b");await finished;
  h.ctx.ui.custom=()=>{throw Error("Explicit status must not open a modal");};await h.extension.commands.get("fast").handler("status",h.ctx);await h.extension.commands.get("openai-tools").handler("status",h.ctx);
  assert.match(h.notifications.at(-1).message,/OpenAI capabilities/);
@@ -387,6 +391,6 @@ test("model boundary closes the real entry's settings without applying stale inp
 test("Fast menu reports failed persistence inline and never displays false success", async t => {
  const h=await createHarness(t);await h.emit("session_start");mkdirSync(h.statePath);
  const opened=captureSettings(h),finished=h.extension.commands.get("fast").handler("",h.ctx),panel=await opened;
- panel.handleInput("\r");await uiTick();const view=panel.render(80).join("\n");assert.match(view,/Change failed/);assert.match(view,/Fast mode\s+off/);assert.equal(h.notifications.length,0);
+ panel.handleInput("\r");await settledSettings.get(panel);const view=panel.render(80).join("\n");assert.match(view,/Change failed/);assert.match(view,/Fast mode\s+off/);assert.equal(h.notifications.length,0);
  panel.handleInput("\x1b");await finished;assert.equal((await h.request({model:astra.id})).service_tier,undefined);
 });

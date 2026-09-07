@@ -79,7 +79,8 @@ test("EOF closes input, nonexistent workdir fails before launch, launch failure 
 	finally { await missing.close(); }
 });
 
-// Native PowerShell startup/Add-Type can exceed one tool yield on hosted Windows.
+// Native PowerShell startup can exceed one tool yield on hosted Windows.
+// Job support is now prebuilt; this completion fixture does not compile it.
 // Poll the same owned job to completion; never relaunch/retry the command or hide exit errors.
 async function nativeCompletion(manager: UnifiedExecManager, command: string, cwd: string, maxBytes: number) {
 	const deadline = Date.now() + 90_000;

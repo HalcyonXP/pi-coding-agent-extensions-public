@@ -27,15 +27,15 @@ test("shell diagnostics preserve every bounded RPC failure code without guest te
 });
 test("native shell observation retains only bounded phase and status fields",()=>{
  const observer=createShellObserver();observer.observe({type:"tool_execution_start",toolName:"exec_command",args:{cmd:"unpublished command"}});
- observer.observe({type:"tool_execution_end",toolName:"exec_command",isError:false,result:{details:{running:false,exit_code:1,termination:"Native supervisor admission failed.",output:"unpublished output",session_id:"unpublished identity"}}});
- assert.deepEqual(observer.snapshot(),{starts:1,ends:1,operation:"launch",toolError:false,running:false,exitCode:1,termination:"supervisor-admission",hadOutput:true});
+ observer.observe({type:"tool_execution_end",toolName:"exec_command",isError:false,result:{details:{running:false,supervisor_ready:false,exit_code:1,termination:"Native supervisor admission failed.",output:"unpublished output",session_id:"unpublished identity"}}});
+ assert.deepEqual(observer.snapshot(),{starts:1,ends:1,operation:"launch",toolError:false,running:false,supervisorReady:false,exitCode:1,termination:"supervisor-admission",hadOutput:true});
  assert.ok(!shellAcceptanceDiagnostic(null,false,observer).includes("unpublished"));
 });
 test("unknown native diagnostics cannot serialize caller payload or unlimited counters",()=>{
  const observer=createShellObserver();for(let i=0;i<100;i++)observer.observe({type:"tool_execution_start",toolName:"write_stdin"});
- observer.observe({type:"tool_execution_end",toolName:"write_stdin",isError:"unpublished",result:{details:{running:"unpublished",exit_code:Infinity,termination:"unpublished"}}});
+ observer.observe({type:"tool_execution_end",toolName:"write_stdin",isError:"unpublished",result:{details:{running:"unpublished",supervisor_ready:"unpublished",exit_code:Infinity,termination:"unpublished"}}});
  observer.observe({type:"tool_execution_end",toolName:"unpublished",result:"unpublished"});
- assert.equal(observer.snapshot().starts,65);assert.equal(observer.snapshot().ends,1);assert.equal(observer.snapshot().termination,"other");assert.equal(observer.snapshot().exitCode,null);assert.ok(!JSON.stringify(observer.snapshot()).includes("unpublished"));
+ assert.equal(observer.snapshot().supervisorReady,null);assert.equal(observer.snapshot().starts,65);assert.equal(observer.snapshot().ends,1);assert.equal(observer.snapshot().termination,"other");assert.equal(observer.snapshot().exitCode,null);assert.ok(!JSON.stringify(observer.snapshot()).includes("unpublished"));
  const fake={snapshot(){throw Error("must not call caller code");}};assert.equal(JSON.parse(shellAcceptanceDiagnostic(null,false,fake)).native.status,"unavailable");
 });
 test("native shell observation is source-only and cannot alter the bounded guest program",async()=>{

@@ -26,6 +26,8 @@ Authenticate normally using /login for OpenAI Codex in this **new** profile. No 
     /openai-tools unified_exec on
     /openai-tools code_mode on
 
+Windows Unified exec also requires the verified prebuilt helper. It loads its independent shell Job Object type without invocation-time compilation; this does not add an unrestricted coordinator mode. Missing/corrupt helpers remain unavailable, not a request for the installer/menu to compile or download anything.
+
 In the terminal, `/openai-tools` opens the native-style searchable settings menu; `/fast` opens it focused on Fast. Values and selected-row explanations stay visible while you change settings with Enter/Space. Esc closes without undoing applied changes. Unavailable or rollback-excluded tools stay read-only; their reasons are shown. Route/OAuth/runtime information is passive, not an entitlement probe. Explicit status/on/off commands remain available in every mode.
 
 Those opt-ins reset off on reload/new session. /fast on and /fast status control the separate persistent priority preference. Subscription capability usage, ordinary conversation billing and Fast costs are distinct. User-directed service use is not an automated validation allowance.

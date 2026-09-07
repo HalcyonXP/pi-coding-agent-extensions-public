@@ -19,10 +19,12 @@ function run(name, cwd, argv, env = {}) {
 run("Repository privacy and SDK provenance", root, ["--test", ".github/test/*.test.mjs"]);
 run("Private artifact primitives (offline)", root, ["--test", "distribution/test/*.test.mjs"]);
 run("Existing repository regressions", root, ["--test", "context-usage-injection/index.test.mjs", "extension-manager/core.test.mjs", "model-constraints/index.test.mjs", "todays-date/index.test.mjs", "tokens-per-second/core.test.mjs", "tokens-per-second/index.test.mjs", "tokens-per-second/reasoning-rates.test.mjs"]);
+// Windows Unified exec also loads its independently scoped Job Object type from
+// this prebuilt assembly. Build explicitly before shell tests, never on invocation.
+if (process.platform === "win32" && process.arch === "x64") run("Offline native helper build/verification", root, ["openai-compatibility/runtime/native/build.mjs"]);
 run("Cohesive extension (network guarded)", join(root, "openai-compatibility"), ["--import", "./test/offline.mjs", "--test", "index.test.mjs", "test/*.test.ts"]);
 run("Native/extension CLI catalog equality (isolated, network guarded)", root, [".github/scripts/check-catalog.mjs"]);
 run("Strict extension typecheck", join(root, "openai-compatibility"), ["node_modules/typescript/bin/tsc", "--noEmit", "-p", "tsconfig.json"]);
-if (process.platform === "win32" && process.arch === "x64") run("Offline native helper build/verification", root, ["openai-compatibility/runtime/native/build.mjs"]);
 // File-level isolation prevents independent OS/CPU/memory stress fixtures from
 // competing for one another's fixed wall watchdogs. In-file concurrency tests remain.
 run("Restricted runtime", join(root, "experiments", "code-mode-runtime"), ["--test", "--test-concurrency=1", "test/*.test.mjs"]);
