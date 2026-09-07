@@ -8,6 +8,12 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { OpenAIJobsPanel, OpenAISettingsPanel, type JobsController, type JobRow } from "../settings-menu.ts";
 import { harness } from "./capability-fixture.ts";
 const tick=()=>new Promise<void>(r=>setImmediate(r));
+const quoteFixture=(s:string,platform:NodeJS.Platform=process.platform)=>`'${s.replaceAll("'",platform==="win32"?"''":"'\\''")}'`;
+const hasReady=(output:string)=>output.split(/\r?\n/).includes("JOB_READY");
+test("jobs fixture preserves shell literals and requires a dedicated readiness line, not an error echo",()=>{
+ assert.equal(quoteFixture("a'b","win32"),"'a''b'");assert.equal(quoteFixture("a'b","linux"),"'a'\\''b'");
+ assert.equal(hasReady("process.stdout.write(JOB_READY);\nReferenceError: JOB_READY is not defined\n"),false);assert.equal(hasReady("JOB_READY\n"),true);assert.equal(hasReady("JOB_READY\r\n"),true);
+});
 const theme={fg:(_tone:string,text:string)=>text} as ExtensionContext["ui"]["theme"];
 const job=():JobRow=>({session_id:"owned-fixture",cleanup_pending:false,ownership:"cell",running:true,buffered_bytes:0,age_seconds:1});
 function fixture(cancel?:JobsController["cancel"]){
@@ -43,10 +49,10 @@ test("jobs stay inside the common settings menu and return without losing its fi
 test("consolidated jobs control cancels a real owned shell and rejects stale or foreign control",async()=>{
  const h=harness(tmpdir());try{
   await h.emit("session_start");assert.deepEqual([...h.commands.keys()],["openai-tools"]);await h.commands.get("openai-tools").handler("unified_exec on",h.ctx);
-  const q=(s:string)=>`'${s.replaceAll("'","''")}'`,cmd=`${process.platform==="win32"?"& ":""}${q(process.execPath)} -e ${q("process.stdout.write('JOB_READY');setTimeout(()=>{},30000)")}`;
+  const cmd=`${process.platform==="win32"?"& ":""}${quoteFixture(process.execPath)} -e ${quoteFixture("process.stdout.write('JOB_READY\\n');setTimeout(()=>{},30000)")}`;
   let launched:any=await h.tools.get("exec_command")!.execute("owned-jobs-fixture",{cmd,yield_time_ms:1},undefined,undefined,h.ctx),output=launched.details.output;
-  for(let n=0;n<30&&!output.includes("JOB_READY");n++){launched=await h.tools.get("write_stdin")!.execute(`owned-jobs-poll-${n}`,{session_id:launched.details.session_id,yield_time_ms:300},undefined,undefined,h.ctx);output+=launched.details.output;}
-  assert.match(output,/JOB_READY/);
+  for(let n=0;n<30&&!hasReady(output);n++){launched=await h.tools.get("write_stdin")!.execute(`owned-jobs-poll-${n}`,{session_id:launched.details.session_id,yield_time_ms:300},undefined,undefined,h.ctx);output+=launched.details.output;}
+  assert.equal(hasReady(output),true,"Dedicated JOB_READY line required");assert.equal(launched.details.running,true);
   const control=h.settings.jobs(h.ctx),rows=control.read();assert.equal(rows.length,1);assert.equal(rows[0].running,true);
   await assert.rejects(h.settings.jobs({...h.ctx,cwd:h.ctx.cwd+"-foreign"}).cancel(rows[0].session_id,new AbortController().signal),/context changed/);
   await h.commands.get("openai-tools").handler(`jobs cancel ${rows[0].session_id}`,h.ctx);assert.equal(control.read().length,0);assert.match(h.notices.at(-1)!,/job cancelled/);assert.equal(h.authCalls(),0);
