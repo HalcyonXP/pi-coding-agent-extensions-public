@@ -66,7 +66,7 @@ test("rendered native layout stays within narrow and wide terminal widths",()=>{
 	const f=fixture();try {for(const width of [1,16,32,60,100])for(const line of f.panel.render(width))assert.ok(visibleWidth(line)<=width,`${width}: ${line}`);assert.deepEqual(f.panel.render(0),[]);}finally{f.panel.dispose();}
 });
 test("configuration text cannot inject terminal or bidirectional controls",()=>{
-	assert.doesNotMatch(settingsText("\x1b[31mname\n\x07\u202ehidden\u2066"),/[\x00-\x1f\u202e\u2066]/);assert.equal(settingsText("x".repeat(1000)).length,300);
+	assert.doesNotMatch(settingsText("\x1b[31mname\n\x07\u061c\u200e\u200f\u202ehidden\u2066"),/[\x00-\x1f\u061c\u200e\u200f\u202e\u2066]/);assert.equal(settingsText("x".repeat(1000)).length,300);
 });
 test("capability settings are passive, distinguish unavailable reasons, and retain ordinary tools",async()=>{
 	const h=harness(tmpdir());try{await h.emit("session_start");const rows=await h.settings.read(h.ctx);assert.equal(rows.find(r=>r.id==="imagegen")!.value,"on");assert.equal(rows.find(r=>r.id==="web_search")!.value,"unavailable");assert.match(rows.find(r=>r.id==="web_search")!.description,/No search transport/);assert.equal(rows.find(r=>r.id==="runtime")!.value,"unavailable");assert.equal(h.authCalls(),0);

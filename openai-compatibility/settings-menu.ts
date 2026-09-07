@@ -18,7 +18,7 @@ export interface SettingsController {
 }
 /** Native configuration can contain custom model names; never render terminal controls. */
 export function settingsText(value: string): string {
-	return value.replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+	return value.replace(/[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
 /** Uses Pi's real settings list; no copied widget or custom keybinding scheme. */
