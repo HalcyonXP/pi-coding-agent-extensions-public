@@ -22,5 +22,5 @@ test("acceptance program retains exactly thirty polls and accepts readiness at t
  const {result,calls}=await run({readyAt:30});assert.equal(result.status,"ok");assert.equal(calls,31);
 });
 for(const [name,options,calls] of [["never ready",{readyAt:31},31],["launch denied",{errorAt:0},1],["poll denied",{readyAt:30,errorAt:1},2]])test("distinct synthetic shell failure is bounded: "+name,async()=>{
- const {result,calls:actual}=await run(options);assert.deepEqual(result,{version:1,status:"error",code:"EXECUTION_FAILED"});assert.equal(actual,calls);
+ const {result,calls:actual}=await run(options);assert.deepEqual(result,{version:1,status:"error",code:"EXECUTION_FAILED",phase:"await"});assert.equal(actual,calls);
 });

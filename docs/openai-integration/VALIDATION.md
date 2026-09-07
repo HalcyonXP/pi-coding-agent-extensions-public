@@ -40,7 +40,7 @@ Use new absolute output paths and unused sibling `<output>.build-inputs` paths; 
     node distribution/accept.mjs C:/Pi-Builds/extracted
     node distribution/accept-profile.mjs C:/Pi-Builds/extracted
 
-`accept-profile.mjs` also runs the source-only `accept-settings.mjs` against the actual extracted SDK/normal extension: Pi's real SettingsList and native theme, synthetic keyboard input, persistent Fast changes, session switches, filtering, normal/excluded contexts and zero network attempts. The recorded frames are genuine component render output, not a capture of the user's terminal or profile.
+`accept-profile.mjs` also runs the source-only `accept-settings.mjs` against the actual extracted SDK/normal extension: Pi's real SettingsList and native theme, synthetic keyboard input, persistent Fast changes, session switches, filtering, normal/excluded contexts and zero network attempts. The recorded frames are genuine component render output, not a capture of the user's terminal or profile. The consolidated Fast/jobs subcommands and nested native jobs view are exercised too. SDK acceptance deliberately verifies compilation/after-shell guest errors and their bounded diagnostics, plus explicit cancellation of a real owned shell through the common command. These expected negative cases must assert their exact failure/observation shape; they are not failed-gate retries or desktop automation.
 
 These installed checks are separate commands, not extra unit-test counts. Synthetic conversation/auth/HTTP seams must remain labelled synthetic. Genuine SDK/native invocation/process/publication/CLI behavior still runs. Record zero final native active/draining ownership and preserve failed outputs for inspection rather than reusing paths.
 

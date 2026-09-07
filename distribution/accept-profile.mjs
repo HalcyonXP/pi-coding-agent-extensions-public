@@ -33,8 +33,8 @@ async function cli(rolledBack){
  const prompt=async message=>{const before=frames.length;await command({type:"prompt",message});await wait(f=>frames.indexOf(f)>=before&&f.type==="extension_ui_request"&&f.method==="notify");return frames.slice(before).filter(f=>f.type==="extension_ui_request"&&f.method==="notify").map(f=>f.message).join("\n");};
  try{
   const state=await command({type:"get_state"});assert.equal(state.data.model.id,"gpt-6-astra");
-  const commands=await command({type:"get_commands"});assert.ok(commands.data.commands.some(c=>c.name==="fast"),"Fast command retained");
-  assert.match(await prompt(rolledBack?"/fast status":"/fast on"),/Fast mode: ON/,"Fast preference persists across native CLI restart and rollback");
+  const commands=await command({type:"get_commands"});assert.ok(commands.data.commands.some(c=>c.name==="openai-tools"),"Common OpenAI command retained");assert.ok(!commands.data.commands.some(c=>["fast","openai-jobs"].includes(c.name)),"No redundant standalone Fast/jobs commands");
+  assert.match(await prompt(rolledBack?"/openai-tools fast status":"/openai-tools fast on"),/Fast mode: ON/,"Fast preference persists across native CLI restart and rollback");
   const status=await prompt("/openai-tools status");assert.match(status,/native preflight ready/);
   assert.throws(()=>run(process.execPath,[installer,"--rollback",profile],{env}),/EEXIST/,"Active native CLI ownership blocks rollback");
   if(!rolledBack){assert.match(status,/Image generation: enabled/);assert.match(await prompt("/openai-tools code_mode on"),/Code mode: enabled/);}
@@ -52,5 +52,5 @@ run(process.execPath,[installer,"--rollback",profile],{env});assert.equal(sha256
 await cli(true);
 assert.equal(sha256(await readFile(join(profile,"auth.json"))),authBefore);assert.equal(sha256(await readFile(join(originals,"original.bin"))),originalBefore);
 const settingsMenu=JSON.parse(run(process.execPath,[fileURLToPath(new URL("./accept-settings.mjs",import.meta.url)),bundle],{env}));
-assert.equal(settingsMenu.status,"passed");assert.equal(settingsMenu.networkAttempts,0);assert.equal(settingsMenu.normalAndExcludedContexts,true);
+assert.equal(settingsMenu.status,"passed");assert.equal(settingsMenu.networkAttempts,0);assert.equal(settingsMenu.normalAndExcludedContexts,true);assert.equal(settingsMenu.consolidatedJobs,true);assert.equal(settingsMenu.frames.length,10);
 console.log(JSON.stringify({status:"passed",bundle,profile,nativeCli:"actual bundled RPC",rollback:"native exclusions, Fast retained",credentialsCopied:false,hostedRequests:0,settingsAndOriginalsPreserved:true,settingsMenu}));

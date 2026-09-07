@@ -107,7 +107,7 @@ test("uses native OpenAI catalogs without registering or replacing any provider"
 	const { models, runtime, emit, extension, registrations } = await createHarness(t);
 	const before = structuredClone(models.getModels());
 	const providers = models.getProviders();
-	assert.ok(extension.commands.has("fast"));
+	assert.deepEqual([...extension.commands.keys()], ["openai-tools"], "Fast and jobs have no redundant standalone commands");
 	assert.ok(extension.flags.has("fast"));
 	await emit("session_start");
 	await emit("model_select");
@@ -140,10 +140,10 @@ test("does not rewrite cache fields or other upstream payload options", async (t
 			// Deliberately synthetic: even legacy fields are now upstream's responsibility.
 			{ prompt_cache_retention: "24h" },
 		]) {
-			await extension.commands.get("fast").handler("off", ctx);
+			await extension.commands.get("openai-tools").handler("fast off", ctx);
 			const payload = Object.freeze({ model: ctx.model.id, service_tier: "auto", ...cacheFields });
 			assert.equal(await request(payload), payload);
-			await extension.commands.get("fast").handler("on", ctx);
+			await extension.commands.get("openai-tools").handler("fast on", ctx);
 			assert.deepEqual(await request(payload), { ...payload, service_tier: "priority" });
 		}
 	}
@@ -151,7 +151,7 @@ test("does not rewrite cache fields or other upstream payload options", async (t
 
 test("preserves Fast support for Astra, dated aliases, and earlier models without affecting unsupported requests", async (t) => {
 	const { ctx, extension, request } = await createHarness(t);
-	await extension.commands.get("fast").handler("on", ctx);
+	await extension.commands.get("openai-tools").handler("fast on", ctx);
 	for (const [provider, api] of [["openai", "openai-responses"], ["openai-codex", "openai-codex-responses"]]) {
 		for (const id of ["gpt-6-astra", "gpt-6-astra-2026-09-03", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
 			ctx.model = { id, provider, api };
@@ -181,12 +181,12 @@ test("preserves Fast support for Astra, dated aliases, and earlier models withou
 
 test("keeps the agent-wide Fast preference shared across extension instances", async (t) => {
 	const first = await createHarness(t);
-	await first.extension.commands.get("fast").handler("on", first.ctx);
+	await first.extension.commands.get("openai-tools").handler("fast on", first.ctx);
 	assert.deepEqual(JSON.parse(readFileSync(first.statePath, "utf8")), { version: 1, enabled: true });
 	const second = await first.load();
 	await second.emit("session_start");
 	assert.equal((await second.request({ model: astra.id })).service_tier, "priority");
-	await second.extension.commands.get("fast").handler("off", second.ctx);
+	await second.extension.commands.get("openai-tools").handler("fast off", second.ctx);
 	const payload = { model: astra.id };
 	assert.equal(await first.request(payload), payload);
 	assert.deepEqual(JSON.parse(readFileSync(first.statePath, "utf8")), { version: 1, enabled: false });
@@ -223,7 +223,7 @@ test("keeps the shared TUI footer and inline TPS with Fast on or off", async (t)
 	assert.equal(offLines.length, 2);
 	assert.match(offLines[1], /\| 46\.7 tok\/s/);
 	assert.doesNotMatch(offLines[1], /⚡/);
-	await extension.commands.get("fast").handler("on", ctx);
+	await extension.commands.get("openai-tools").handler("fast on", ctx);
 	assert.equal(footers.length, 1, "Retain one footer owner");
 	assert.match(footer.render(160)[1], /⚡.*gpt-6-astra • high/);
 	assert.match(footer.render(40)[1], /46\.7 tok\/s/);
@@ -240,7 +240,7 @@ test("uses upstream cache handling for GPT-5.6 and Astra with no local transport
 		ctx.model = model;
 		for (const cacheRetention of ["none", "short", "long"]) {
 			for (const fast of [false, true]) {
-				await extension.commands.get("fast").handler(fast ? "on" : "off", ctx);
+				await extension.commands.get("openai-tools").handler(fast ? "fast on" : "fast off", ctx);
 				let nativePayload;
 				let captured;
 				const stream = provider.stream(model, context, {
@@ -362,7 +362,7 @@ const uiTick = () => new Promise(resolve => setImmediate(resolve));
 
 test("normal installed entry exposes a shared settings menu and persists Fast without notification spam", async t => {
  const h = await createHarness(t); await h.emit("session_start");
- const opened = captureSettings(h), finished = h.extension.commands.get("fast").handler("", h.ctx), panel = await opened;
+ const opened = captureSettings(h), finished = h.extension.commands.get("openai-tools").handler("fast", h.ctx), panel = await opened;
  assert.match(panel.render(80).join("\n"), /→ Fast mode\s+off/);
  assert.match(panel.render(80).join("\n"), /Image generation/);
  panel.handleInput("\r"); await settledSettings.get(panel);
@@ -379,18 +379,18 @@ test("openai-tools focuses its capability rows and retains RPC/status fallback",
  const opened=captureSettings(h),finished=h.extension.commands.get("openai-tools").handler("",h.ctx),panel=await opened;
  assert.match(panel.render(80).join("\n"),/→ Image generation\s+on/);panel.handleInput("\r");await settledSettings.get(panel);assert.ok(!h.active().includes("imagegen"));
  panel.handleInput("\x1b");await finished;
- h.ctx.ui.custom=()=>{throw Error("Explicit status must not open a modal");};await h.extension.commands.get("fast").handler("status",h.ctx);await h.extension.commands.get("openai-tools").handler("status",h.ctx);
+ h.ctx.ui.custom=()=>{throw Error("Explicit status must not open a modal");};await h.extension.commands.get("openai-tools").handler("fast status",h.ctx);await h.extension.commands.get("openai-tools").handler("status",h.ctx);
  assert.match(h.notifications.at(-1).message,/OpenAI capabilities/);
 });
 
 test("model boundary closes the real entry's settings without applying stale input", async t => {
- const h=await createHarness(t);await h.emit("session_start");const opened=captureSettings(h),finished=h.extension.commands.get("fast").handler("",h.ctx),panel=await opened;
+ const h=await createHarness(t);await h.emit("session_start");const opened=captureSettings(h),finished=h.extension.commands.get("openai-tools").handler("fast",h.ctx),panel=await opened;
  await h.emit("model_select");await finished;panel.handleInput("\r");await uiTick();assert.equal((await h.request({model:astra.id})).service_tier,undefined);
 });
 
 test("Fast menu reports failed persistence inline and never displays false success", async t => {
  const h=await createHarness(t);await h.emit("session_start");mkdirSync(h.statePath);
- const opened=captureSettings(h),finished=h.extension.commands.get("fast").handler("",h.ctx),panel=await opened;
+ const opened=captureSettings(h),finished=h.extension.commands.get("openai-tools").handler("fast",h.ctx),panel=await opened;
  panel.handleInput("\r");await settledSettings.get(panel);const view=panel.render(80).join("\n");assert.match(view,/Change failed/);assert.match(view,/Fast mode\s+off/);assert.equal(h.notifications.length,0);
  panel.handleInput("\x1b");await finished;assert.equal((await h.request({model:astra.id})).service_tier,undefined);
 });

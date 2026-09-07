@@ -28,9 +28,9 @@ Authenticate normally using /login for OpenAI Codex in this **new** profile. No 
 
 Windows Unified exec also requires the verified prebuilt helper. It loads its independent shell Job Object type without invocation-time compilation; this does not add an unrestricted coordinator mode. Missing/corrupt helpers remain unavailable, not a request for the installer/menu to compile or download anything.
 
-In the terminal, `/openai-tools` opens the native-style searchable settings menu; `/fast` opens it focused on Fast. Values and selected-row explanations stay visible while you change settings with Enter/Space. Esc closes without undoing applied changes. Unavailable or rollback-excluded tools stay read-only; their reasons are shown. Route/OAuth/runtime information is passive, not an entitlement probe. Explicit status/on/off commands remain available in every mode.
+In the terminal, `/openai-tools` is the single native searchable menu, including Fast and the owned-jobs view. There are no standalone Fast/jobs commands. `/openai-tools fast` or `/openai-tools jobs` focuses the corresponding row in that same menu. Values and selected-row explanations stay visible while you change settings with Enter/Space. Esc closes without undoing applied changes. Unavailable or rollback-excluded tools stay read-only; their reasons are shown. Route/OAuth/runtime information is passive, not an entitlement probe. Explicit status/on/off subcommands remain available in every mode. The Jobs view is a passive snapshot; cancellation requires confirmation and never undoes completed effects or clears unknown ownership. Refresh resets only the jobs filter; Esc returns to the parent menu.
 
-Those opt-ins reset off on reload/new session. /fast on and /fast status control the separate persistent priority preference. Subscription capability usage, ordinary conversation billing and Fast costs are distinct. User-directed service use is not an automated validation allowance.
+Those opt-ins reset off on reload/new session. /openai-tools fast on and /openai-tools fast status control the separate persistent priority preference. Subscription capability usage, ordinary conversation billing and Fast costs are distinct. User-directed service use is not an automated validation allowance.
 
 ## Rollback and side-by-side updates
 

@@ -8,6 +8,7 @@ import {
 } from "./rpc-protocol.mjs";
 
 import { CELL_LIMITS, CellStore, cellTools, validOperation, operationJSON } from "./cell-protocol.mjs";
+import { cellDiagnostics, validCellDone } from "./cell-diagnostics.mjs";
 
 function launchWorker(entry = "./rpc-worker.mjs") {
   return spawn(process.execPath, ["--max-old-space-size=96", fileURLToPath(new URL(entry, import.meta.url))], {
@@ -45,6 +46,7 @@ export class AsyncRuntimeProbe {
     let child;
     try { child = this.#launch(); } catch { return failure("HOST_FAILED"); }
     const decoder = new FrameDecoder();
+    const diagnostics = cell ? cellDiagnostics() : undefined;
     const tasks = new Set();
     const toolTasks = new Set();
     const timers = new Map();
@@ -80,7 +82,7 @@ export class AsyncRuntimeProbe {
     function accept(frame) {
       if (done || closed) return stop("PROTOCOL_ERROR");
       if (exact(frame, ["type", "result"]) && frame.type === "done") {
-        const parsed = validDone(frame.result) ? frame.result : parseResponse(Buffer.from(JSON.stringify(frame.result)));
+        const parsed = validDone(frame.result) || (cell && validCellDone(frame.result)) ? frame.result : parseResponse(Buffer.from(JSON.stringify(frame.result)));
         if (parsed.code === "PROTOCOL_ERROR") return stop("PROTOCOL_ERROR");
         if (toolTasks.size && parsed.status === "ok") return stop("DETACHED_TOOL");
         done = parsed;
@@ -151,12 +153,15 @@ export class AsyncRuntimeProbe {
       // real host validation/approvals/result hooks and revokes on model/registry changes.
       const task = Promise.resolve().then(async () => {
         if (stopped || done || controller.signal.aborted) return;
+        const observeResult = diagnostics?.begin(frame.name);
         const value = await gateway.invoke(frame.name, frame.args, { signal: controller.signal });
         if (stopped || done || closed || controller.signal.aborted || gateway.signal.aborted) return;
         const json = resultJSON(cell?.evidence ? cell.evidence.project(value) : value);
         resultBytes += Buffer.byteLength(json);
         if (resultBytes > RPC_LIMITS.totalResultBytes) return stop("TOOL_RESULT_LIMIT");
-        send({ type: "reply", id: frame.id, value: JSON.parse(json) });
+        const projected = JSON.parse(json);
+        observeResult?.(projected);
+        send({ type: "reply", id: frame.id, value: projected });
       }).catch((error) => {
         if (!stopped && !done && !closed) stop(error?.message === "TOOL_RESULT_LIMIT" ? "TOOL_RESULT_LIMIT" : "GATEWAY_FAILED");
       }).finally(() => { tasks.delete(task); toolTasks.delete(task); });
@@ -184,7 +189,9 @@ export class AsyncRuntimeProbe {
       await Promise.allSettled([...tasks]);
       for (const source of signals) source.removeEventListener("abort", abort);
       this.#running.delete(entry);
-      finish(stopped ? failure(stopped) : exitCode !== 0 || !done ? failure("HOST_FAILED") : done);
+      const result = stopped ? failure(stopped) : exitCode !== 0 || !done ? failure("HOST_FAILED") : done;
+      // Host-observed delegation summaries are not guest output or side-effect proof.
+      finish(diagnostics && result.status === "error" ? {version:result.version,status:result.status,code:result.code,diagnostics:diagnostics.snapshot(result.phase)} : result);
     });
     if ([...signals].some((source) => source.aborted)) abort();
     if (!stopped) {

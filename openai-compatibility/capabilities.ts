@@ -9,19 +9,21 @@ import { createWebSearchTool, type WebSearchProfile } from "./web-search-tool.ts
 import { subscriptionStatus } from "./subscription.ts";
 import { ToolOwnership } from "./tool-ownership.ts";
 import { CodeMode, createCodeModeTools, toolGatewayInfo } from "./code-mode.ts";
-import type { SettingsRow } from "./settings-menu.ts";
+import type { SettingsRow, JobsController } from "./settings-menu.ts";
 
 /** Trusted composition only, never a model parameter. The normal entry point
  * explicitly selects the D14 verified subset; no profile activates tools by itself.
  */
 export interface CapabilityOptions {
 	webSearch?: { transport: typeof fetch; timeoutMs?: number; profile?: WebSearchProfile };
-	openSettings?: (ctx: ExtensionContext) => Promise<void>;
+	openSettings?: (ctx: ExtensionContext, focus?: string) => Promise<void>;
+	fastCommand?: (args: string, ctx: ExtensionContext) => Promise<void>;
 }
 class CapabilityPreferenceError extends Error {}
 export interface CapabilitySettings {
 	read(ctx: ExtensionContext): Promise<SettingsRow[]>;
 	change(id: string, value: string, ctx: ExtensionContext, signal: AbortSignal): Promise<void>;
+	jobs(ctx: ExtensionContext): JobsController;
 	contextVersion(): number;
 	onBoundary(close: () => void): () => void;
 }
@@ -134,18 +136,14 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			return { content: [{ type: "text", text: "OpenAI result withheld: capability or session authorization changed." }], details: {}, isError: true };
 		}
 	});
-	pi.registerCommand("openai-jobs", {
-		description: "Inspect this session's Unified exec jobs, or cancel <session_id>",
-		async handler(args, ctx) {
-			const [action, id, extra] = args.trim().split(/\s+/);
-			if (action === "cancel" && id && !extra) {
-				try { await processes.cancel(unifiedOwner(ctx), id); ctx.ui.notify("Unified exec job cancelled.", "info"); }
-				catch (error) { ctx.ui.notify((error as Error).message, "warning"); }
-			} else if (!action || action === "status") {
-				ctx.ui.notify(JSON.stringify(processes.inspect(unifiedOwner(ctx)), null, 2), "info");
-			} else ctx.ui.notify("Usage: /openai-jobs [status | cancel <session_id>]", "warning");
-		},
-	});
+	function jobs(ctx: ExtensionContext): JobsController {
+		const version = menuEpoch, owner = unifiedOwner(ctx);
+		const assertCurrent = () => { if (version !== menuEpoch || (current && unifiedOwner(current) !== owner)) throw new Error("Jobs context changed. Reopen OpenAI settings."); };
+		return {
+			read() { assertCurrent(); return processes.inspect(owner); },
+			async cancel(id, signal) { signal.throwIfAborted(); assertCurrent(); await processes.cancel(owner, id); },
+		};
+	}
 	const groups: Record<string, string[]> = { imagegen: ["imagegen"], web_search: ["web_search"], unified_exec: ["exec_command", "write_stdin"], code_mode: ["exec", "wait"] };
 	async function changePreference(name: string, action: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
 		if (!Object.hasOwn(groups, name) || !["on", "off"].includes(action)) throw new CapabilityPreferenceError("Unknown capability setting.");
@@ -195,7 +193,9 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 				description: reason ? `${reason} Session preference: ${names.every(name => enabled.has(name)) ? "on" : "off"}; no tool is enabled by this row.` : descriptions[id], values: reason ? undefined : ["off", "on"] };
 		});
 		const auth = trusted ? subscriptionStatus(ctx) : "Not inspected on an unsupported route.";
+		const ownedJobs = jobs(ctx).read();
 		rows.push(
+			{ id: "jobs", label: "Jobs", value: `${ownedJobs.filter(job => job.running).length} running / ${ownedJobs.length} retained`, values: ["refresh"], description: "Open this session's Unified exec job snapshot; refresh or explicitly cancel an owned job. Cancellation cannot undo completed effects." },
 			{ id: "route", label: "Conversation route", value: trusted ? "official OpenAI" : "unsupported", description: `${ctx.model?.provider ?? "No provider"}/${ctx.model?.id ?? "no model"}. Models/providers remain owned by Pi; change them with Pi's model selector.` },
 			{ id: "subscription", label: "Codex subscription", value: !trusted ? "not inspected" : auth.startsWith("Codex OAuth configured") ? "configured" : auth.startsWith("missing") ? "login required" : "unavailable", description: `${auth}. Opening settings never refreshes credentials or probes service access.` },
 			{ id: "runtime", label: "Code runtime", value: !code.available ? "unavailable" : code.native?.drainingScopes ? "draining" : code.native?.activeScopes === 2 ? "busy" : "ready", description: code.available ? `Verified Windows preflight; launch is checked again. Native scopes: ${code.native?.activeScopes ?? 0} active, ${code.native?.drainingScopes ?? 0} draining / 2. Draining blocks new admission; no fallback.` : codeReasons[code.reason ?? ""] ?? "Compatible native host and verified prebuilt helper required; no runtime download or compiler." },
@@ -203,18 +203,29 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		return rows;
 	}
 	pi.registerCommand("openai-tools", {
-		description: "OpenAI settings, or status / imagegen|unified_exec|web_search|code_mode on|off",
+		description: "OpenAI settings, Fast, capability switches and owned jobs",
 		getArgumentCompletions(prefix) {
-			const values = ["status", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
+			const values = ["status", "fast", "fast on", "fast off", "fast toggle", "fast status", "jobs", "jobs status", "jobs cancel ", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
 			const matches = values.filter(value => value.startsWith(prefix.trim().toLowerCase())).map(value => ({ value, label: value }));
 			return matches.length ? matches : null;
 		},
 		async handler(args, ctx) {
 			if (!args.trim() && ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.custom === "function" && options.openSettings) { await options.openSettings(ctx); return; }
-			const [name, action, extra] = args.trim().split(/\s+/);
+			const [name, action, extra, trailing] = args.trim().split(/\s+/);
+			if (name === "fast" && options.fastCommand) { await options.fastCommand(args.trim().slice(4).trim(), ctx); return; }
+			if (name === "jobs") {
+				if (!action && ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.custom === "function" && options.openSettings) { await options.openSettings(ctx, "jobs"); return; }
+				try {
+					const control = jobs(ctx);
+					if (action === "cancel" && extra && !trailing) { await control.cancel(extra, new AbortController().signal); ctx.ui.notify("Unified exec job cancelled.", "info"); }
+					else if ((!action || action === "status") && !extra) ctx.ui.notify(JSON.stringify(control.read(), null, 2), "info");
+					else ctx.ui.notify("Usage: /openai-tools jobs [status | cancel <session_id>]", "warning");
+				} catch (error) { ctx.ui.notify((error as Error).message, "warning"); }
+				return;
+			}
 			if (name && name !== "status") {
 				if (!["imagegen", "unified_exec", "web_search", "code_mode"].includes(name) || !["on", "off"].includes(action) || extra) {
-					ctx.ui.notify("Usage: /openai-tools status | imagegen|unified_exec|web_search|code_mode on|off", "warning"); return;
+					ctx.ui.notify("Usage: /openai-tools [status | fast on|off|toggle|status | jobs status|cancel <session_id> | imagegen|unified_exec|web_search|code_mode on|off]", "warning"); return;
 				}
 				try { await changePreference(name, action, ctx); }
 				catch (error) { if (!(error instanceof CapabilityPreferenceError)) throw error; ctx.ui.notify(error.message, "warning"); return; }
@@ -235,7 +246,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		},
 	});
 	return {
-		read: readSettings,
+		read: readSettings, jobs,
 		async change(id, value, ctx, signal) {
 			const revision = menuEpoch, rows = await readSettings(ctx);
 			signal.throwIfAborted();

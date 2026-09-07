@@ -3,6 +3,7 @@ import { CellEvidence } from "./evidence.mjs";
 import { WindowsCellRuntime } from "./windows-host.mjs";
 import { CellStore, cellTools } from "./cell-protocol.mjs";
 import { execInput, validYield, validTokens, budgetOutput } from "./cell-input.mjs";
+import { copyCellDiagnostics } from "./cell-diagnostics.mjs";
 
 // owner and signal come from native session/policy composition, never model IDs.
 // runtimeFactory is a trusted offline test seam; normal composition is Windows-contained only.
@@ -65,8 +66,10 @@ export class CodeCells {
       catch { void this.#terminate(cell); notify(); return; }
       if (cell.state === "running" && !scope.signal.aborted && !this.#closed) {
         // The real worker already removes output from its done frame. Keep the
-        // manager boundary status-only too, including trusted test factories.
-        cell.result = {version:result.version,status:result.status,...(result.code ? {code:result.code} : {})};
+        // manager boundary free of raw output too, including trusted test factories.
+        // Only the fixed diagnostic schema may accompany an error.
+        const diagnostics = result.status === "error" ? copyCellDiagnostics(Object.getOwnPropertyDescriptor(result, "diagnostics")?.value) : undefined;
+        cell.result = {version:result.version,status:result.status,...(result.code ? {code:result.code} : {}),...(diagnostics ? {diagnostics} : {})};
         void this.#complete(cell);
       }
       notify();
