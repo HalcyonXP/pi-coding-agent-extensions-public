@@ -3,11 +3,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {readFile} from "node:fs/promises";
+import {execFileSync} from "node:child_process";
+import {fileURLToPath} from "node:url";
+import {shellAcceptanceDiagnostic} from "../acceptance-diagnostics.mjs";
 const read=path=>readFile(new URL("../../"+path,import.meta.url),"utf8");
 test("scoped Apache grants preserve the complete existing license text",async()=>{
- const canonical=await read("openai-compatibility/LICENSE");
+ const canonical=execFileSync("git",["show","HEAD:openai-compatibility/LICENSE"],{cwd:fileURLToPath(new URL("../../",import.meta.url)),encoding:"utf8"});
  for(const dir of ["distribution","docs/openai-integration"]){assert.equal(await read(dir+"/LICENSE"),canonical);assert.match(await read(dir+"/NOTICE"),/Copyright 2026 Project Maintainers/);assert.match(await read(dir+"/NOTICE"),/first-party/);}
  assert.match(await read("README.md"),/scoped grants do not license otherwise unlicensed components/);
+});
+test("scoped grants keep canonical bytes even with Windows autocrlf enabled",async()=>{
+ const cwd=fileURLToPath(new URL("../../",import.meta.url));
+ for(const path of ["distribution/LICENSE","distribution/NOTICE","docs/openai-integration/LICENSE","docs/openai-integration/NOTICE"]){const canonical=execFileSync("git",["show","HEAD:"+path],{cwd});const checkout=execFileSync("git",["-c","core.autocrlf=true","cat-file","--filters","HEAD:"+path],{cwd});assert.deepEqual(checkout,canonical,path);}
+});
+test("shell acceptance diagnostics expose fixed status/code and marker presence only",()=>{
+ const result=JSON.parse(shellAcceptanceDiagnostic({status:"completed",result:{status:"error",code:"WALL_LIMIT",output:["unpublished payload"],path:"unpublished path"}},true));
+ assert.deepEqual(result,{phase:"synthetic-shell-readiness",cellStatus:"completed",resultStatus:"error",code:"WALL_LIMIT",markerRecorded:true});
+ const unknown=shellAcceptanceDiagnostic({status:"unpublished status",result:{status:"unpublished result",code:"unpublished code"}},"unpublished marker");assert.ok(!unknown.includes("unpublished"));assert.equal(JSON.parse(unknown).code,"UNCLASSIFIED");assert.equal(JSON.parse(shellAcceptanceDiagnostic(null)).cellStatus,"unknown");
 });
 test("root distribution license metadata does not change the private prerelease contract",async()=>{
  const pkg=JSON.parse(await read("distribution/locks/package.json")),lock=JSON.parse(await read("distribution/locks/package-lock.json"));

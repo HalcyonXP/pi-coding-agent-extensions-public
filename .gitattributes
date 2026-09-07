@@ -8,3 +8,8 @@ openai-compatibility/runtime/native/*.cs text eol=lf
 openai-compatibility/runtime/native/*.mjs text eol=lf
 host-patches/pi-0.85.1/LICENSE.pi text eol=lf
 openai-compatibility/runtime/native/*.json text eol=lf
+# Installed acceptance compares these scoped grants with canonical source bytes.
+distribution/LICENSE text eol=lf
+distribution/NOTICE text eol=lf
+docs/openai-integration/LICENSE text eol=lf
+docs/openai-integration/NOTICE text eol=lf
