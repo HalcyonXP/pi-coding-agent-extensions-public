@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "name": "cohesive-windows-without-demo-or-install-archives",
+  "roots": [
+    "artifacts",
+    "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay"
+  ],
+  "preservedFiles": [
+    {
+      "path": "artifacts/earendil-works-chord-0.85.1.tgz",
+      "bytes": 180881,
+      "sha256": "c3b983ba3155769b4867f2370205a3efd8da8a0f292e2b6f65fef40d0861c31f"
+    },
+    {
+      "path": "artifacts/earendil-works-pi-agent-core-0.85.1.tgz",
+      "bytes": 682912,
+      "sha256": "0436174a84c3c06c2a28f0cdaf16b030fb2b24865a32e509f39d5dd4e30f8a82"
+    },
+    {
+      "path": "artifacts/earendil-works-pi-ai-0.85.1.tgz",
+      "bytes": 798833,
+      "sha256": "af7d11986179445ce6fe88b37d57de22f823c0ffd3a65cae31c555b7f5e99253"
+    },
+    {
+      "path": "artifacts/earendil-works-pi-coding-agent-0.85.1.tgz",
+      "bytes": 6997088,
+      "sha256": "0b6e47bd388fd2af34e911ccd7912bdaf2915d8d1e5917a71c066df3368573f2"
+    },
+    {
+      "path": "artifacts/earendil-works-pi-telemetry-0.85.1.tgz",
+      "bytes": 27323,
+      "sha256": "22103a32c657ab1f0ca8dd0b3adab48924c56636a5a9ab8b89a43559fb201310"
+    },
+    {
+      "path": "artifacts/earendil-works-pi-tui-0.85.1.tgz",
+      "bytes": 558247,
+      "sha256": "f4b4e8ad9f2910133bede23b1435ccc9df5de035131955cbc2cb308c99886442"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/README.md",
+      "bytes": 1322,
+      "sha256": "e17bc73b76c7977ffeef99120c7896ff992cf5938a60c4d7427a7b19fc180d97"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/doom-component.ts",
+      "bytes": 3645,
+      "sha256": "d95dc47c92db0fdc5b0e0b56a277c67f277012d3f7296df745d8a93f64d5a42e"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/doom-engine.ts",
+      "bytes": 4914,
+      "sha256": "706e43f70bd374b73928e5a44d196d1dd5c03d93979d08bdfc01d049b5083855"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/doom-keys.ts",
+      "bytes": 3495,
+      "sha256": "e8bd99a4ce90dd44ad120c58f3b2ba7bc0b0c662bcdc4ed4994d059130be9fdd"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/doom/build.sh",
+      "bytes": 3366,
+      "sha256": "ab09c9b6dc98ea7c1fa8e74c13981ce69b698c01aec77309c5c7d40ad114d38c"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/doom/build/doom.js",
+      "bytes": 64607,
+      "sha256": "c3147cf4881c88b4210c017c26828f52aff83f0c4db27d7dad3fe6cda9ade1fb"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/doom/build/doom.wasm",
+      "bytes": 380169,
+      "sha256": "571d161956593508cf4ade732ae93753f00484bb526667a8676571cca14dec7d"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/doom/doomgeneric_pi.c",
+      "bytes": 1709,
+      "sha256": "98210909e1e7dee71cbbdba64f1db4bebd88b504e861ee36ea42093c59b251a1"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/index.ts",
+      "bytes": 2117,
+      "sha256": "f89818dd75c7d8970458b1dbb9c5e85fea9b86534fd740c898c1f6f9c9f9ceba"
+    },
+    {
+      "path": "node_modules/@earendil-works/pi-coding-agent/examples/extensions/doom-overlay/wad-finder.ts",
+      "bytes": 1719,
+      "sha256": "20254888262081bf96932253bfd346971deefa48d8df011fd3baa7aa2d653b7d"
+    }
+  ]
+}

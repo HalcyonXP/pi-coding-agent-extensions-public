@@ -1,6 +1,6 @@
 # Integration guide and glossary
 
-This guide describes the public source's implementation and constraints, not an inherited private project's approval history. Read [architecture](ARCHITECTURE.md), [supported/deviating surface](FINAL-ACCEPTANCE.md), [validation](VALIDATION.md), [security](SECURITY.md) and [isolated installation](PRIVATE-RELEASE.md).
+This guide describes the public source's implementation and constraints, not an inherited private project's approval history. Read [architecture](ARCHITECTURE.md), [supported/deviating surface](FINAL-ACCEPTANCE.md), [validation](VALIDATION.md), [security](SECURITY.md), [local preview versus public release](LOCAL-PREVIEW.md) and [isolated installation](PRIVATE-RELEASE.md).
 
 | Term | Agreed meaning |
 | --- | --- |
@@ -17,7 +17,10 @@ This guide describes the public source's implementation and constraints, not an 
 | Public source | This repository's sanitized fresh history and implementation; not old private records, a paid entitlement guarantee or a prebuilt release |
 | Release contract | [Scope, externally trusted pins and delivery gates](RELEASE-CONTRACT.md); not authorization to publish assets |
 | Download pin verification | Offline byte/identity matching against already trusted archive/manifest/source/version pins; not signature verification, archive inspection or installation |
-| Release availability | Authorized assets actually uploaded and downloaded/verified; not source acceptance or an Actions provenance artifact |
+| Local preview ready | Accepted-merge-specific artifact/installed checks and verified new-path local handoff; not a public binary release or redistribution clearance |
+| Release availability | Authorized assets actually uploaded and downloaded/verified; not source acceptance, a local handoff or an Actions provenance artifact |
+| Runtime payload | Manifested files delivered in the immutable archive; not every build input or upstream example |
+| Retained build inputs | Original locked host tarballs and excluded demo files preserved byte-identically beside the build output, outside the delivered archive |
 | Redistribution review | [Actual package, bundled-code and embedded-work coverage](REDISTRIBUTION.md); notice candidates and zero returned advisories are not clearance |
 | Standing project authorization | Delegated in-scope decisions and delivery planning; never a waiver of technical/privacy gates or permission to bypass guards |
 

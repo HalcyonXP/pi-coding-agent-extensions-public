@@ -22,6 +22,7 @@ Public source and a green source check are not a shipping artifact, hosted entit
 - distribution/accept-profile.mjs launches the genuine bundled CLI in isolated profiles, checks Fast across restart, locks/exclusions, documentation and rollback preservation. It makes no model/service call.
 - Two local builds must agree; the exact-source Node 24 CI manifest/archive digest must be compared with supported local reproduction. A source or toolchain change requires new receipts.
 - Source acceptance requires the exact reviewed head/base, all expected hosted checks, a labelled COMMENTED AI-assisted self-review, unchanged closure scope and guarded integration. Self-review is not independent approval. Failed/missing/cancelled/skipped checks are not waived.
-- Release availability additionally needs explicit accepted artifact identity, provenance, upload/download verification and separate authorization. Actions uploads only provenance; it never deploys the executable bundle.
+- A [local preview handoff](LOCAL-PREVIEW.md) additionally needs accepted-merge-specific artifacts, verified copy/extraction and actual installed checks against that extraction. It is not a public upload/download, completed redistribution review or the user's active installation.
+- Public release availability additionally needs explicit accepted artifact identity, provenance, upload/download verification and separate authorization. Actions uploads only provenance; it never deploys the executable bundle.
 
 See [validation commands](VALIDATION.md). No live validation harness, credentials, account-specific response receipts or service-budget claim markers are published here. Routine checks must not invent a new hosted-service allowance or retry a previous private development smoke.
