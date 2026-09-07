@@ -41,7 +41,7 @@ try{
     await until(()=>!panel.render(80).join("\n").includes("applying…"));assert.equal(JSON.parse(await readFile(join(profile,"openai-compatibility.json"),"utf8")).enabled,true);
     assert.match(capture("fast-saved",panel),/→ Fast mode\s+on/);
    };
-   await session.prompt("/fast");assert.equal(notices.length,0,"Menu changes stay inline, not notification spam");
+   await session.prompt("/openai-tools fast");assert.equal(notices.length,0,"Menu changes stay inline, not notification spam");
    drive=async panel=>{
     const before=capture(excluded?"capabilities-excluded":"capabilities-before",panel);
     assert.match(before,/→ Image generation\s+(on|unavailable)/);
@@ -51,9 +51,16 @@ try{
     for(let i=0;i<7;i++)panel.handleInput("\x7f");for(const char of "Code mode")panel.handleInput(char);panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));assert.ok(session.getActiveToolNames().includes("exec"));assert.ok(session.getActiveToolNames().includes("wait"));assert.match(capture("code-enabled",panel),/→ Code mode\s+on/);
    };
    await session.prompt("/openai-tools");assert.ok(session.getActiveToolNames().includes("read"));assert.ok(session.getActiveToolNames().includes("write"));assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
+   drive=async panel=>{
+    assert.match(panel.render(80).map(clean).join("\n"),/→ Jobs/);panel.handleInput("\r");
+    const view=capture(excluded?"jobs-after-exclusions":"jobs-inside-openai",panel);assert.match(view,/Unified exec jobs/);assert.match(view,/Refresh jobs/);assert.doesNotMatch(view,/Job 1/);
+    panel.handleInput("\x1b");await until(()=>!panel.render(80).join("\n").includes("applying…"));assert.match(panel.render(80).map(clean).join("\n"),/→ Jobs/);
+   };
+   await session.prompt("/openai-tools jobs");assert.equal(notices.length,0,"Jobs navigation stays inside the OpenAI menu");
+   await session.prompt("/openai-tools jobs status");assert.equal(notices.at(-1),"[]");
    await session.prompt("/openai-tools status");assert.match(notices.at(-1),/OpenAI capabilities/);
   }finally{await session.extensionRunner.emit("session_shutdown",{});session.dispose();}
  }
  assert.equal(networkAttempts,0);
- console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,sessionOnlyCapabilities:true,noNotificationSpam:true,networkAttempts,frames}));
+ console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,sessionOnlyCapabilities:true,consolidatedJobs:true,noNotificationSpam:true,networkAttempts,frames}));
 }finally{globalThis.fetch=priorFetch;}

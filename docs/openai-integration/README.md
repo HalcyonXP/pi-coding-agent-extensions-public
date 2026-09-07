@@ -23,6 +23,9 @@ This guide describes the public source's implementation and constraints, not an 
 | Runtime payload | Manifested files delivered in the immutable archive; not every build input or upstream example |
 | Retained build inputs | Original locked host tarballs and excluded demo files preserved byte-identically beside the build output, outside the delivered archive |
 | Redistribution review | [Actual package, bundled-code and embedded-work coverage](REDISTRIBUTION.md); notice candidates and zero returned advisories are not clearance |
+| OpenAI controls | One `/openai-tools` entry point with Fast, session capabilities and the nested owned-jobs view; explicit Fast/jobs subcommands retain non-TUI control |
+| Cell diagnostics | Fixed guest phase plus host-observed delegation/result counters and shell categories; not exception text, application success or proof of external effects |
+| Jobs snapshot | Passive same-session process records; cancellation is explicit user control over owned handles, not arbitrary-PID lookup or automatic retry |
 | Settings value | Current saved Fast preference or applicable session tool switch; not service entitlement or native execution authority |
 | Settings availability | Passive route/ownership/preflight snapshot on open/change; unavailable rows explain why and cannot override exclusions |
 | Standing project authorization | Delegated in-scope decisions and delivery planning; never a waiver of technical/privacy gates or permission to bypass guards |

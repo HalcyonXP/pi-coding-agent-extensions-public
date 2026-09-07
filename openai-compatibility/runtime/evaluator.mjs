@@ -9,11 +9,13 @@ import { CELL_LIMITS, validOperation } from "./cell-protocol.mjs";
 
 // cell is a native worker composition seam, never a guest-selected runtime flag.
 export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
+  let phase = "initialize";
+  const fail = code => cell ? {...failure(code), phase} : failure(code);
   let engine;
   try {
     engine = await createEngine();
   } catch {
-    return failure("ENGINE_UNAVAILABLE");
+    return fail("ENGINE_UNAVAILABLE");
   }
 
   const runtime = engine.newRuntime();
@@ -92,10 +94,10 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
         });
       }`, "bootstrap.js", { type: "global" });
       try {
-        if (installer.error) return failure("HOST_FAILED");
+        if (installer.error) return fail("HOST_FAILED");
         const installed = context.callFunction(installer.value, context.undefined, bridge);
         try {
-          if (installed.error) return failure("HOST_FAILED");
+          if (installed.error) return fail("HOST_FAILED");
         } finally {
           installed.dispose();
         }
@@ -143,12 +145,12 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
         return (json) => parse(json);
       }`, "bootstrap.js", { type: "global" });
       try {
-        if (bootstrap.error) return failure("HOST_FAILED");
+        if (bootstrap.error) return fail("HOST_FAILED");
         const names = cell ? context.newString(JSON.stringify(allowedTools)) : context.null;
         try {
           const installed = context.callFunction(bootstrap.value, context.undefined, toolBridge, names);
           try {
-            if (installed.error) return failure("HOST_FAILED");
+            if (installed.error) return fail("HOST_FAILED");
             decode = installed.value.dup();
           } finally { installed.dispose(); }
         } finally { if (cell) names.dispose(); }
@@ -189,20 +191,22 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
       const bootstrap = context.evalCode(CELL_BOOTSTRAP, "cell-bootstrap.js", {type: "global"});
       const names = context.newString(JSON.stringify(allowedTools));
       try {
-        if (bootstrap.error) return failure("HOST_FAILED");
+        if (bootstrap.error) return fail("HOST_FAILED");
         const installed = context.callFunction(bootstrap.value, context.undefined, operation, control, names);
-        try { if (installed.error) return failure("HOST_FAILED"); } finally { installed.dispose(); }
+        try { if (installed.error) return fail("HOST_FAILED"); } finally { installed.dispose(); }
       } finally { bootstrap.dispose(); names.dispose(); operation.dispose(); control.dispose(); }
     }
+    phase = "compile";
     // Compile a body as an argument inside QuickJS, never splice it into a wrapper.
     // Closing delimiters in guest source must not change the outer completion value.
     const constructor = context.evalCode("(async function(){}).constructor", "bootstrap.js", { type: "global" });
     const source = context.newString(code);
     try {
-      if (constructor.error) return failure(fatal ?? "EXECUTION_FAILED");
+      if (constructor.error) return fail(fatal ?? "EXECUTION_FAILED");
       const compiled = context.callFunction(constructor.value, context.undefined, source);
       try {
-        if (compiled.error) return failure(fatal ?? "EXECUTION_FAILED");
+        if (compiled.error) return fail(fatal ?? "EXECUTION_FAILED");
+        phase = "execute";
         evaluation = context.callFunction(compiled.value, context.undefined);
       } finally {
         compiled.dispose();
@@ -211,7 +215,8 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
       source.dispose();
       constructor.dispose();
     }
-    if (evaluation.error) return exited && !fatal ? { version: 1, status: "ok", output } : failure(fatal ?? "EXECUTION_FAILED");
+    if (evaluation.error) return exited && !fatal ? { version: 1, status: "ok", output } : fail(fatal ?? "EXECUTION_FAILED");
+    phase = "await";
     let jobs = 0;
     while (!interrupted()) {
       // A completed root is not a durable owner for detached asynchronous actions.
@@ -220,20 +225,20 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
         if (root.type !== "pending") {
           if (root.type === "rejected") root.error.dispose();
           else if (!root.notAPromise) root.value.dispose();
-          if ([...pendingTools.values()].some(entry => entry.kind === "tool")) return failure("DETACHED_TOOL");
+          if ([...pendingTools.values()].some(entry => entry.kind === "tool")) return fail("DETACHED_TOOL");
           break;
         }
       }
       for (const [id, entry] of pendingTools) {
         if (!entry.settled) continue;
-        if (entry.error) return failure("GATEWAY_FAILED");
+        if (entry.error) return fail("GATEWAY_FAILED");
         if (typeof entry.json !== "string" || Buffer.byteLength(entry.json) > RPC_LIMITS.resultBytes) {
-          return failure("TOOL_RESULT_LIMIT");
+          return fail("TOOL_RESULT_LIMIT");
         }
         const json = context.newString(entry.json);
         const decoded = context.callFunction(decode, context.undefined, json);
         try {
-          if (decoded.error) return failure(fatal ?? "EXECUTION_FAILED");
+          if (decoded.error) return fail(fatal ?? "EXECUTION_FAILED");
           entry.deferred.resolve(decoded.value);
         } finally { decoded.dispose(); json.dispose(); entry.deferred.dispose(); }
         pendingTools.delete(id);
@@ -242,7 +247,7 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
         if (++jobs > LIMITS.jobs) { fatal = "EXECUTION_LIMIT"; break; }
         const pending = runtime.executePendingJobs(1);
         try {
-          if (pending.error) return exited && !fatal ? {version: 1, status: "ok", output} : failure(fatal ?? "EXECUTION_FAILED");
+          if (pending.error) return exited && !fatal ? {version: 1, status: "ok", output} : fail(fatal ?? "EXECUTION_FAILED");
         } finally { pending.dispose(); }
         continue;
       }
@@ -260,21 +265,21 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
       wake = undefined;
       deadline += performance.now() - idleStart;
     }
-    if (fatal) return failure(fatal);
+    if (fatal) return fail(fatal);
     if (exited) return { version: 1, status: "ok", output };
     const state = context.getPromiseState(evaluation.value);
-    if (state.type === "pending") return failure("PENDING_PROMISE");
+    if (state.type === "pending") return fail("PENDING_PROMISE");
     if (state.type === "rejected") {
       state.error.dispose();
-      return failure("EXECUTION_FAILED");
+      return fail("EXECUTION_FAILED");
     }
     // For non-Promises the API returns the original handle, not a fresh owned value.
-    if (state.notAPromise) return failure("EXECUTION_FAILED");
+    if (state.notAPromise) return fail("EXECUTION_FAILED");
     state.value.dispose();
     return { version: 1, status: "ok", output };
   } catch {
     // Never serialize guest exceptions, dependency paths, stderr, source, or host stacks.
-    return failure(fatal ?? "EXECUTION_FAILED");
+    return fail(fatal ?? "EXECUTION_FAILED");
   } finally {
     wake = undefined;
     for (const entry of pendingTools.values()) entry.deferred.dispose();

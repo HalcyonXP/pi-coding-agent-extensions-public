@@ -1,9 +1,10 @@
+import type { CellDiagnostics } from "./cell-diagnostics.mjs";
 export interface CellOutcome {
 	cell_id: string;
 	status: "running" | "draining" | "completed" | "terminated";
 	output: string[];
 	omitted_output_bytes?: number;
-	result?: { version: number; status: string; code?: string };
+	result?: { version: number; status: string; code?: string; diagnostics?: CellDiagnostics };
 }
 // Types do not establish native authority. Runtime checks require genuine
 // invocation/scopes, original context identity and native owned resource drain.

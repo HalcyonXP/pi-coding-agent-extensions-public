@@ -319,7 +319,8 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 	// and neither requests a service nor changes global/user settings.
 	const capabilitySettings = registerCapabilities(pi, withFileMutationQueue, {
 		webSearch: { transport: fetch, profile: "verified-v1" },
-		openSettings: ctx => openSettings(ctx, "imagegen"),
+		openSettings: (ctx, focus) => openSettings(ctx, focus ?? "imagegen"),
+		fastCommand: (args, ctx) => fastCommand(args, ctx),
 	});
 
 	const statePath = getFastModeStatePath();
@@ -512,10 +513,11 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 				description: `Saved for this Pi profile. Priority processing may increase usage or cost. ${isFastCapableModel(ctx.model) ? fastActive(ctx) ? "Active on this model." : "Off; this model supports Fast." : `Inactive for ${modelLabel(ctx)}; the saved preference is kept.`}` }, ...rows];
 		};
 		await showOpenAISettings(ctx, {
-			read, isCurrent, onBoundary: capabilitySettings.onBoundary,
+			read, isCurrent, onBoundary: capabilitySettings.onBoundary, jobs: capabilitySettings.jobs(ctx),
 			async change(id, value, signal) {
 				signal.throwIfAborted();
 				if (!isCurrent()) throw new Error("Settings context changed. Reopen the menu.");
+				if (id === "jobs") { if (value !== "refresh") throw new Error("Invalid jobs action."); return "Jobs snapshot refreshed; no job was launched."; }
 				if (id === "fast") {
 					if (!["on", "off"].includes(value)) throw new Error("Invalid Fast preference.");
 					const messages: string[] = [];
@@ -528,16 +530,7 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 		}, focus);
 	};
 
-	pi.registerCommand("fast", {
-		description: "Open OpenAI settings at Fast mode, or set on/off/toggle/status",
-		getArgumentCompletions: (prefix) => {
-			const values = ["on", "off", "toggle", "status"];
-			const matches = values
-				.filter((value) => value.startsWith(prefix.trim().toLowerCase()))
-				.map((value) => ({ value, label: value }));
-			return matches.length > 0 ? matches : null;
-		},
-		handler: async (args, ctx) => {
+	const fastCommand = async (args: string, ctx: ExtensionContext): Promise<void> => {
 			refreshSharedState(ctx);
 			const action = args.trim().toLowerCase();
 
@@ -566,10 +559,9 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 					reportStatus(ctx);
 					break;
 				default:
-					ctx.ui.notify("Usage: /fast [on|off|toggle|status]", "warning");
+					ctx.ui.notify("Usage: /openai-tools fast [on|off|toggle|status]", "warning");
 			}
-		},
-	});
+	};
 
 	pi.on("before_provider_request", (event, ctx) => {
 		refreshSharedState(ctx);

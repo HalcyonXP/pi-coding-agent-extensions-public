@@ -1739,7 +1739,7 @@ it("ported native host loads the cohesive entry, native Astra, provider policy a
 			},
 		});
 		expect(harness.session.getActiveToolNames()).toEqual(expect.arrayContaining(["ordinary", "imagegen"]));
-		await harness.session.prompt("/fast on");
+		await harness.session.prompt("/openai-tools fast on");
 		expect(await harness.session.extensionRunner.emitBeforeProviderRequest({ fixture: true })).toEqual({
 			fixture: true,
 			service_tier: "priority",
@@ -1958,7 +1958,7 @@ describe("returned Unified exec jobs are native-owned after real cell handlers r
 					});
 					expect(outcomes.at(-1)).toMatchObject({ status: "completed", result: { status: "ok" } });
 					expect(processAlive(info!.pid)).toBe(true);
-					if (mode === "direct-to-cell") await harness.session.prompt(`/openai-jobs cancel ${jobId}`);
+					if (mode === "direct-to-cell") await harness.session.prompt(`/openai-tools jobs cancel ${jobId}`);
 					else await invoke({ cell_id: firstCell, terminate: true });
 				} else if (mode === "cancel") await invoke({ cell_id: firstCell, terminate: true });
 				else if (mode === "provider") {

@@ -245,7 +245,7 @@ export class UnifiedExecManager {
 	}
 	inspect(owner: string) {
 		return [...this.processes.values()].filter((record) => record.owner === owner && (!record.revoked || !record.closed))
-			.map((record) => ({ session_id: record.id, cleanup_pending: Boolean(record.revoked && !record.closed), ownership: record.access?.scope ? "cell" : "conversation", pid: record.child.pid, running: !record.closed, buffered_bytes: record.output.byteLength, age_seconds: Math.floor((Date.now() - record.created) / 1000) }));
+			.map((record) => ({ session_id: record.id, cleanup_pending: Boolean(!record.closed && (record.revoked || record.stop)), ownership: record.access?.scope ? "cell" : "conversation", pid: record.child.pid, running: !record.closed, buffered_bytes: record.output.byteLength, age_seconds: Math.floor((Date.now() - record.created) / 1000) }));
 	}
 	async cancel(owner: string, id: string): Promise<void> {
 		// Explicit user control may cancel a same-conversation cell job; model-facing
