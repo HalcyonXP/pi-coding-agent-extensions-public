@@ -9,3 +9,18 @@ This is a public source repository, not the active Pi installation. Develop and 
 - Public Git history uses a non-personal maintainer identity. Do not publish personal email, machine-specific paths, private records, credentials, local receipts or user artwork. See PUBLICATION.md.
 - Require exact-head checks and a labelled COMMENTED AI-assisted self-review before guarded integration. A self-review is not independent approval; local tests do not replace hosted CI or installed-artifact acceptance.
 - Never use a default server-side merge that can select a personal account email. Verify every new commit's author/committer before upload, including merges. No automatic release/deployment from Actions.
+
+## Canonical development target and local guards
+
+- Develop only in the fresh public repository: https://github.com/HalcyonXP/pi-coding-agent-extensions-public (GitHub repository ID `R_kgDOUQewAQ`). Before edits, confirm the Git worktree/common directory, exact origin, repository identity and non-personal commit identity. Folder names alone are not authority.
+- Installation and private-history checkouts are not development targets. Never repoint an old checkout to this public origin or import its Git history. Use feature branches and retain the existing exact-head review/CI/integration gates.
+- Maintainer-local accident guards may be installed under the Git common directory's `workspace-guard/`. They are local configuration, not a portable sandbox or inherited protection for fresh clones. When present, run the preflight before work and use its explicitly scoped GitHub wrapper:
+
+```powershell
+$guard = Join-Path (git rev-parse --path-format=absolute --git-common-dir) 'workspace-guard/guard.mjs'
+node $guard preflight --online
+node $guard github pr view 1
+```
+
+- The local commit hooks check identity/staged privacy; push hooks check destination, available history and pinned secret scans. GitHub wrapper operations pin this repository and refuse repository overrides, URL selectors, raw API/admin, server-side merge, release and deployment commands. These checks do not supply review/CI approval or authorize integration.
+- A new clone does not inherit local hooks. Establish equivalent safeguards before writes; do not interpret a missing hook as permission to skip repository, identity, privacy or acceptance checks. Pinned local validators require deliberate maintenance after reviewed updates, not automatic replacement with unreviewed source.
