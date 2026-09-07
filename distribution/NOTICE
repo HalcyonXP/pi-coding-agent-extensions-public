@@ -1,0 +1,8 @@
+Pi OpenAI distribution tooling
+Copyright 2026 Project Maintainers
+
+Original first-party tooling, tests, documentation and root package/lock
+metadata in distribution/ are licensed under the Apache License, Version 2.0.
+See LICENSE. This grant does not relicense the referenced or bundled packages,
+upstream host, compiler/reference inputs, or other repository components.
+Their applicable licenses and required notices remain in force.

@@ -1,3 +1,5 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
 // Actual installed-package acceptance. Synthetic conversation/auth/HTTP only;
 // real resource loading, native AgentSession, contained worker and shell processes.
 import assert from "node:assert/strict";

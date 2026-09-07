@@ -1,3 +1,5 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
 // Private Windows distribution only. Never deploys, publishes or edits an active profile.
 import assert from "node:assert/strict";
 import {readFile,writeFile,mkdir,copyFile,rm,mkdtemp} from "node:fs/promises";
@@ -44,7 +46,7 @@ const selected=git(["ls-files","-z","--","openai-compatibility"]).split("\0").fi
 for(const path of selected)await copySource(path,join(out,"extensions",path));
 const nativeDestination=join(out,"extensions","openai-compatibility","runtime","native","bin",native.directory.split(/[\\/]/).filter(Boolean).at(-1));await mkdir(nativeDestination,{recursive:true});
 await copyFile(native.executable,join(nativeDestination,"WindowsRuntime.exe"));await copyFile(native.manifest,join(nativeDestination,"manifest.json"));
-for(const path of ["distribution/lib.mjs","distribution/launch.mjs","distribution/install.mjs","distribution/README.md","host-patches/pi-0.85.1/LICENSE.pi","host-patches/pi-0.85.1/provenance.json","host-patches/pi-0.85.1/parent-bound-invocation.patch"])await copySource(path,join(out,path));
+for(const path of ["distribution/lib.mjs","distribution/launch.mjs","distribution/install.mjs","distribution/README.md","distribution/LICENSE","distribution/NOTICE","docs/openai-integration/LICENSE","docs/openai-integration/NOTICE","host-patches/pi-0.85.1/LICENSE.pi","host-patches/pi-0.85.1/provenance.json","host-patches/pi-0.85.1/parent-bound-invocation.patch"])await copySource(path,join(out,path));
 // Include canonical offline installation/acceptance/contracts, not just links to
 // repository-only guides. No generated concept images or local receipts/auth.
 const documents=git(["ls-files","-z","--","docs/openai-integration/*.md"]).split("\0").filter(Boolean);

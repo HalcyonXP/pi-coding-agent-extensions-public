@@ -8,7 +8,7 @@ Windows x64, existing Node 24 or 25, .NET Framework 4.8, and native Windows Powe
 
 Build only a clean committed snapshot using the [validation/build procedure](VALIDATION.md). Keep each output directory new; verify canonical source/patch/catalog/license/lock/compiler/helper provenance, relocated build equality, real tar extraction, both installed acceptance commands and exact-source hosted checks. Record the source commit and its own manifest/archive SHA-256; never reuse another source's digest or review as this one.
 
-If a maintainer later publishes accepted assets, verify archive/hash/manifest/source/receipt association and downloaded bytes before use. Hashes provide integrity, not independent approval or authenticity against hostile installed JavaScript. No automatic executable publication occurs in Actions.
+If a maintainer later publishes accepted assets, follow the [release contract and pre-execution verification procedure](RELEASE-CONTRACT.md) before extracting or running any downloaded code. Obtain the expected archive/manifest/source/version pins together from independently trusted public acceptance records, not solely from the same unverified download. Hashes provide integrity relative to that trust decision, not a signature, independent approval or protection against hostile installed JavaScript. No automatic executable publication occurs in Actions.
 
 ## New isolated profile
 
