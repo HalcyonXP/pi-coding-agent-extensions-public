@@ -23,7 +23,9 @@ run("Cohesive extension (network guarded)", join(root, "openai-compatibility"), 
 run("Native/extension CLI catalog equality (isolated, network guarded)", root, [".github/scripts/check-catalog.mjs"]);
 run("Strict extension typecheck", join(root, "openai-compatibility"), ["node_modules/typescript/bin/tsc", "--noEmit", "-p", "tsconfig.json"]);
 if (process.platform === "win32" && process.arch === "x64") run("Offline native helper build/verification", root, ["openai-compatibility/runtime/native/build.mjs"]);
-run("Restricted runtime", join(root, "experiments", "code-mode-runtime"), ["--test", "test/*.test.mjs"]);
+// File-level isolation prevents independent OS/CPU/memory stress fixtures from
+// competing for one another's fixed wall watchdogs. In-file concurrency tests remain.
+run("Restricted runtime", join(root, "experiments", "code-mode-runtime"), ["--test", "--test-concurrency=1", "test/*.test.mjs"]);
 run("Canonical runtime syntax", join(root, "openai-compatibility", "runtime"), ["check.mjs"]);
 if (args.includes("--host")) {
   // An existing provenance-checked fixture is required. Never clone over or repatch user work.
