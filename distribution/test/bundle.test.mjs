@@ -1,3 +1,5 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
 import assert from "node:assert/strict";
 import test from "node:test";
 import {mkdtemp,writeFile,readFile,mkdir,rm,utimes,cp,symlink} from "node:fs/promises";

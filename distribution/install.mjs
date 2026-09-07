@@ -1,3 +1,5 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
 // Opt-in isolated profile creation/rollback only. No global install/settings/auth edits.
 import assert from "node:assert/strict";
 import {readFile,writeFile,mkdir} from "node:fs/promises";

@@ -1,3 +1,5 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
 // Genuine bundled CLI/RPC and actual installer/rollback. No model/service requests.
 import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
@@ -11,6 +13,9 @@ import {verifyBundle,run,sha256} from "./lib.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32","Usage: node distribution/accept-profile.mjs <Windows bundle>");
 const bundle=resolve(process.argv[2]);await verifyBundle(bundle);
 const guide=await readFile(join(bundle,"docs","openai-integration","PRIVATE-RELEASE.md"),"utf8");assert.match(guide,/0\.3\.0-private\.1/);assert.match(guide,/--rollback/);assert.match(await readFile(join(bundle,"docs","openai-integration","FINAL-ACCEPTANCE.md"),"utf8"),/Explicit supported surface and deviations/);
+assert.match(await readFile(join(bundle,"docs","openai-integration","RELEASE-CONTRACT.md"),"utf8"),/download-pins-matched-not-installed/);
+for(const path of ["distribution/LICENSE","distribution/NOTICE","docs/openai-integration/LICENSE","docs/openai-integration/NOTICE"])assert.deepEqual(await readFile(join(bundle,path)),await readFile(new URL("../"+path,import.meta.url)),"Installed scoped license/notice must match canonical source");
+assert.equal(existsSync(join(bundle,"distribution","verify-download.mjs")),false,"Pre-execution verifier must come from independently trusted source, not the unverified bundle");
 const directory=await mkdtemp(join(tmpdir(),"pi profile acceptance ")),profile=join(directory,"isolated profile"),installer=join(bundle,"distribution","install.mjs"),launcher=join(bundle,"distribution","launch.mjs");
 const env={...process.env,PI_OFFLINE:"1",PI_TELEMETRY:"0"};
 run(process.execPath,[installer,"--create",profile],{env});assert.throws(()=>run(process.execPath,[installer,"--create",profile],{env}),/existing profile/);

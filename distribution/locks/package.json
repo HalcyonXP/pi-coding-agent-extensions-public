@@ -2,6 +2,7 @@
   "name": "pi-openai-private-windows",
   "version": "0.3.0-private.1",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "file:./artifacts/earendil-works-pi-coding-agent-0.85.1.tgz",

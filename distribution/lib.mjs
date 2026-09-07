@@ -1,3 +1,5 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFile,readdir,lstat,writeFile,mkdir} from "node:fs/promises";
