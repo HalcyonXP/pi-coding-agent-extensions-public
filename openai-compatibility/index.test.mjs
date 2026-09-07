@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -342,4 +342,51 @@ test("unrelated conversational overrides remain registered and do not disable of
 	assert.equal(h.registry.getRegisteredProviderConfig("unrelated-fixture"), override);
 	assert.ok(h.models.getModel("unrelated-fixture", "fixture"));
 	assert.deepEqual(h.active(), ["read", "powershell", "imagegen"]);
+});
+
+async function captureSettings(h) {
+ h.ctx.mode = "tui"; h.ctx.hasUI = true;
+ let capture; const opened = new Promise(resolve => { capture = resolve; });
+ h.ctx.ui.select = () => { throw Error("Retired action picker must not be used"); };
+ h.ctx.ui.custom = async factory => new Promise(resolve => {
+  const component = factory({ requestRender() {} }, h.ctx.ui.theme, {}, () => { component.dispose?.(); resolve(); });
+  capture(component);
+ });
+ return opened;
+}
+const uiTick = () => new Promise(resolve => setImmediate(resolve));
+
+test("normal installed entry exposes a shared settings menu and persists Fast without notification spam", async t => {
+ const h = await createHarness(t); await h.emit("session_start");
+ const opened = captureSettings(h), finished = h.extension.commands.get("fast").handler("", h.ctx), panel = await opened;
+ assert.match(panel.render(80).join("\n"), /→ Fast mode\s+off/);
+ assert.match(panel.render(80).join("\n"), /Image generation/);
+ panel.handleInput("\r"); await uiTick();
+ assert.equal(JSON.parse(readFileSync(h.statePath,"utf8")).enabled,true);
+ assert.match(panel.render(80).join("\n"), /Fast mode\s+on/);
+ assert.equal(h.notifications.length,0);
+ panel.handleInput("\x1b"); await finished;
+ assert.equal((await h.request({model:astra.id})).service_tier,"priority");
+});
+
+test("openai-tools focuses its capability rows and retains RPC/status fallback", async t => {
+ const h=await createHarness(t);await h.emit("session_start");
+ await h.extension.commands.get("openai-tools").handler("",h.ctx);assert.match(h.notifications.at(-1).message,/OpenAI capabilities/);
+ const opened=captureSettings(h),finished=h.extension.commands.get("openai-tools").handler("",h.ctx),panel=await opened;
+ assert.match(panel.render(80).join("\n"),/→ Image generation\s+on/);panel.handleInput("\r");await uiTick();assert.ok(!h.active().includes("imagegen"));
+ panel.handleInput("\x1b");await finished;
+ h.ctx.ui.custom=()=>{throw Error("Explicit status must not open a modal");};await h.extension.commands.get("fast").handler("status",h.ctx);await h.extension.commands.get("openai-tools").handler("status",h.ctx);
+ assert.match(h.notifications.at(-1).message,/OpenAI capabilities/);
+});
+
+test("model boundary closes the real entry's settings without applying stale input", async t => {
+ const h=await createHarness(t);await h.emit("session_start");const opened=captureSettings(h),finished=h.extension.commands.get("fast").handler("",h.ctx),panel=await opened;
+ await h.emit("model_select");await finished;panel.handleInput("\r");await uiTick();assert.equal((await h.request({model:astra.id})).service_tier,undefined);
+});
+
+test("Fast menu reports failed persistence inline and never displays false success", async t => {
+ const h=await createHarness(t);await h.emit("session_start");mkdirSync(h.statePath);
+ const opened=captureSettings(h),finished=h.extension.commands.get("fast").handler("",h.ctx),panel=await opened;
+ panel.handleInput("\r");await uiTick();const view=panel.render(80).join("\n");assert.match(view,/Change failed/);assert.match(view,/Fast mode\s+off/);assert.equal(h.notifications.length,0);
+ panel.handleInput("\x1b");await finished;assert.equal((await h.request({model:astra.id})).service_tier,undefined);
 });
