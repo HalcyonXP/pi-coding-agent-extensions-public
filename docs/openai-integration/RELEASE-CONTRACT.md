@@ -2,6 +2,8 @@
 
 This contract covers the cohesive OpenAI extension, compatible patched Pi host, locked runtime dependencies and verified prebuilt helper in a Windows x64 bundle. It does **not** release every extension in the source repository or announce available binaries. `0.3.0-private.1` is the selected first unsigned technical-preview label, not an existing tag or promise of immediate delivery. Stable private package/host names identify the non-upstream variant; they are not a development destination or visibility claim.
 
+The immediate maintainer-installation target is a [verified local Windows technical preview](LOCAL-PREVIEW.md). Public binary release is not its prerequisite. A local handoff still requires accepted-merge-specific artifacts, pre-execution byte verification and fresh extracted installed acceptance, but must not be labelled uploaded/downloaded release availability or completed redistribution clearance. The user's active installation and credentials remain untouched.
+
 ## Scope and remaining gates
 
 Windows x64, existing Node 24/25 and .NET Framework 4.8 remain required. The selected host is the compatible patched Pi 0.85.1, not stock Pi or an official upstream binary. Preserve native models/providers, ordinary tools, Fast/footer, immutable originals and native ownership. Restricted coordinator JavaScript does not sandbox deliberately delegated full-OS commands. No runtime download/compiler, portable or unrestricted fallback.

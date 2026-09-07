@@ -35,7 +35,7 @@ From a clean committed Windows source snapshot and its prepared host:
     node distribution/build.mjs --host .pi/host-rpc-checkout --out C:/Pi-Builds/bundle-a
     node distribution/build.mjs --host .pi/host-rpc-checkout --out C:/Pi-Builds/bundle-b
 
-Use new absolute output paths; compare complete archive and manifest hashes. Extract an archive with real tar into a new directory (also test a path containing spaces), then:
+Use new absolute output paths and unused sibling `<output>.build-inputs` paths; compare complete archive and manifest hashes. The latter directories retain original locked tarballs and the excluded DOOM example, not release assets. Curation checks their exact file/byte/hash policy and byte-identical retention without altering the native patch or consumer lock. Do not include these directories in the runtime archive or any upload allowlist. Both installed commands also verify the packaged policy, curation record, and absence of the excluded demo and archive candidates. Extract an archive with real tar into a new directory (also test a path containing spaces), then:
 
     node distribution/accept.mjs C:/Pi-Builds/extracted
     node distribution/accept-profile.mjs C:/Pi-Builds/extracted
