@@ -23,14 +23,14 @@ const observerSnapshots=new WeakMap();
 // Observe genuine native events, never guest-emitted diagnostics. Only fixed-field
 // summaries are retained; no args, command, IDs, output, exception text or paths.
 export function createShellObserver(){
- let starts=0,ends=0,last={operation:"none",toolError:null,running:null,exitCode:null,termination:"none",hadOutput:false};
+ let starts=0,ends=0,last={operation:"none",toolError:null,running:null,supervisorReady:null,exitCode:null,termination:"none",hadOutput:false};
  const observer={
   observe(event){
    if(!["exec_command","write_stdin"].includes(event?.toolName))return;
    if(event.type==="tool_execution_start"){starts=Math.min(starts+1,65);return;}
    if(event.type!=="tool_execution_end")return;
    ends=Math.min(ends+1,65);const d=event.result?.details;
-   last={operation:event.toolName==="exec_command"?"launch":"poll",toolError:typeof event.isError==="boolean"?event.isError:null,running:typeof d?.running==="boolean"?d.running:null,exitCode:Number.isInteger(d?.exit_code)&&d.exit_code>=-2147483648&&d.exit_code<=2147483647?d.exit_code:null,termination:d?.termination===undefined?"none":terminationKinds.get(d.termination)??"other",hadOutput:typeof d?.output==="string"&&d.output.length>0};
+   last={operation:event.toolName==="exec_command"?"launch":"poll",toolError:typeof event.isError==="boolean"?event.isError:null,running:typeof d?.running==="boolean"?d.running:null,supervisorReady:typeof d?.supervisor_ready==="boolean"?d.supervisor_ready:null,exitCode:Number.isInteger(d?.exit_code)&&d.exit_code>=-2147483648&&d.exit_code<=2147483647?d.exit_code:null,termination:d?.termination===undefined?"none":terminationKinds.get(d.termination)??"other",hadOutput:typeof d?.output==="string"&&d.output.length>0};
   },
   snapshot(){return {starts,ends,...last};},
  };

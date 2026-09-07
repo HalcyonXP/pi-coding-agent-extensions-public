@@ -80,9 +80,10 @@ test("unsupported routes are explained without probing subscription authenticati
 	const h=harness(tmpdir());try{await h.emit("session_start");h.ctx.model={...h.ctx.model!,provider:"other"};await h.emit("model_select");const rows=await h.settings.read(h.ctx);assert.equal(rows.find(r=>r.id==="subscription")!.value,"not inspected");assert.equal(rows.find(r=>r.id==="imagegen")!.values,undefined);assert.equal(h.authCalls(),0);}finally{await h.emit("session_shutdown");}
 });
 test("delayed native preflight cannot enable Code mode after menu close",async(t)=>{
-	const h=harness(tmpdir());(h.ctx as any).toolGatewayInfo={version:1,protectedResults:true,activeScopes:0,drainingScopes:0,maxScopes:2};let resolve!:()=>void;let calls=0;
-	t.mock.method(CodeMode.prototype,"status",async()=>{if(++calls===2)await new Promise<void>(r=>{resolve=r;});return {available:true,native:(h.ctx as any).toolGatewayInfo};});
-	try{await h.emit("session_start");const abort=new AbortController();const changing=h.settings.change("code_mode","on",h.ctx,abort.signal);await tick();abort.abort();resolve();await assert.rejects(changing,/aborted/);assert.ok(!h.active().includes("exec"));}finally{await h.emit("session_shutdown");}
+	const h=harness(tmpdir());(h.ctx as any).toolGatewayInfo={version:1,protectedResults:true,activeScopes:0,drainingScopes:0,maxScopes:2};let resolve!:()=>void,entered!:()=>void;let calls=0;
+	const preflight=new Promise<void>(r=>{entered=r;});
+	t.mock.method(CodeMode.prototype,"status",async()=>{if(++calls===2)await new Promise<void>(r=>{resolve=r;entered();});return {available:true,native:(h.ctx as any).toolGatewayInfo};});
+	try{await h.emit("session_start");const abort=new AbortController();const changing=h.settings.change("code_mode","on",h.ctx,abort.signal);await preflight;abort.abort();resolve();await assert.rejects(changing,/aborted/);assert.ok(!h.active().includes("exec"));}finally{await h.emit("session_shutdown");}
 });
 test("native draining status is not mislabeled ready",async(t)=>{
 	const h=harness(tmpdir());t.mock.method(CodeMode.prototype,"status",async()=>({available:true,native:{version:1,protectedResults:true,activeScopes:0,drainingScopes:1,maxScopes:2}}));try{await h.emit("session_start");assert.equal((await h.settings.read(h.ctx)).find(r=>r.id==="runtime")!.value,"draining");}finally{await h.emit("session_shutdown");}

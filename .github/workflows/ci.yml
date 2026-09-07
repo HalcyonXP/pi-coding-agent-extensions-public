@@ -45,6 +45,12 @@ jobs:
           tokens-per-second/core.test.mjs
           tokens-per-second/index.test.mjs
           tokens-per-second/reasoning-rates.test.mjs
+      - name: Acquire pinned compiler/reference build inputs (Windows only)
+        if: runner.os == 'Windows'
+        run: node .github/scripts/prepare-native-compiler.mjs
+      - name: Build verified helper offline before Windows shell tests
+        if: runner.os == 'Windows'
+        run: node openai-compatibility/runtime/native/build.mjs
       - name: Test OpenAI integration (offline mocks)
         run: npm test --prefix openai-compatibility
       - name: Type-check OpenAI integration

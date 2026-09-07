@@ -8,6 +8,7 @@ import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding
 import { Type } from "typebox";
 import type { CapabilityLease } from "./capability-policy.ts";
 import { Utf8OutputBuffer } from "./utf8-output.ts";
+import { verifiedExecutable } from "./runtime/native/artifact.mjs";
 
 const MAX_PROCESSES = 4;
 const MAX_RETAINED = 8;
@@ -16,13 +17,24 @@ const MAX_LIFETIME = 10 * 60_000;
 const IDLE_TIMEOUT = 5 * 60_000;
 export interface Launch { executable: string; args: string[]; supervised?: boolean }
 
-export function nativeShell(command: string): Launch {
+async function shellHelper(): Promise<string> {
+	if (process.arch !== "x64") throw new Error("Windows Unified exec requires x64 and the verified prebuilt helper.");
+	try { return await verifiedExecutable(); }
+	catch { throw new Error("Windows Unified exec requires the verified prebuilt helper. No invocation-time compiler or fallback."); }
+}
+/** Passive artifact inspection, not process launch, native authority or command readiness. */
+export async function nativeShellStatus(): Promise<{ available: boolean; reason?: string }> {
+	if (process.platform !== "win32") return { available: true };
+	try { await shellHelper(); return { available: true }; }
+	catch { return { available: false, reason: "Verified prebuilt Windows x64 helper required; no compiler or fallback." }; }
+}
+export async function nativeShell(command: string): Promise<Launch> {
 	if (process.platform !== "win32") return { executable: "/bin/sh", args: ["-c", command] };
 	const pwsh = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "PowerShell", "7", "pwsh.exe");
 	const shell = existsSync(pwsh) ? pwsh : path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 	const encoded = Buffer.from(command).toString("base64");
 	if (encoded.length > 24_000) throw new Error("Command exceeds the Windows launch budget; use an existing script file for larger commands.");
-	return { executable: shell, supervised: true, args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", fileURLToPath(new URL("./native/windows-job.ps1", import.meta.url)), "-ParentProcessId", String(process.pid), "-CommandBase64", encoded] };
+	return { executable: shell, supervised: true, args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", fileURLToPath(new URL("./native/windows-job.ps1", import.meta.url)), "-ParentProcessId", String(process.pid), "-VerifiedHelperPath", await shellHelper(), "-CommandBase64", encoded] };
 }
 
 export interface NativeJobScope {
@@ -44,6 +56,7 @@ interface ProcessRecord {
 	termination?: string;
 	closed: boolean;
 	ready: boolean;
+	supervised: boolean;
 	revoked?: boolean;
 	created: number;
 	touched: number;
@@ -56,6 +69,8 @@ export interface ExecResult {
 	output: string;
 	exit_code: number | null;
 	running: boolean;
+	/** Private supervisor preamble seen; not acknowledgement receipt or user-command success. */
+	supervisor_ready?: boolean;
 	truncated_bytes: number;
 	termination?: string;
 }
@@ -65,10 +80,10 @@ export class UnifiedExecManager {
 	private processes = new Map<string, ProcessRecord>();
 	private sweep: NodeJS.Timeout | undefined;
 	private generation = 0;
-	private launch: (command: string) => Launch;
+	private launch: (command: string) => Launch | Promise<Launch>;
 	private lifetimeMs: number;
 	private idleMs: number;
-	constructor(launch: (command: string) => Launch = nativeShell, lifetimeMs = MAX_LIFETIME, idleMs = IDLE_TIMEOUT) {
+	constructor(launch: (command: string) => Launch | Promise<Launch> = nativeShell, lifetimeMs = MAX_LIFETIME, idleMs = IDLE_TIMEOUT) {
 		this.launch = launch; this.lifetimeMs = lifetimeMs; this.idleMs = idleMs;
 		this.startSweeper();
 	}
@@ -93,7 +108,10 @@ export class UnifiedExecManager {
 		if (!command.trim() || command.length > 128_000) throw new Error("Command is empty or exceeds its size limit.");
 		const directory = await realpath(cwd);
 		if (!(await stat(directory)).isDirectory()) throw new Error("Unified exec workdir must be an existing directory.");
-		signal?.throwIfAborted();
+		const launch = await this.launch(command);
+		// Verification is asynchronous. Recheck revocation AND capacity afterwards,
+		// before native resource registration or the synchronous spawn/map insertion.
+		signal?.throwIfAborted(); binding?.resource.signal.throwIfAborted(); binding?.context?.throwIfAborted();
 		if (generation !== this.generation) throw new Error("Unified exec session changed before launch.");
 		if ([...this.processes.values()].some((p) => p.revoked && !p.closed)) throw new Error("Unified exec is blocked: previous process cleanup is incomplete.");
 		if ([...this.processes.values()].filter((p) => !p.closed).length >= MAX_PROCESSES) throw new Error("Unified exec concurrent process limit reached.");
@@ -101,7 +119,6 @@ export class UnifiedExecManager {
 			for (const [id, record] of this.processes) { if (record.closed) { this.processes.delete(id); break; } }
 			if (this.processes.size >= MAX_RETAINED) throw new Error("Unified exec retained-session limit reached.");
 		}
-		const launch = this.launch(command);
 		let ownedRecord: ProcessRecord | undefined;
 		// Native registration precedes OS launch, not receipt of a public session ID.
 		const release = binding?.resource.ownResource(async () => {
@@ -116,7 +133,7 @@ export class UnifiedExecManager {
 			child = spawn(launch.executable, launch.args, { cwd: directory, windowsHide: true, detached: process.platform !== "win32", stdio: "pipe" });
 		} catch (error) { release?.(); throw error; }
 		let done!: () => void;
-		const record: ProcessRecord = { id: randomUUID(), owner, child, access: binding ? {scope:binding.scope,context:binding.context} : undefined, output: new Utf8OutputBuffer(), exitCode: null, closed: false, ready: !launch.supervised, created: Date.now(), touched: Date.now(), done: new Promise((resolve) => { done = resolve; }) };
+		const record: ProcessRecord = { id: randomUUID(), owner, child, access: binding ? {scope:binding.scope,context:binding.context} : undefined, output: new Utf8OutputBuffer(), exitCode: null, closed: false, ready: !launch.supervised, supervised: launch.supervised === true, created: Date.now(), touched: Date.now(), done: new Promise((resolve) => { done = resolve; }) };
 		ownedRecord = record;
 		this.processes.set(record.id, record);
 		let prelude = Buffer.alloc(0), admissionTimer: NodeJS.Timeout | undefined;
@@ -194,7 +211,7 @@ export class UnifiedExecManager {
 			const dropped = chunk.truncatedBytes;
 			const retained = !record.closed || record.output.byteLength > 0;
 			if (!retained) this.processes.delete(record.id);
-			return { session_id: retained ? record.id : undefined, output, exit_code: record.exitCode, running: !record.closed, truncated_bytes: dropped, termination: record.termination };
+			return { session_id: retained ? record.id : undefined, output, exit_code: record.exitCode, running: !record.closed, ...(record.supervised ? { supervisor_ready: record.ready } : {}), truncated_bytes: dropped, termination: record.termination };
 		} finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
 	}
 	private stop(record: ProcessRecord, reason: string): Promise<void> {

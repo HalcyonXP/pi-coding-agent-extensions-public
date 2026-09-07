@@ -34,7 +34,7 @@ Imagegen accepts prompt, up to five workspace-local referenced_image_paths OR up
 
 Web accepts one search query or initial absolute-public-URL open per call, using fixed gpt-5.4-mini with a short/low bounded profile. Domain filters are advisory, not enforcement. Preserve the full bounded source records and cite original URLs; no general find, deep research, opaque continuation or native citation-widget parity is promised.
 
-Unified exec delegates full-OS shell commands, not a shell sandbox or PTY. Windows uses supervised Job Object/held-parent identities and a private readiness acknowledgement; POSIX process groups do not establish Windows crash equivalence. Exact native scope/context identity owns nested returned jobs and stdin, not a returned string ID. Unconfirmed cleanup stays draining.
+Unified exec delegates full-OS shell commands, not a shell sandbox or PTY. On Windows x64 it requires the verified prebuilt helper: PowerShell loads its independent Job Object type as a library, with no per-launch compilation/download or unverified fallback. The restricted coordinator executable entry point and limits remain unchanged. Windows uses supervised Job Object/held-parent identities and a private readiness acknowledgement; POSIX process groups do not establish Windows crash equivalence. Exact native scope/context identity owns nested returned jobs and stdin, not a returned string ID. Unconfirmed cleanup stays draining.
 
 Code mode runs a bounded QuickJS async-function body, not ambient Node/V8. exec accepts code, yield_time_ms and max_output_tokens; wait accepts cell_id, yield_time_ms, max_tokens and terminate. Helpers include tools.NAME(args), text, store/load, image/evidence and yield_control. At most 32 eligible native tool names are exposed; exec/wait recursion is denied. Zero guest text cannot suppress protected finalized source/image evidence. Coordinator restrictions do not constrain the OS permissions of explicitly delegated native tools.
 
@@ -42,6 +42,6 @@ See [architecture/limits](../docs/openai-integration/ARCHITECTURE.md), [supporte
 
 ## Development
 
-From the repository root: npm ci --ignore-scripts --prefix openai-compatibility, then node .github/scripts/validate-openai.mjs. This uses offline guards and temporary storage. Source tests are not a binary release, live-service proof or permission to modify an active installation. [Full host/build commands](../docs/openai-integration/VALIDATION.md) use separate prepared directories and pinned inputs.
+From the repository root: npm ci --ignore-scripts --prefix openai-compatibility, explicitly prepare the pinned compiler inputs on Windows, then node .github/scripts/validate-openai.mjs. The validator builds/verifies the prebuilt assembly before native shell tests; standalone Windows `npm test` also needs that explicit build first. This uses offline guards and temporary storage. Source tests are not a binary release, live-service proof or permission to modify an active installation. [Full host/build commands](../docs/openai-integration/VALIDATION.md) use separate prepared directories and pinned inputs.
 
 [Third-party notices](THIRD_PARTY_NOTICES.md) and [Apache-2.0 license](LICENSE) are preserved. The hosted OpenAI backend is not distributed by this repository.

@@ -14,7 +14,7 @@ From the repository root:
 
 The privacy ref fetch is read-only and requires the exact intended repository remote. Before a remote exists, --staged checks the proposed local tree without network access; it does not replace the later platform/ref audit. GitHub-generated PR metadata must be checked before publication, not inferred from clean local author fields.
 
-The compiler preparation command is Windows-only and explicitly downloads hash-pinned public build inputs. The subsequent helper build is offline. Gitleaks preparation downloads its checksum-pinned public binary, not a hosted OpenAI request; no scanner report prints matched values. Dependency/tool acquisition is separate from model/service use.
+The compiler preparation command is Windows-only and explicitly downloads hash-pinned public build inputs. The subsequent helper build is offline. The validator builds/verifies that assembly before the Windows extension shell tests: Unified exec now loads its independent Job Object type from it instead of invoking a C# compiler in PowerShell. To run `npm test --prefix openai-compatibility` alone on Windows, explicitly prepare the pinned compiler and run `node openai-compatibility/runtime/native/build.mjs` first. No tool/menu/launcher/installer performs these builds. Gitleaks preparation downloads its checksum-pinned public binary, not a hosted OpenAI request; no scanner report prints matched values. Dependency/tool acquisition is separate from model/service use.
 
 ## Genuine patched host
 
