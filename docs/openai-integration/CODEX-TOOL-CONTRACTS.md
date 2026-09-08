@@ -1,0 +1,89 @@
+# Pinned exposed tool contracts
+
+This is a **source-inspection record, not an executed Codex conformance suite or completed Pi compatibility claim**. Target: [`openai/codex@45305dd229c01e6cb6e122f6559e4f9b805bae6b`](https://github.com/openai/codex/tree/45305dd229c01e6cb6e122f6559e4f9b805bae6b). Pi comparison starts from accepted `de79a6f8b4d17e176505123ff5cece0c5f881a72`; the source-only tests inspect the current Pi definitions without launching tools. The broader [compatibility objective](CODEX-COMPATIBILITY.md) remains open, tracked in [#16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16); this audit is [#17](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/17).
+
+## Evidence and vocabulary
+
+The matching source checkout contains first-party machine-readable facts at `openai-compatibility/test/fixtures/codex-contracts.json` and offline `codex-contracts.test.ts`. They record 42 immutable source/notice files (516,581 bytes), without shipping those upstream files or executing Cargo, Codex or a service. Each record pins path, size and SHA-256. They are source-only development inputs, not files expected inside the installed bundle. Tests refuse changed target/evidence classification, missing/duplicate anchors, conflated output paths and unearned runtime/hosted-parity claims. They also check actual Pi schemas/defaults through nonexecuting seams. Neither a hand-authored fact nor its passing test independently proves upstream behavior; source review supplies that association.
+
+- **Advertised input:** the selected registered schema serialized to the provider. Configuration, environment and tool mode can select different schemas.
+- **Parsed input:** handler deserialization and enforced runtime checks. A schema's `number` does not imply that its Rust parser accepts fractions, nor does `additionalProperties:false` alone prove rejection along every dispatch/hook path.
+- **Direct output:** provider-facing tool-result serialization, distinct from TUI rendering and telemetry.
+- **Nested projection:** the object/string returned to coordinator JavaScript. It need not be the direct output or a Pi `{result,isError}` wrapper.
+- **Output schema metadata:** used for nested tool descriptions/projections; it is not necessarily sent as a field of the direct Responses API tool.
+- **Documented helper:** an API described by pinned source. Its presence does not establish an audited implementation, ordering, lifetime or hosted guarantee.
+
+The initially guessed `core/src/tools/spec.rs` and `core/src/tools/code_mode.rs` paths returned 404 and were not treated as sources. Module/import inspection located `spec_plan.rs`, `handlers/shell_spec.rs` and `code_mode/mod.rs`. Failed lookups and the earlier internal-argument comparison remain preserved; no moving-main fallback or upstream history import was used.
+
+## Unified exec: inputs and selected variants
+
+[Registration](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/spec_plan.rs#L1077-L1128), [schema builders](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/handlers/shell_spec.rs#L24-L166), [exec handler](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs), [stdin handler](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/handlers/unified_exec/write_stdin.rs).
+
+| Surface | Inspected target | Current Pi / consequence |
+| --- | --- | --- |
+| Tool kind / required fields | Function JSON, `strict:false`, `additionalProperties:false`; `cmd` / `session_id` required | Function JSON with bounded TypeBox validation; names/requiredness overlap, not the whole contract |
+| Session ID | Schema `number`; stdin parser `i32`; nested output also numeric | String/UUID lookup plus genuine native context/scope authority. Numeric IDs are not accepted. Any adaptation needs round-trip/revocation tests, never ID-as-authority |
+| Timing/output numbers | Advertised `number`; parsed unsigned integer types | Bounded integers. Do not admit fractions or silently widen budgets to imitate a permissive advertised type |
+| Always present interactive exec properties | `cmd`, `workdir`, `yield_time_ms`, `max_output_tokens`, `sandbox_permissions`, `justification`, `prefix_rule` | Pi supports the first four plus literal `tty:false`. Permission controls are absent, not silently ignored |
+| Conditional properties | `tty` depends on UnifiedExecTty; `shell` on shell mode/remote environment; `login` on environment configuration; `environment_id` on multiple environments; `additional_permissions` on the approval feature | These require real enforcement/design before exposure. Never advertise a sandbox, chosen shell or PTY that Pi does not implement |
+| stdin properties | `session_id`, optional `chars`, `yield_time_ms`, `max_output_tokens`; chars defaults empty | Same names, different ID/timing/output limits. Native Pi approvals/hooks remain authoritative |
+| One-shot variant | Disabling resumable Unified exec selects `exec_command` without `tty`/`yield_time_ms`, adds `timeout_ms` (10,000 ms default), removes output session ID and does not register `write_stdin` | Pi's selected tool is resumable; this is a different target configuration, not another optional timeout field to accept without implementation |
+
+The target's generic exec description says “in a PTY,” while its `tty` argument defaults **false**, meaning pipes. Effective fields/defaults and enforcement take precedence over that shorthand. Shell/login defaults also depend on selected environment configuration, not merely `Default` on a handler fixture.
+
+### Timing is not retention
+
+[Constants/defaults](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/unified_exec/mod.rs#L73-L79), [clamping](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/unified_exec/mod.rs#L210-L221), [stdin collection](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/unified_exec/process_manager.rs#L950-L961).
+
+- Target initial exec: 10,000 ms default, Windows minimum 10,000 ms, other-platform minimum 250 ms, maximum 30,000 ms. Earlier completion can return sooner.
+- Target stdin: parsed default 250 ms. Nonempty input is bounded to 250–30,000 ms; empty polls are bounded to at least 5,000 ms and a configurable maximum whose default is 300,000 ms.
+- That **300,000 ms is an empty-poll wait maximum**, not job retention, idle timeout or process lifetime.
+- Target output default is 10,000 tokens, subject to policy/truncation. Pi currently defaults to 1,000 ms and 4,096 approximate output tokens, with 0–30,000 ms waits and a 16,384-token/64-KiB per-response ceiling. This audit does not change any of those values or the existing ownership/readiness/lifetime budgets.
+
+## Direct output, nested output and metadata are different
+
+[ExecCommandToolOutput](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/context.rs#L306-L487) has two projections:
+
+1. **Direct model output:** a text header containing available chunk/session/exit/token metadata, wall time and bounded output. It reserves header/omission space under a separate model/history truncation policy. Telemetry has its own budget.
+2. **Code-mode output:** a structured object with required `wall_time_seconds` and `output`; optional `chunk_id`, `exit_code`, numeric `session_id` and `original_token_count`. An explicit output-token request selects truncation; omission/truncation details remain a further algorithm-level comparison, not a lossless-output claim.
+
+The schema builder records `output_schema`, but [`ResponsesApiTool` marks it `serde(skip)`](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/tools/src/responses_api.rs#L31-L45). [Code-mode tool definitions](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/tools/src/code_mode.rs) carry that metadata into nested descriptions. **It is incorrect to copy that internal field into a claimed direct Responses tool schema.**
+
+Pi currently returns JSON text plus structured `details`, and nested callers receive the native `{result,isError}` wrapper. The readable exec/wait TUI introduced in PR #15 does not alter that wire contract. Aligning nested results or direct formatting therefore needs separate native/result-projection design, protected-evidence and compatibility tests—not another visual renderer or speculative duplicate fields. Nonzero process exits, tool errors, hook feedback, OS completion and successful return are separate observations. Exact error text, every unknown-field/hook path, and the full truncation algorithms are not yet certified equivalent.
+
+## Code mode: known input/helper contract, runtime still separate
+
+[Exec schema](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/code_mode/execute_spec.rs), [wait schema](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/code_mode/wait_spec.rs), [description/pragma parser](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/code-mode-protocol/src/description.rs#L15-L47), [response formatting/delegation](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/code_mode/mod.rs#L252-L432).
+
+- Target `exec` is a **custom/freeform tool with Lark grammar**, accepting raw JavaScript and an optional first-line `// @exec:` pragma. Pi exposes a JSON function with `code` plus bounded options; its compatible pragma parsing does not make the transport freeform.
+- Target pragma fields are `yield_time_ms` and `max_output_tokens`, non-negative safe integers. Default exec yield is configurable with a 10,000 ms baseline. `wait` is a JSON function requiring string `cell_id`, with `yield_time_ms`, `max_tokens`, `terminate`; documented wait/output defaults are 10,000 ms/tokens.
+- Target descriptions advertise a fresh V8 async module without ambient Node/filesystem/network/console, normalized tool names and tool-specific nested object/string results. Pi uses restricted QuickJS async-function bodies and at most 32 native tool names. Neither is an LLM subagent; restricted coordinator JS does not sandbox delegated shell commands.
+- Target descriptions name `exit`, `text`, `image`, `audio`, `generatedImage`, `store`, `load`, `notify`, `setTimeout`, `clearTimeout`, `ALL_TOOLS`, `yield_control`. This is a **documented catalog**, not proof that equivalent helper implementations/lifetimes/notify ordering were audited. Pi's current names/reference helpers/bounded storage are a narrower contract.
+- Target model results prepend script status/wall time to text/image/audio content, rather than Pi's CellOutcome JSON. Helper output, protected evidence and repeated/custom-output ordering require native design. The description of `notify` does not authorize fabricated native results, changing in-flight model input or starting idle inference.
+
+## Web: do not confuse a hosted builtin with standalone web.run
+
+[Hosted registration](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/core/src/tools/hosted_spec.rs) emits a provider builtin `web_search` with web-access/filter/location/context/content-type controls. It does **not** export the hosted model's internal function-argument schema. Responses Lite/standalone availability and provider capabilities select a different path.
+
+[Standalone extension](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/ext/web-search/src/tool.rs) registers namespace **`web` / `run`**. Its schema is explicitly generated from [`SearchCommands`](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/codex-api/src/search.rs#L31-L225): `search_query`, `image_query`, `open`, `click`, `find`, `screenshot`, `finance`, `weather`, `sports`, `time`, `response_length`. Query filters and operation-specific fields are client source contracts, not verification of service-side enforcement or availability.
+
+The request includes an instance session ID, the selected tool-call model/settings and a [bounded recent conversation tail](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/ext/web-search/src/history.rs#L14-L73). Returned service text becomes direct model output, while opaque structured results go through client events. The inspected tool does not replay `encrypted_output`; that fact alone does not settle opaque-reference or hosted continuation guarantees.
+
+Pi's normal `web_search` remains one search or initial public-URL open, short/low output and a fixed service model, without conversation upload. Its experimental adapter schema is broader but is **not** the normal enabled profile. New operations/context/reference handling need bounded, ownership-aware native evidence and synthetic request/response acceptance; do not flip profiles or upload conversation state as an incidental schema change. Existing protected Code-mode execution is available only with genuine finalized-evidence scope even where older guidance still favors direct calls.
+
+## Image: selected request settings align; references/projections remain work
+
+[Image tool](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/codex-rs/ext/image-generation/src/tool.rs) registers **`image_gen` / `imagegen`** with required `prompt`, optional `referenced_image_paths` and `num_last_images_to_include`, and denied unknown fields. References are bounded to five; a nonempty path list and recent-image selection are mutually exclusive. The handler fixes `gpt-image-2`, automatic size/quality/background. These settings agree with Pi's selected automatic service settings; no new model/size/quality knobs are justified by this audit.
+
+Target direct output is image content with an optional artifact hint. Its nested projection is `{image_url, output_hint?}` for `generatedImage`. Pi additionally supports safe destination copies and genuine native references while retaining canonical originals. Namespaces, recent-image selection, native/reference/output projection and artifact failure semantics still require explicit comparison. Do not replace protected image evidence with guest-supplied URLs or delete originals to match a presentation. No image service or user artwork was accessed for this record.
+
+## Next implementation order and invariants
+
+1. Design direct-format versus nested-projection/freeform adaptation through genuine Pi APIs; retain existing response consumers until a tested compatibility transition is accepted.
+2. Resolve defaults/ID round trips and documented unsupported options without copying retention/lifetime numbers or advertising unenforced permissions/PTY.
+3. Audit helper implementation/notifications and bounded Web/reference/context behavior. Implement one accepted increment at a time; preserve failures and required native frame/ownership/evidence regressions.
+4. Complete image reference/projection and native lifecycle/terminal gaps, plus issue #3's separate actual-payload release gates.
+
+This record changes no execution or model-facing tool guidance. Full local/hosted/exact-source reproduction/installed and separate master/handoff gates still apply to its source-bearing bundle. Source inspection and AI-assisted self-review are not independent approval, live entitlement, public release clearance or a model-training certificate.
+
+Reference attribution: OpenAI Codex, Copyright 2025 OpenAI, [Apache-2.0 license](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/LICENSE) and [upstream NOTICE](https://github.com/openai/codex/blob/45305dd229c01e6cb6e122f6559e4f9b805bae6b/NOTICE). Existing component and third-party notices remain unchanged. This first-party fact record does not redistribute an upstream runtime or claim endorsement.

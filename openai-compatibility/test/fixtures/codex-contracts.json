@@ -1,0 +1,512 @@
+{
+  "version": 1,
+  "target": {
+    "repository": "openai/codex",
+    "commit": "45305dd229c01e6cb6e122f6559e4f9b805bae6b",
+    "license": "Apache-2.0",
+    "licensePath": "LICENSE",
+    "noticePath": "NOTICE"
+  },
+  "basis": "source-inspection-not-upstream-execution",
+  "claimedParity": false,
+  "piBaseline": "de79a6f8b4d17e176505123ff5cece0c5f881a72",
+  "sourceFiles": [
+    {
+      "path": "codex-rs/Cargo.toml",
+      "bytes": 19278,
+      "sha256": "1f67184d5da7dbf67ae284f43e0e7222f7f3dad74ec70d6c2fb8bcdf73ae191a"
+    },
+    {
+      "path": "codex-rs/code-mode-protocol/src/description.rs",
+      "bytes": 37704,
+      "sha256": "a85090f7b639db03dc336937490b3230e37203da5d780d5c20b0bf378276ee24"
+    },
+    {
+      "path": "codex-rs/code-mode-protocol/src/lib.rs",
+      "bytes": 1930,
+      "sha256": "c1c852edadb044f8941741d432ee8343e15df1d9d01776642c6eb0fa05b18893"
+    },
+    {
+      "path": "codex-rs/code-mode-protocol/src/runtime.rs",
+      "bytes": 5721,
+      "sha256": "a64d60e9e7d2c1812ace64825d4009f12d1d4ef572c5ba04602acc44658e1094"
+    },
+    {
+      "path": "codex-rs/code-mode/Cargo.toml",
+      "bytes": 1017,
+      "sha256": "2646402e31d512209a03e1568ae81b5b5d85405f7f762d8aa169b3f0ac14959b"
+    },
+    {
+      "path": "codex-rs/code-mode/src/lib.rs",
+      "bytes": 298,
+      "sha256": "672628d0254daded50e508875039d7dcdb95d4d850209ae3ac3f95161b0e470d"
+    },
+    {
+      "path": "codex-rs/codex-api/src/endpoint/search.rs",
+      "bytes": 11388,
+      "sha256": "e1d5b6a9da9b6fa9dc263df10bf8e8047992ea88b3ca200fb93b7a597c6aa2ed"
+    },
+    {
+      "path": "codex-rs/codex-api/src/search.rs",
+      "bytes": 10244,
+      "sha256": "a83fd7ddd41c86985cce2aa899a2907ca820c226d5e7337949cc7e47a35c5f4f"
+    },
+    {
+      "path": "codex-rs/core/src/tools/code_mode/execute_handler.rs",
+      "bytes": 7997,
+      "sha256": "217655094d20f95d79bf0a4ba3c8b4aab7a0d1b3f4a65f8d1e309479a8c00f19"
+    },
+    {
+      "path": "codex-rs/core/src/tools/code_mode/execute_spec.rs",
+      "bytes": 3227,
+      "sha256": "f9a083fa1766e5381eacd47055b71cbf954be7f78926fa472482aae6fc5f2b44"
+    },
+    {
+      "path": "codex-rs/core/src/tools/code_mode/mod.rs",
+      "bytes": 19817,
+      "sha256": "be419aef3b8100ec9cd59bb3706ee55e3c28facadb13eb25e68fc87b0c300eba"
+    },
+    {
+      "path": "codex-rs/core/src/tools/code_mode/wait_handler.rs",
+      "bytes": 7609,
+      "sha256": "f64566a5efa9b625549e823fa141d89f41efd4c7d89b7d917bd5e54c682a8768"
+    },
+    {
+      "path": "codex-rs/core/src/tools/code_mode/wait_spec.rs",
+      "bytes": 3822,
+      "sha256": "83f52d58d786d9365ed4ceb8b11902aeef3fddfaf0997ddf666a642fb8ad8617"
+    },
+    {
+      "path": "codex-rs/core/src/tools/context.rs",
+      "bytes": 19002,
+      "sha256": "e9bc2f7d5a749fc5cf49989fd7a4e1dfe171c723e12c50c723d34f8ebefeff54"
+    },
+    {
+      "path": "codex-rs/core/src/tools/handlers/mod.rs",
+      "bytes": 23598,
+      "sha256": "3c836719f6e9cdca14469c4c2018fc98d26e933fa242b0e099690d2e3662f642"
+    },
+    {
+      "path": "codex-rs/core/src/tools/handlers/shell_spec.rs",
+      "bytes": 13282,
+      "sha256": "f617b9463dcb1c52b2645bf24ad5c0ad73abda0f2f36c2a420ca239ae127582c"
+    },
+    {
+      "path": "codex-rs/core/src/tools/handlers/unified_exec.rs",
+      "bytes": 4781,
+      "sha256": "8adbc4d775079d82065e37b74f26a37a770ab2cb0f02290a488580996fa5c33b"
+    },
+    {
+      "path": "codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs",
+      "bytes": 22428,
+      "sha256": "e024443896f596818af5830b416c59df26cab3bd793fd0abb179f4bbebad7b60"
+    },
+    {
+      "path": "codex-rs/core/src/tools/handlers/unified_exec/write_stdin.rs",
+      "bytes": 4772,
+      "sha256": "cf67f1a7cf1fce73bb321428a05a7604db2f3790e0a61303e03f3b6d257dd451"
+    },
+    {
+      "path": "codex-rs/core/src/tools/hosted_spec.rs",
+      "bytes": 1791,
+      "sha256": "add42354c1662ced395898ba4b8bac9b4546ee5b5963cd40bc3f542fc950765c"
+    },
+    {
+      "path": "codex-rs/core/src/tools/mod.rs",
+      "bytes": 4986,
+      "sha256": "0c8ec9324f67053cf7c14dac5d53504c9e8c370b84cb2323fdb0239e674572d7"
+    },
+    {
+      "path": "codex-rs/core/src/tools/registry.rs",
+      "bytes": 30218,
+      "sha256": "f90bfac6c021ffa0aadce1208bd7d13679915ac2b1bfcec227e9648e9992343a"
+    },
+    {
+      "path": "codex-rs/core/src/tools/router.rs",
+      "bytes": 13188,
+      "sha256": "466ee7a51fd9e6b741653b50313a2567bb08ce55a32af815a619a07cc38bafef"
+    },
+    {
+      "path": "codex-rs/core/src/tools/spec_plan.rs",
+      "bytes": 59381,
+      "sha256": "451622e76c45dd1585318c200fdee9a00d7aaf785d4a540facca1010146307b7"
+    },
+    {
+      "path": "codex-rs/core/src/unified_exec/mod.rs",
+      "bytes": 7931,
+      "sha256": "612caa3475c086a9860f92be871ac5f8d1b08c71c6c20765c06ed4b081ee696c"
+    },
+    {
+      "path": "codex-rs/core/src/unified_exec/process_manager.rs",
+      "bytes": 68649,
+      "sha256": "369ae860f62967ba8d1b3b6f2c80952a2e625019e5abfb168a19b0d0f2fbf53c"
+    },
+    {
+      "path": "codex-rs/ext/image-generation/src/lib.rs",
+      "bytes": 196,
+      "sha256": "c710abe1967cd3f7faaf78c0a35de0f5e6cc5c461f130b79d2b25d27ba8df9de"
+    },
+    {
+      "path": "codex-rs/ext/image-generation/src/tool.rs",
+      "bytes": 25352,
+      "sha256": "7643d8507cde1b48a0e13459abc8b938e02effdd06d6b25ca4b1f8c9104fd421"
+    },
+    {
+      "path": "codex-rs/ext/web-search/src/history.rs",
+      "bytes": 7192,
+      "sha256": "1709050ed757591901cc7ab5b96a6d94d73fc8c2154e87e214ae816684daed8d"
+    },
+    {
+      "path": "codex-rs/ext/web-search/src/lib.rs",
+      "bytes": 91,
+      "sha256": "4ea39ef34bf59d199f150f9a98103b8ecf8fae4d8f6d9dddbf34cb76b6fb8f9d"
+    },
+    {
+      "path": "codex-rs/ext/web-search/src/output.rs",
+      "bytes": 2121,
+      "sha256": "a483459fa18c301e4beebb02f46478559f80f9d8cbcfb5b03a5973971001a8ee"
+    },
+    {
+      "path": "codex-rs/ext/web-search/src/schema.rs",
+      "bytes": 1058,
+      "sha256": "6371391751d2a5dddad546aa810a6c64f770498702cec8153df74d1d7dff6f9b"
+    },
+    {
+      "path": "codex-rs/ext/web-search/src/tool.rs",
+      "bytes": 12004,
+      "sha256": "779bf921c096ca8cfad311342df1b76972790c497067e467064d01d58110a6d1"
+    },
+    {
+      "path": "codex-rs/tools/src/code_mode.rs",
+      "bytes": 8320,
+      "sha256": "f554dfbaabc4fcbd367f325f3ad677c564cda794d3a0a3cae1b193542db0b08e"
+    },
+    {
+      "path": "codex-rs/tools/src/json_schema.rs",
+      "bytes": 13739,
+      "sha256": "86cec68e6537dfacdfee6bb928cd67802ebbf4abfb70a47643e86bd30404ac56"
+    },
+    {
+      "path": "codex-rs/tools/src/lib.rs",
+      "bytes": 4755,
+      "sha256": "a097dfe44fb28e4abecc5af58266353678f8fac56c9b54214b86934f6fa377b6"
+    },
+    {
+      "path": "codex-rs/tools/src/responses_api.rs",
+      "bytes": 5346,
+      "sha256": "7af0354e43c3fa7f052d86df5ae0c6ce276569243af6f6ea5fe00abcb15bd244"
+    },
+    {
+      "path": "codex-rs/tools/src/tool_executor.rs",
+      "bytes": 4659,
+      "sha256": "74e3ee04ebcbb84c15b10445b2392a34c8f47bc3f492388fd82fa11714ce0764"
+    },
+    {
+      "path": "codex-rs/tools/src/tool_output.rs",
+      "bytes": 9771,
+      "sha256": "621bffae61fdd212c186ed73738f02adabaf793935e0864378f71102a3f37326"
+    },
+    {
+      "path": "codex-rs/tools/src/tool_spec.rs",
+      "bytes": 6750,
+      "sha256": "af8b5286fb6d2eb3574c484b25076f515bca2d4350ecb5059e436966ecdd519d"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 10926,
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    {
+      "path": "NOTICE",
+      "bytes": 242,
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    }
+  ],
+  "unified": {
+    "inputKind": "function-json",
+    "strict": false,
+    "additionalProperties": false,
+    "requiredExec": [
+      "cmd"
+    ],
+    "requiredWrite": [
+      "session_id"
+    ],
+    "alwaysExecProperties": [
+      "cmd",
+      "workdir",
+      "yield_time_ms",
+      "max_output_tokens",
+      "sandbox_permissions",
+      "justification",
+      "prefix_rule"
+    ],
+    "conditionalExecProperties": {
+      "tty": "UnifiedExecTty",
+      "shell": "direct shell mode or at least one remote environment",
+      "login": "any selected environment permits login shells",
+      "environment_id": "multiple environments",
+      "additional_permissions": "ExecPermissionApprovals"
+    },
+    "writeProperties": {
+      "session_id": "number",
+      "chars": "string",
+      "yield_time_ms": "number",
+      "max_output_tokens": "number"
+    },
+    "parsedIntegerTypes": {
+      "session_id": "i32",
+      "yield_time_ms": "u64",
+      "max_output_tokens": "usize"
+    },
+    "initialYield": {
+      "defaultMs": 10000,
+      "windowsMinimumMs": 10000,
+      "otherMinimumMs": 250,
+      "maximumMs": 30000
+    },
+    "stdinYield": {
+      "parsedDefaultMs": 250,
+      "nonemptyMinimumMs": 250,
+      "nonemptyMaximumMs": 30000,
+      "emptyMinimumMs": 5000,
+      "emptyMaximumDefaultMs": 300000,
+      "emptyMaximumConfigurable": true
+    },
+    "outputDefaultTokens": 10000,
+    "outputSchemaSerializedToResponses": false,
+    "codeResultRequired": [
+      "wall_time_seconds",
+      "output"
+    ],
+    "codeResultOptional": [
+      "chunk_id",
+      "exit_code",
+      "session_id",
+      "original_token_count"
+    ],
+    "codeResultWrappedInPiResult": false,
+    "directOutput": "text-header-and-bounded-output",
+    "codeOutput": "structured-object",
+    "oneShot": {
+      "removes": [
+        "tty",
+        "yield_time_ms"
+      ],
+      "adds": [
+        "timeout_ms"
+      ],
+      "timeoutDefaultMs": 10000,
+      "writeStdinRegistered": false,
+      "outputSessionId": false
+    },
+    "references": [
+      "codex-rs/core/src/tools/handlers/shell_spec.rs",
+      "codex-rs/core/src/tools/handlers/unified_exec.rs",
+      "codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs",
+      "codex-rs/core/src/tools/handlers/unified_exec/write_stdin.rs",
+      "codex-rs/core/src/tools/spec_plan.rs",
+      "codex-rs/core/src/tools/context.rs",
+      "codex-rs/tools/src/responses_api.rs",
+      "codex-rs/core/src/unified_exec/mod.rs",
+      "codex-rs/core/src/unified_exec/process_manager.rs"
+    ]
+  },
+  "code": {
+    "execKind": "custom-grammar",
+    "grammarSyntax": "lark",
+    "input": "raw-javascript",
+    "pragma": "// @exec:",
+    "pragmaProperties": [
+      "yield_time_ms",
+      "max_output_tokens"
+    ],
+    "pragmaNumbers": "non-negative-safe-integers",
+    "waitKind": "function-json",
+    "waitRequired": [
+      "cell_id"
+    ],
+    "waitProperties": {
+      "cell_id": "string",
+      "yield_time_ms": "number",
+      "max_tokens": "number",
+      "terminate": "boolean"
+    },
+    "defaultExecYieldMs": 10000,
+    "defaultWaitYieldMs": 10000,
+    "defaultOutputTokens": 10000,
+    "descriptionRuntime": "fresh-v8-async-module",
+    "descriptionHelpers": [
+      "exit",
+      "text",
+      "image",
+      "audio",
+      "generatedImage",
+      "store",
+      "load",
+      "notify",
+      "setTimeout",
+      "clearTimeout",
+      "ALL_TOOLS",
+      "yield_control"
+    ],
+    "modelOutput": "status-wall-time-and-content-items",
+    "nestedResults": "tool-specific-projection",
+    "runtimeImplementationAudited": false,
+    "notifyOrderingAudited": false,
+    "references": [
+      "codex-rs/core/src/tools/code_mode/execute_spec.rs",
+      "codex-rs/core/src/tools/code_mode/wait_spec.rs",
+      "codex-rs/core/src/tools/code_mode/execute_handler.rs",
+      "codex-rs/core/src/tools/code_mode/wait_handler.rs",
+      "codex-rs/core/src/tools/code_mode/mod.rs",
+      "codex-rs/code-mode-protocol/src/description.rs",
+      "codex-rs/code-mode-protocol/src/runtime.rs",
+      "codex-rs/tools/src/code_mode.rs"
+    ]
+  },
+  "web": {
+    "standalone": {
+      "namespace": "web",
+      "name": "run",
+      "schemaSource": "SearchCommands",
+      "properties": [
+        "search_query",
+        "image_query",
+        "open",
+        "click",
+        "find",
+        "screenshot",
+        "finance",
+        "weather",
+        "sports",
+        "time",
+        "response_length"
+      ],
+      "directOutput": "service-text",
+      "resultsDelivery": "separate-client-events",
+      "encryptedOutputReplayedByInspectedTool": false,
+      "recentInput": "two-user-text-messages-and-bounded-assistant-tail"
+    },
+    "hosted": {
+      "kind": "web_search",
+      "functionParametersExposedByClient": false,
+      "controls": [
+        "external_web_access",
+        "indexed_web_access",
+        "filters",
+        "user_location",
+        "search_context_size",
+        "search_content_types"
+      ]
+    },
+    "hostedServiceBehaviorVerified": false,
+    "references": [
+      "codex-rs/core/src/tools/hosted_spec.rs",
+      "codex-rs/core/src/tools/spec_plan.rs",
+      "codex-rs/tools/src/tool_spec.rs",
+      "codex-rs/ext/web-search/src/schema.rs",
+      "codex-rs/ext/web-search/src/tool.rs",
+      "codex-rs/ext/web-search/src/output.rs",
+      "codex-rs/ext/web-search/src/history.rs",
+      "codex-rs/codex-api/src/search.rs"
+    ]
+  },
+  "image": {
+    "namespace": "image_gen",
+    "name": "imagegen",
+    "inputProperties": [
+      "prompt",
+      "referenced_image_paths",
+      "num_last_images_to_include"
+    ],
+    "required": [
+      "prompt"
+    ],
+    "unknownFieldsDenied": true,
+    "maxReferences": 5,
+    "recentImageRange": [
+      1,
+      5
+    ],
+    "pathsAndRecentMutuallyExclusiveWhenPathsNonempty": true,
+    "model": "gpt-image-2",
+    "size": "auto",
+    "quality": "auto",
+    "background": "auto",
+    "directOutput": "image-content-and-optional-output-hint",
+    "codeOutput": {
+      "required": [
+        "image_url"
+      ],
+      "optional": [
+        "output_hint"
+      ]
+    },
+    "binaryAndHostedServiceBehaviorVerified": false,
+    "references": [
+      "codex-rs/ext/image-generation/src/lib.rs",
+      "codex-rs/ext/image-generation/src/tool.rs"
+    ]
+  },
+  "pi": {
+    "unifiedExecFields": [
+      "cmd",
+      "workdir",
+      "yield_time_ms",
+      "max_output_tokens",
+      "tty"
+    ],
+    "unifiedWriteFields": [
+      "session_id",
+      "chars",
+      "yield_time_ms",
+      "max_output_tokens"
+    ],
+    "sessionIdType": "string",
+    "tty": false,
+    "yieldDefaultMs": 1000,
+    "yieldRangeMs": [
+      0,
+      30000
+    ],
+    "outputDefaultTokens": 4096,
+    "outputTokenRange": [
+      1,
+      16384
+    ],
+    "directOutput": "json-text-and-details",
+    "nestedOutput": "native-result-isError-wrapper",
+    "codeExecFields": [
+      "code",
+      "yield_time_ms",
+      "max_output_tokens"
+    ],
+    "codeWaitFields": [
+      "cell_id",
+      "yield_time_ms",
+      "max_tokens",
+      "terminate"
+    ],
+    "codeExecKind": "function-json",
+    "codeRenderer": "tui-only-wire-unchanged",
+    "verifiedWebFields": [
+      "search_query",
+      "open",
+      "response_length"
+    ],
+    "verifiedWebMaximumOperations": 1,
+    "codeMaxTools": 32
+  },
+  "unresolved": [
+    "native-freeform-transport-and-result-projection-design",
+    "timing-defaults-without-lifetime-budget-relaxation",
+    "numeric-lookup-adaptation-with-native-authority",
+    "shell-options-permission-enforcement-and-pty",
+    "code-helper-catalog-runtime-and-notify-ordering",
+    "bounded-web-operations-context-and-reference-continuation",
+    "image-reference-and-generatedImage-projection",
+    "full-dispatch-unknown-field-equivalence-and-truncation-algorithms",
+    "public-release-redistribution-advisory-provenance-delivery"
+  ]
+}

@@ -16,6 +16,10 @@ The privacy ref fetch is read-only and requires the exact intended repository re
 
 The compiler preparation command is Windows-only and explicitly downloads hash-pinned public build inputs. The subsequent helper build is offline. The validator builds/verifies that assembly before the Windows extension shell tests: Unified exec now loads its independent Job Object type from it instead of invoking a C# compiler in PowerShell. To run `npm test --prefix openai-compatibility` alone on Windows, explicitly prepare the pinned compiler and run `node openai-compatibility/runtime/native/build.mjs` first. No tool/menu/launcher/installer performs these builds. Gitleaks preparation downloads its checksum-pinned public binary, not a hosted OpenAI request; no scanner report prints matched values. Dependency/tool acquisition is separate from model/service use.
 
+## Source-inspection contract fixtures
+
+The ordinary extension suite includes `test/codex-contracts.test.ts` and the source-only `test/fixtures/codex-contracts.json`. They pin the [inspected exposed tool contract](CODEX-TOOL-CONTRACTS.md), refuse unearned runtime/hosted/parity claims and compare actual Pi schemas/defaults with nonexecuting manager seams. No upstream source is downloaded or executed by these tests; no tool, model, service or authentication is invoked. The source-file hashes are reviewed provenance, not an independently run Codex conformance suite. A deliberate Pi contract change must update the gap record and tests rather than treating the baseline differences as permanent waivers.
+
 ## Genuine patched host
 
     node .github/scripts/prepare-pi-host.mjs --rpc

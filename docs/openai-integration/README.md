@@ -45,6 +45,11 @@ This guide describes the public source's implementation and constraints, not an 
 | Result retention | Up to eight in-memory process/output records; no completed-result poll TTL; eligible completed least-recently-collected records can be evicted for capacity |
 | Settings availability | Passive route/ownership/preflight snapshot on open/change; unavailable rows explain why and cannot override exclusions |
 | Standing project authorization | Delegated in-scope decisions and delivery planning; never a waiver of technical/privacy gates or permission to bypass guards |
+| Exposed tool contract | Selected registration/schema, dispatch/defaults and output projection at a pinned source; not an internal argument type or a hosted-service/training guarantee |
+| Nested projection | Tool-specific object/string returned to coordinator JavaScript; distinct from provider-facing direct output, native evidence and the current Pi result/isError wrapper |
+| Output schema metadata | Source metadata that may inform nested descriptions; not necessarily serialized into a direct provider request |
+
+The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and records current gaps. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
 
 Original first-party documentation in this directory is licensed under [Apache-2.0](LICENSE); see [scope and attribution](NOTICE). Other source components and third-party works retain their own terms.
 
