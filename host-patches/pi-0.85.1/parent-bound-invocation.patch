@@ -2997,11 +2997,335 @@ index b5ee926..63c0364 100644
 +		}
  	}
  }
+diff --git a/packages/coding-agent/src/modes/interactive/components/local-job-group.ts b/packages/coding-agent/src/modes/interactive/components/local-job-group.ts
+new file mode 100644
+index 0000000..037bfe0
+--- /dev/null
++++ b/packages/coding-agent/src/modes/interactive/components/local-job-group.ts
+@@ -0,0 +1,310 @@
++import { Container, MouseRegion, stripTerminalSequences, Text, truncateToWidth } from "@earendil-works/pi-tui";
++import type { AgentSessionEvent } from "../../../core/agent-session.ts";
++import type { CustomMessage } from "../../../core/messages.ts";
++import { theme } from "../theme/theme.ts";
++import type { CustomMessageComponent } from "./custom-message.ts";
++import { keyHint } from "./keybinding-hints.ts";
++import type { ToolExecutionComponent } from "./tool-execution.ts";
++
++type Start = Extract<AgentSessionEvent, { type: "tool_execution_start" }>;
++type Result = Parameters<ToolExecutionComponent["updateResult"]>[0];
++type Job = { number: number; status: string; preview: string; session?: string };
++type Call = { start: Start; args: string; component: ToolExecutionComponent; job: Job; prominent: boolean };
++
++// These bounds concern presentation only. No scope/resource authority or result persistence is added.
++const MAX_RECORDS = 64;
++const MAX_ROWS = 8;
++function data(value: unknown): Record<string, unknown> | undefined {
++	if (!value || typeof value !== "object" || Array.isArray(value)) return;
++	const prototype = Object.getPrototypeOf(value);
++	if (prototype !== Object.prototype && prototype !== null) return;
++	const copy: Record<string, unknown> = Object.create(null);
++	for (const key of Reflect.ownKeys(value)) {
++		if (typeof key !== "string") return;
++		const d = Object.getOwnPropertyDescriptor(value, key);
++		if (!d || !("value" in d)) return;
++		copy[key] = d.value;
++	}
++	return copy;
++}
++const id = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 1024;
++function stdin(args: unknown): Record<string, unknown> | undefined {
++	const value = data(args);
++	if (
++		value &&
++		id(value.session_id) &&
++		(!Object.hasOwn(value, "chars") || value.chars === "") &&
++		Object.keys(value).every((key) => ["session_id", "chars", "yield_time_ms", "max_output_tokens"].includes(key))
++	)
++		return value;
++}
++function argumentsFor(event: Start): Record<string, unknown> | undefined {
++	const args = event.toolName === "write_stdin" ? stdin(event.args) : data(event.args);
++	if (!args || Object.values(args).some((v) => v !== undefined && !["string", "number", "boolean"].includes(typeof v)))
++		return;
++	if (event.toolName === "write_stdin") return args;
++	if (
++		event.toolName === "exec_command" &&
++		typeof args.cmd === "string" &&
++		args.cmd.length > 0 &&
++		args.cmd.length <= 65536 &&
++		Object.keys(args).every((key) => ["cmd", "workdir", "yield_time_ms", "max_output_tokens", "tty"].includes(key))
++	)
++		return args;
++}
++export function localJobStart(event: Start): boolean {
++	try {
++		return id(event.scopeId) && id(event.toolCallId) && !!argumentsFor(event);
++	} catch {
++		return false;
++	}
++}
++
++// Only ordinary successful shell shapes get a short preview. Everything else keeps its native card.
++export function localJobResult(result: unknown): { output: string; running: boolean; session?: string } | undefined {
++	try {
++		const value = data(result);
++		if (!value || value.isError !== false) return;
++		for (const key of ["usage", "terminate"]) if (value[key] === undefined) delete value[key];
++		if (Object.keys(value).some((key) => !["content", "details", "isError"].includes(key))) return;
++		const detail = data(value.details);
++		if (!detail) return;
++		// Unified exec retains these own JS properties when absent; JSON omits them.
++		for (const key of ["termination", "session_id"]) if (detail[key] === undefined) delete detail[key];
++		if (
++			Object.keys(detail).some(
++				(key) =>
++					!["session_id", "output", "exit_code", "running", "supervisor_ready", "truncated_bytes"].includes(key),
++			) ||
++			typeof detail.output !== "string" ||
++			detail.output.length > 65536 ||
++			detail.truncated_bytes !== 0 ||
++			(Object.hasOwn(detail, "supervisor_ready") && typeof detail.supervisor_ready !== "boolean")
++		)
++			return;
++		if (detail.running === true) {
++			if (!id(detail.session_id) || detail.exit_code !== null) return;
++		} else if (detail.running !== false || detail.exit_code !== 0 || Object.hasOwn(detail, "session_id")) return;
++		if (!Array.isArray(value.content) || value.content.length !== 1) return;
++		const block = data(value.content[0]);
++		if (
++			!block ||
++			Object.keys(block).length !== 2 ||
++			block.type !== "text" ||
++			typeof block.text !== "string" ||
++			block.text.length > 524288
++		)
++			return;
++		const parsed = data(JSON.parse(block.text));
++		if (
++			!parsed ||
++			Object.keys(parsed).length !== Object.keys(detail).length ||
++			!Object.keys(detail).every((key) => Object.hasOwn(parsed, key) && parsed[key] === detail[key])
++		)
++			return;
++		return {
++			output: detail.output,
++			running: detail.running,
++			session: detail.running ? (detail.session_id as string) : undefined,
++		};
++	} catch {
++		return;
++	}
++}
++
++// This recognizes only fixed ordinary audit text, never arbitrary evidence or direct completion reports.
++// Correlation is display-only: neither these IDs nor history rows restore execution authority.
++export function localJobAudit(message: CustomMessage): { scope: string; journal: string } | undefined {
++	try {
++		if (message.customType !== "code-mode-evidence" || message.display !== true) return;
++		const d = data(message.details);
++		if (
++			!d ||
++			d.auditOnly !== true ||
++			d.isError !== false ||
++			!id(d.scopeId) ||
++			!id(d.journalId) ||
++			!id(d.toolCallId) ||
++			!["exec_command", "write_stdin"].includes(d.toolName as string) ||
++			Object.keys(d).sort().join() !== "auditOnly,isError,journalId,scopeId,toolCallId,toolName"
++		)
++			return;
++		if (!Array.isArray(message.content) || message.content.length !== 1) return;
++		const block = data(message.content[0]);
++		if (
++			!block ||
++			Object.keys(block).length !== 2 ||
++			block.type !== "text" ||
++			block.text !== `Code mode: ${d.toolName} returned.`
++		)
++			return;
++		return { scope: d.scopeId, journal: d.journalId };
++	} catch {
++		return;
++	}
++}
++
++function preview(text: string): string {
++	return stripTerminalSequences(text)
++		.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ")
++		.replace(/\s+/g, " ")
++		.trim();
++}
++
++/** Native transcript component. Full native components remain available through the existing expand control.
++ * A group holds at most 64 calls and 64 audits; overflow falls back outside the group, never disappears.
++ * Replayed audit-only groups report returned calls, not live jobs or confirmed cleanup.
++ */
++export class LocalJobGroup extends Container {
++	private calls = new Map<string, Call>();
++	private jobs: Job[] = [];
++	private audits = new Map<string, CustomMessageComponent>();
++	private body = new Container();
++	private expanded = false;
++	readonly scopeId: string;
++	private requestRender: () => void;
++	constructor(scopeId: string, requestRender: () => void) {
++		super();
++		this.scopeId = scopeId;
++		this.requestRender = requestRender;
++		this.addChild(
++			new MouseRegion(this.body, (event) => {
++				if (event.type !== "click" || event.button !== "left") return undefined;
++				this.setExpanded(!this.expanded);
++				this.requestRender();
++				return { handled: true };
++			}),
++		);
++	}
++	hasCall(callId: string): boolean {
++		return this.calls.has(callId);
++	}
++	addCall(start: Start, component: ToolExecutionComponent, hadUpdates = false): boolean {
++		if (
++			!localJobStart(start) ||
++			start.scopeId !== this.scopeId ||
++			this.calls.has(start.toolCallId) ||
++			this.calls.size >= MAX_RECORDS
++		)
++			return false;
++		const session = start.toolName === "write_stdin" ? (stdin(start.args)?.session_id as string) : undefined;
++		let job = session ? this.jobs.find((j) => j.session === session) : undefined;
++		if (!job) {
++			job = { number: this.jobs.length + 1, status: "call pending", preview: "", session };
++			this.jobs.push(job);
++		}
++		this.calls.set(start.toolCallId, {
++			start,
++			args: JSON.stringify(argumentsFor(start)),
++			component,
++			job,
++			prominent: hadUpdates,
++		});
++		component.setExpanded(this.expanded);
++		return true;
++	}
++	updateCall(
++		callId: string,
++		result: Result,
++		partial = false,
++		correlation?: { scopeId?: string; toolName: string },
++	): void {
++		const call = this.calls.get(callId);
++		if (!call) return;
++		const summary = localJobResult(result);
++		if (
++			partial ||
++			!summary ||
++			(correlation && (correlation.scopeId !== this.scopeId || correlation.toolName !== call.start.toolName))
++		)
++			call.prominent = true;
++		if (call.prominent) {
++			let exit: unknown;
++			try {
++				exit = data(data(result)?.details)?.exit_code;
++			} catch {
++				/* Unknown stays prominent. */
++			}
++			call.job.status = result.isError
++				? "error — see details"
++				: typeof exit === "number" && Number.isSafeInteger(exit) && exit !== 0
++					? `error (exit ${exit}) — see details`
++					: "update — see details";
++			return;
++		}
++		if (summary) {
++			// A mismatched response cannot merge separate jobs or manufacture a successful correlation.
++			if (
++				summary.session &&
++				((call.job.session && summary.session !== call.job.session) ||
++					this.jobs.some((job) => job !== call.job && job.session === summary.session))
++			) {
++				call.prominent = true;
++				call.job.status = "unmatched result — see details";
++				return;
++			}
++			call.job.session ??= summary.session;
++			call.job.status = summary.running ? "running" : "exited 0";
++			if (summary.output) {
++				const text = preview(summary.output);
++				call.job.preview = call.job.preview ? `${call.job.preview} | ${text}` : text;
++				if (call.job.preview.length > 512) call.job.preview = `${call.job.preview.slice(0, 511)}…`;
++			}
++		}
++	}
++	addAudit(journal: string, component: CustomMessageComponent): boolean {
++		if (this.audits.has(journal) || this.audits.size >= MAX_RECORDS) return false;
++		this.audits.set(journal, component);
++		component.setExpanded(this.expanded);
++		return true;
++	}
++	setExpanded(expanded: boolean): void {
++		this.expanded = expanded;
++		for (const c of this.calls.values()) c.component.setExpanded(expanded);
++		for (const c of this.audits.values()) c.setExpanded(expanded);
++	}
++	setShowImages(show: boolean): void {
++		for (const c of this.calls.values()) c.component.setShowImages(show);
++	}
++	setImageWidthCells(width: number): void {
++		for (const c of this.calls.values()) c.component.setImageWidthCells(width);
++	}
++	override invalidate(): void {
++		for (const c of this.calls.values()) c.component.invalidate();
++		for (const c of this.audits.values()) c.invalidate();
++		super.invalidate();
++	}
++	override render(width: number): string[] {
++		if (!Number.isFinite(width)) return [];
++		width = Math.floor(width);
++		if (width <= 0) return [];
++		this.body.clear();
++		const line = (text: string) => this.body.addChild(new Text(truncateToWidth(text, width, "…"), 0, 0));
++		const title = this.jobs.length
++			? `Local job updates · ${this.jobs.length} observed`
++			: "Local tool audit · history only";
++		line(
++			`${theme.fg("muted", `${title} · ${this.audits.size} call audits`)} · ${keyHint("app.tools.expand", this.expanded ? "collapse" : "details")}`,
++		);
++		if (this.expanded) {
++			this.body.addChild(new Text(`Scope: ${preview(this.scopeId)}`, 0, 0));
++			for (const [callId, c] of this.calls) {
++				this.body.addChild(new Text(`Call: ${preview(callId)} · ${c.start.toolName}\n${preview(c.args)}`, 0, 0));
++				this.body.addChild(c.component);
++			}
++			for (const [journal, c] of this.audits) {
++				this.body.addChild(new Text(`Audit: ${preview(journal)}`, 0, 0));
++				this.body.addChild(c);
++			}
++		} else {
++			for (const job of this.jobs.slice(0, MAX_ROWS)) {
++				const text = `#${job.number} ${job.status}${job.preview ? ` · ${job.preview}` : ""}`;
++				line(theme.fg(job.status.includes("error") ? "error" : "toolOutput", text));
++			}
++			if (this.jobs.length > MAX_ROWS)
++				line(theme.fg("muted", `+${this.jobs.length - MAX_ROWS} more job rows — expand`));
++			for (const c of this.calls.values()) if (c.prominent) this.body.addChild(c.component);
++		}
++		return super.render(width);
++	}
++}
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index 8db1b80..66d21ef 100644
+index 8db1b80..88a4474 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -154,6 +154,7 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
+@@ -127,6 +127,7 @@ import { ExtensionInputComponent } from "./components/extension-input.ts";
+ import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
+ import { FooterComponent, formatTokens } from "./components/footer.ts";
+ import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
++import { LocalJobGroup, localJobAudit, localJobStart } from "./components/local-job-group.ts";
+ import { LoginDialogComponent } from "./components/login-dialog.ts";
+ import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
+ import { ModelSelectorComponent } from "./components/model-selector.ts";
+@@ -154,6 +155,7 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
  import { UserMessageComponent } from "./components/user-message.ts";
  import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
  import { editInExternalEditor } from "./external-editor.ts";
@@ -3009,7 +3333,7 @@ index 8db1b80..66d21ef 100644
  import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
  import { getModelSearchText } from "./model-search.ts";
  import { shareSession } from "./session-share.ts";
-@@ -429,6 +430,7 @@ export class InteractiveMode {
+@@ -429,6 +431,7 @@ export class InteractiveMode {
  
  	// Tool execution tracking: toolCallId -> component
  	private pendingTools = new Map<string, ToolExecutionComponent>();
@@ -3017,7 +3341,7 @@ index 8db1b80..66d21ef 100644
  
  	// Tool output expansion state
  	private toolOutputExpanded = false;
-@@ -2007,6 +2009,7 @@ export class InteractiveMode {
+@@ -2007,6 +2010,7 @@ export class InteractiveMode {
  		this.streamingComponent = undefined;
  		this.streamingMessage = undefined;
  		this.pendingTools.clear();
@@ -3025,7 +3349,7 @@ index 8db1b80..66d21ef 100644
  		this.renderInitialMessages();
  	}
  
-@@ -3158,10 +3161,18 @@ export class InteractiveMode {
+@@ -3158,10 +3162,43 @@ export class InteractiveMode {
  
  	private subscribeToAgent(): void {
  		this.unsubscribe = this.session.subscribe(async (event) => {
@@ -3042,10 +3366,35 @@ index 8db1b80..66d21ef 100644
 +		}
 +	}
 +
++	private localJobGroup(scopeId: string): LocalJobGroup {
++		const existing = this.chatContainer.children.find(
++			(child) => child instanceof LocalJobGroup && child.scopeId === scopeId,
++		);
++		if (existing instanceof LocalJobGroup) return existing;
++		const group = new LocalJobGroup(scopeId, () => this.ui.requestRender());
++		group.setExpanded(this.toolOutputExpanded);
++		this.chatContainer.addChild(group);
++		return group;
++	}
++
++	private updateLocalJob(
++		callId: string,
++		result: Parameters<ToolExecutionComponent["updateResult"]>[0],
++		partial = false,
++		correlation?: { scopeId?: string; toolName: string },
++	): void {
++		for (const child of this.chatContainer.children) {
++			if (child instanceof LocalJobGroup && child.hasCall(callId)) {
++				child.updateCall(callId, result, partial, correlation);
++				return;
++			}
++		}
++	}
++
  	private async handleEvent(event: AgentSessionEvent): Promise<void> {
  		if (!this.isInitialized) {
  			await this.init();
-@@ -3171,7 +3182,7 @@ export class InteractiveMode {
+@@ -3171,7 +3208,7 @@ export class InteractiveMode {
  
  		switch (event.type) {
  			case "agent_start":
@@ -3054,17 +3403,65 @@ index 8db1b80..66d21ef 100644
  				// Restore main escape handler if retry handler is still active
  				// (retry success event fires later, but we need main handler now)
  				if (this.retryEscapeHandler) {
-@@ -3324,6 +3335,9 @@ export class InteractiveMode {
- 			case "tool_execution_start": {
- 				let component = this.pendingTools.get(event.toolCallId);
- 				if (!component) {
-+					if (event.scopeId && event.localPoll === "pending") {
-+						this.chatContainer.addChild(new Text(theme.fg("dim", "Local job update"), 0, 0));
-+					}
- 					component = new ToolExecutionComponent(
- 						event.toolName,
- 						event.toolCallId,
-@@ -3374,7 +3388,7 @@ export class InteractiveMode {
+@@ -3295,11 +3332,10 @@ export class InteractiveMode {
+ 						if (!errorMessage) {
+ 							errorMessage = this.streamingMessage.errorMessage || "Error";
+ 						}
+-						for (const [, component] of this.pendingTools.entries()) {
+-							component.updateResult({
+-								content: [{ type: "text", text: errorMessage }],
+-								isError: true,
+-							});
++						for (const [id, component] of this.pendingTools.entries()) {
++							const result = { content: [{ type: "text", text: errorMessage }], isError: true };
++							component.updateResult(result);
++							this.updateLocalJob(id, result);
+ 						}
+ 						this.pendingTools.clear();
+ 					} else {
+@@ -3337,7 +3373,18 @@ export class InteractiveMode {
+ 						this.sessionManager.getCwd(),
+ 					);
+ 					component.setExpanded(this.toolOutputExpanded);
+-					this.chatContainer.addChild(component);
++					const definition = this.getRegisteredToolDefinition(event.toolName);
++					const grouped =
++						localJobStart(event) &&
++						!definition?.renderCall &&
++						!definition?.renderResult &&
++						!(definition && "renderShell" in definition && definition.renderShell) &&
++						this.localJobGroup(event.scopeId!).addCall(
++							event,
++							component,
++							this.localPollPresentation.hadUpdates(event),
++						);
++					if (!grouped) this.chatContainer.addChild(component);
+ 					this.pendingTools.set(event.toolCallId, component);
+ 				}
+ 				component.markExecutionStarted();
+@@ -3348,7 +3395,9 @@ export class InteractiveMode {
+ 			case "tool_execution_update": {
+ 				const component = this.pendingTools.get(event.toolCallId);
+ 				if (component) {
+-					component.updateResult({ ...event.partialResult, isError: false }, true);
++					const result = { ...event.partialResult, isError: false };
++					component.updateResult(result, true);
++					this.updateLocalJob(event.toolCallId, result, true, event);
+ 					this.ui.requestRender();
+ 				}
+ 				break;
+@@ -3357,7 +3406,9 @@ export class InteractiveMode {
+ 			case "tool_execution_end": {
+ 				const component = this.pendingTools.get(event.toolCallId);
+ 				if (component) {
+-					component.updateResult({ ...event.result, isError: event.isError });
++					const result = { ...event.result, isError: event.isError };
++					component.updateResult(result);
++					this.updateLocalJob(event.toolCallId, result, false, event);
+ 					this.pendingTools.delete(event.toolCallId);
+ 					this.ui.requestRender();
+ 				}
+@@ -3374,7 +3425,7 @@ export class InteractiveMode {
  					this.streamingComponent = undefined;
  					this.streamingMessage = undefined;
  				}
@@ -3073,7 +3470,18 @@ index 8db1b80..66d21ef 100644
  
  				this.ui.requestRender();
  				break;
-@@ -3688,6 +3702,7 @@ export class InteractiveMode {
+@@ -3602,7 +3653,9 @@ export class InteractiveMode {
+ 						this.outputPad,
+ 					);
+ 					component.setExpanded(this.toolOutputExpanded);
+-					this.chatContainer.addChild(component);
++					const audit = !renderer && localJobAudit(message);
++					if (!audit || !this.localJobGroup(audit.scope).addAudit(audit.journal, component))
++						this.chatContainer.addChild(component);
+ 				}
+ 				break;
+ 			}
+@@ -3688,6 +3741,7 @@ export class InteractiveMode {
  		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
  	): void {
  		this.pendingTools.clear();
@@ -3081,13 +3489,32 @@ index 8db1b80..66d21ef 100644
  		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
  		// Cache-miss notices are not persisted; re-derive them from the full entry
  		// list and re-inject them after the assistant messages that paid for them.
+@@ -4609,7 +4663,7 @@ export class InteractiveMode {
+ 					onShowImagesChange: (enabled) => {
+ 						this.settingsManager.setShowImages(enabled);
+ 						for (const child of this.chatContainer.children) {
+-							if (child instanceof ToolExecutionComponent) {
++							if (child instanceof ToolExecutionComponent || child instanceof LocalJobGroup) {
+ 								child.setShowImages(enabled);
+ 							}
+ 						}
+@@ -4617,7 +4671,7 @@ export class InteractiveMode {
+ 					onImageWidthCellsChange: (width) => {
+ 						this.settingsManager.setImageWidthCells(width);
+ 						for (const child of this.chatContainer.children) {
+-							if (child instanceof ToolExecutionComponent) {
++							if (child instanceof ToolExecutionComponent || child instanceof LocalJobGroup) {
+ 								child.setImageWidthCells(width);
+ 							}
+ 						}
 diff --git a/packages/coding-agent/src/modes/interactive/local-poll-presentation.ts b/packages/coding-agent/src/modes/interactive/local-poll-presentation.ts
 new file mode 100644
-index 0000000..cfc6ff6
+index 0000000..16e5eb3
 --- /dev/null
 +++ b/packages/coding-agent/src/modes/interactive/local-poll-presentation.ts
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,62 @@
 +import type { AgentSessionEvent } from "../../core/agent-session.ts";
++import { localJobStart } from "./components/local-job-group.ts";
 +
 +type Start = Extract<AgentSessionEvent, { type: "tool_execution_start" }>;
 +
@@ -3096,29 +3523,39 @@ index 0000000..cfc6ff6
 + * Normal agent_end is not scope completion; deferred calls survive foreground turns.
 + */
 +export class LocalPollPresentation {
-+	private pending = new Map<string, { start: Start; revealed: boolean }>();
++	private pending = new Map<string, { start: Start; revealed: boolean; deferrable: boolean; updated: boolean }>();
++	private updatedStarts = new WeakSet<AgentSessionEvent>();
++
++	/** Display-only memory across redraw; never part of raw SDK/RPC events. */
++	hadUpdates(start: AgentSessionEvent): boolean {
++		return this.updatedStarts.has(start);
++	}
 +
 +	accept(event: AgentSessionEvent): AgentSessionEvent[] {
 +		if (event.type === "tool_execution_start") {
-+			if (
-+				event.scopeId &&
-+				event.toolName === "write_stdin" &&
-+				event.localPoll === "pending" &&
-+				!this.pending.has(event.toolCallId) &&
-+				this.pending.size < 8
-+			) {
-+				this.pending.set(event.toolCallId, { start: event, revealed: false });
-+				return [];
++			if (localJobStart(event) && !this.pending.has(event.toolCallId) && this.pending.size < 8) {
++				const deferrable = event.toolName === "write_stdin" && event.localPoll === "pending";
++				this.pending.set(event.toolCallId, { start: event, revealed: !deferrable, deferrable, updated: false });
++				return deferrable ? [] : [event];
 +			}
 +		} else if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
 +			const held = this.pending.get(event.toolCallId);
 +			if (held && held.start.scopeId === event.scopeId && held.start.toolName === event.toolName) {
++				if (event.type === "tool_execution_update") held.updated = true;
 +				if (event.type === "tool_execution_end") {
 +					this.pending.delete(event.toolCallId);
-+					if (!held.revealed && event.localPoll === "quiet" && event.isError === false) return [];
++					if (
++						held.deferrable &&
++						!held.updated &&
++						!held.revealed &&
++						event.localPoll === "quiet" &&
++						event.isError === false
++					)
++						return [];
 +				}
 +				if (held.revealed) return [event];
 +				held.revealed = true;
++				if (held.updated) this.updatedStarts.add(held.start);
 +				return [held.start, event];
 +			}
 +		}
@@ -3135,23 +3572,31 @@ index 0000000..cfc6ff6
 +
 +	clear(): void {
 +		this.pending.clear();
++		this.updatedStarts = new WeakSet();
 +	}
 +}
 diff --git a/packages/coding-agent/test/suite/tool-invocation.test.ts b/packages/coding-agent/test/suite/tool-invocation.test.ts
 new file mode 100644
-index 0000000..842380b
+index 0000000..35eff2e
 --- /dev/null
 +++ b/packages/coding-agent/test/suite/tool-invocation.test.ts
-@@ -0,0 +1,531 @@
+@@ -0,0 +1,992 @@
 +// Native scoped invocation regression fixtures.
 +import type { AgentToolInvocation, AgentToolResult, AgentToolScope } from "@earendil-works/pi-agent-core";
 +import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 +import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
-+import { Container } from "@earendil-works/pi-tui";
++import { Container, stripTerminalSequences, Text, visibleWidth } from "@earendil-works/pi-tui";
 +import { Type } from "typebox";
 +import { afterEach, describe, expect, it } from "vitest";
 +import type { AgentSessionEvent } from "../../src/core/agent-session.ts";
 +import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
++import type { CustomMessage } from "../../src/core/messages.ts";
++import {
++	LocalJobGroup,
++	localJobAudit,
++	localJobResult,
++} from "../../src/modes/interactive/components/local-job-group.ts";
++import { ToolExecutionComponent } from "../../src/modes/interactive/components/tool-execution.ts";
 +import { InteractiveMode } from "../../src/modes/interactive/interactive-mode.ts";
 +import { LocalPollPresentation } from "../../src/modes/interactive/local-poll-presentation.ts";
 +import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
@@ -3673,6 +4118,460 @@ index 0000000..842380b
 +				}),
 +			).toHaveLength(1);
 +		});
++});
++
++describe("compact native scoped job groups", () => {
++	const result = (detail: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
++		content: [{ type: "text", text: JSON.stringify(detail) }],
++		details: detail,
++		isError: false,
++		...extra,
++	});
++	const running = (id = "owned") =>
++		result({
++			session_id: id,
++			output: "",
++			exit_code: null,
++			running: true,
++			supervisor_ready: false,
++			truncated_bytes: 0,
++		});
++	const ended = (output = "SYNTHETIC_FINISHED\n") =>
++		result({
++			session_id: undefined,
++			output,
++			exit_code: 0,
++			running: false,
++			supervisor_ready: true,
++			truncated_bytes: 0,
++			termination: undefined,
++		});
++	const start = (
++		n: string,
++		toolName = "exec_command",
++		args: unknown = { cmd: "synthetic harmless command" },
++		scopeId: string | undefined = "group",
++	) =>
++		({ type: "tool_execution_start", toolCallId: n, toolName, args, scopeId }) as Extract<
++			AgentSessionEvent,
++			{ type: "tool_execution_start" }
++		>;
++	const audit = (n: string, scope = "group", toolName = "exec_command") =>
++		({
++			role: "custom",
++			customType: "code-mode-evidence",
++			display: true,
++			content: [{ type: "text", text: `Code mode: ${toolName} returned.` }],
++			details: {
++				toolName,
++				toolCallId: n,
++				isError: false,
++				auditOnly: true,
++				journalId: `journal-${n}`,
++				scopeId: scope,
++			},
++			timestamp: 0,
++		}) as CustomMessage;
++	function display(definition?: any, renderer?: any) {
++		initTheme("dark", false);
++		let sink!: (event: AgentSessionEvent) => Promise<void>;
++		const pending = new Set<string>(),
++			view = Object.create(InteractiveMode.prototype) as Record<string, any>;
++		Object.assign(view, {
++			isInitialized: true,
++			localPollPresentation: new LocalPollPresentation(),
++			pendingTools: new Map(),
++			chatContainer: new Container(),
++			loadedResourcesContainer: new Container(),
++			pendingMessagesContainer: new Container(),
++			footer: { invalidate() {} },
++			ui: { requestRender() {}, terminal: { setProgress() {} } },
++			toolOutputExpanded: false,
++			clearStatusIndicator() {},
++			getRegisteredToolDefinition: () => definition,
++			renderInitialMessages() {},
++			runtimeHost: {
++				session: {
++					agent: { state: { pendingToolCalls: pending } },
++					settingsManager: {
++						getShowImages: () => false,
++						getImageWidthCells: () => 80,
++						getShowTerminalProgress: () => false,
++						getCodeBlockIndent: () => 0,
++						getShowCacheMissNotices: () => false,
++					},
++					sessionManager: { getCwd: () => "." },
++					extensionRunner: { getMessageRenderer: () => renderer },
++					subscribe: (fn: typeof sink) => {
++						sink = fn;
++						return () => {};
++					},
++				},
++			},
++		});
++		view.subscribeToAgent();
++		return {
++			view,
++			pending,
++			emit: async (event: AgentSessionEvent) => {
++				if (event.type === "tool_execution_start") pending.add(event.toolCallId);
++				if (event.type === "tool_execution_end") pending.delete(event.toolCallId);
++				await sink(event);
++			},
++			finish: async (s: ReturnType<typeof start>, r: ReturnType<typeof ended>) => {
++				pending.delete(s.toolCallId);
++				await sink({
++					type: "tool_execution_end",
++					toolCallId: s.toolCallId,
++					toolName: s.toolName,
++					scopeId: s.scopeId,
++					result: r,
++					isError: r.isError,
++				} as AgentSessionEvent);
++			},
++			frame: (width = 80) => view.chatContainer.render(width).map(stripTerminalSequences).join("\n"),
++			groups: () =>
++				view.chatContainer.children.filter((c: unknown) => c instanceof LocalJobGroup) as LocalJobGroup[],
++		};
++	}
++	it("groups three starts, terminal output and six audits into four lines; expansion preserves original native details", async () => {
++		const f = display(),
++			originals = [];
++		for (let n = 0; n < 3; n++) {
++			const s = start(`start-${n}`);
++			originals.push(s);
++			await f.emit(s);
++			await f.finish(s, running(`owned-${n}`));
++		}
++		expect(f.frame().split("\n")).toHaveLength(4);
++		expect(f.groups()).toHaveLength(1);
++		for (let n = 0; n < 3; n++) {
++			const s = {
++				...start(`poll-${n}`, "write_stdin", { session_id: `owned-${n}` }),
++				localPoll: "pending",
++			} as ReturnType<typeof start>;
++			await f.emit(s);
++			await f.finish(s, ended(`SYNTHETIC_GROUP_${n}\n`));
++		}
++		for (let n = 0; n < 3; n++)
++			for (const tool of ["exec_command", "write_stdin"])
++				f.view.addMessageToChat(audit(`${tool}-${n}`, "group", tool));
++		expect(f.frame().split("\n")).toHaveLength(4);
++		expect(f.frame()).toContain("6 call audits");
++		expect(f.frame()).not.toContain("session_id");
++		for (let n = 0; n < 3; n++) expect(f.frame()).toContain(`SYNTHETIC_GROUP_${n}`);
++		f.view.setToolsExpanded(true);
++		const expanded = f.frame();
++		expect(expanded).toContain("Scope: group");
++		expect(expanded).toContain("Call: start-0");
++		expect(expanded).toContain("synthetic harmless command");
++		expect(expanded).toContain("session_id");
++		expect(expanded).toContain("Code mode: exec_command returned.");
++		expect(expanded).toContain("Audit: journal-");
++		expect(f.view.pendingTools.size).toBe(0);
++		expect(originals[0]).toEqual(start("start-0"));
++		f.view.setToolsExpanded(false);
++		expect(f.groups()[0].render(80)).toHaveLength(4);
++	});
++	it("keeps prior meaningful output when an empty terminal collection updates the same job", async () => {
++		const f = display(),
++			s = start("start");
++		await f.emit(s);
++		const r = running();
++		r.details.output = "EARLY_OUTPUT";
++		r.content[0].text = JSON.stringify(r.details);
++		await f.finish(s, r);
++		const p = start("poll", "write_stdin", { session_id: "owned" });
++		await f.emit(p);
++		await f.finish(p, ended(""));
++		expect(f.frame()).toContain("EARLY_OUTPUT");
++		expect(f.frame()).toContain("exited 0");
++		expect(f.frame().split("\n")).toHaveLength(2);
++	});
++	it("does not group direct calls, nonempty stdin, control, unknown arguments or custom renderers", async () => {
++		for (const [s, definition] of [
++			[start("direct", "exec_command", { cmd: "harmless" }, undefined), undefined],
++			[start("input", "write_stdin", { session_id: "s", chars: "hello" }), undefined],
++			[start("control", "write_stdin", { session_id: "s", chars: "\u0003" }), undefined],
++			[start("unknown", "exec_command", { cmd: "harmless", unexpected: true }), undefined],
++			[start("rendered"), { renderCall: () => new Text("CUSTOM_CALL") }],
++		] as const) {
++			const f = display(definition);
++			await f.emit({ ...s, scopeId: s.toolCallId === "direct" ? undefined : s.scopeId });
++			expect(f.groups()).toHaveLength(0);
++			expect(f.view.chatContainer.children[0]).toBeInstanceOf(ToolExecutionComponent);
++		}
++	});
++	for (const [name, change] of [
++		[
++			"error",
++			(r: any) => {
++				r.isError = true;
++			},
++		],
++		[
++			"nonzero exit",
++			(r: any) => {
++				r.details.exit_code = 7;
++			},
++		],
++		[
++			"loss",
++			(r: any) => {
++				r.details.truncated_bytes = 1;
++			},
++		],
++		[
++			"termination",
++			(r: any) => {
++				r.details.termination = "cancelled";
++			},
++		],
++		[
++			"remaining session",
++			(r: any) => {
++				r.details.session_id = "unread";
++			},
++		],
++		[
++			"unknown metadata",
++			(r: any) => {
++				r.details.unknown = true;
++			},
++		],
++		[
++			"defined usage",
++			(r: any) => {
++				r.usage = {};
++			},
++		],
++		[
++			"defined terminate",
++			(r: any) => {
++				r.terminate = true;
++			},
++		],
++		[
++			"mismatched text",
++			(r: any) => {
++				r.content[0].text = "OTHER_RESULT";
++			},
++		],
++		["image", (r: any) => r.content.push({ type: "image", data: tinyBmp(), mimeType: "image/bmp" })],
++		[
++			"source evidence",
++			(r: any) => {
++				r.details.sourceEvidencePresent = true;
++			},
++		],
++	] as const)
++		it(`fails to native full rendering for ${name}`, async () => {
++			const f = display(),
++				s = start("start"),
++				r = ended("IMPORTANT_OUTPUT");
++			change(r);
++			expect(localJobResult(r)).toBeUndefined();
++			await f.emit(s);
++			await f.finish(s, r);
++			expect(f.frame().split("\n").length).toBeGreaterThan(2);
++			expect(f.frame()).toContain(name === "mismatched text" ? "OTHER_RESULT" : "IMPORTANT_OUTPUT");
++		});
++	it("normalizes only known own undefined fields on a copy; key order is not evidence loss", () => {
++		const r = ended();
++		expect(localJobResult(r)).toMatchObject({ running: false });
++		expect(Object.hasOwn(r.details, "termination")).toBe(true);
++		expect(Object.hasOwn(r.details, "session_id")).toBe(true);
++		r.content[0].text = JSON.stringify(Object.fromEntries(Object.entries(r.details).reverse()));
++		expect(localJobResult(r)).toMatchObject({ running: false });
++	});
++	it("never invokes accessor fields during compact classification", () => {
++		let reads = 0;
++		const r = ended();
++		Object.defineProperty(r.details, "output", {
++			get() {
++				reads++;
++				return "hidden";
++			},
++		});
++		expect(localJobResult(r)).toBeUndefined();
++		expect(reads).toBe(0);
++	});
++	it("keeps native partial updates prominent even if the final result looks compactable", async () => {
++		const f = display(),
++			s = start("partial");
++		await f.emit(s);
++		await f.emit({
++			type: "tool_execution_update",
++			toolCallId: s.toolCallId,
++			toolName: s.toolName,
++			scopeId: s.scopeId,
++			args: s.args,
++			partialResult: text("PARTIAL_DATA"),
++		});
++		expect(f.frame()).toContain("PARTIAL_DATA");
++		await f.finish(s, ended());
++		expect(f.frame()).toContain("SYNTHETIC_FINISHED");
++		expect(f.frame().split("\n").length).toBeGreaterThan(2);
++	});
++	it("does not conceal cross-scope or mismatched job results", async () => {
++		const f = display(),
++			s = start("a");
++		await f.emit(s);
++		await f.finish(s, running("original"));
++		const p = start("p", "write_stdin", { session_id: "original" });
++		await f.emit(p);
++		await f.finish(p, running("foreign"));
++		expect(f.frame()).toContain("unmatched result");
++		expect(f.frame()).toContain("foreign");
++		const p2 = start("p2", "write_stdin", { session_id: "original" });
++		await f.emit(p2);
++		await f.finish({ ...p2, scopeId: "foreign" }, ended());
++		expect(f.frame()).toContain("SYNTHETIC_FINISHED");
++		expect(f.frame().split("\n").length).toBeGreaterThan(3);
++	});
++	it("isolates same-looking shell IDs between groups", async () => {
++		const f = display();
++		for (const scope of ["one", "two"]) {
++			const s = start(scope, "exec_command", { cmd: "synthetic" }, scope);
++			await f.emit(s);
++			await f.finish(s, running("same"));
++		}
++		expect(f.groups()).toHaveLength(2);
++	});
++	it("sanitizes control/directional text and bounds compact Unicode rows", async () => {
++		const f = display(),
++			s = start("unicode");
++		await f.emit(s);
++		await f.finish(s, ended("safe\u001b]0;not-a-title\u0007\u202e\n界🐄".repeat(80)));
++		for (const w of [1, 16, 31, 80])
++			for (const line of f.groups()[0].render(w)) {
++				expect(visibleWidth(line)).toBeLessThanOrEqual(w);
++				expect(stripTerminalSequences(line)).not.toMatch(/[\u001b\u202e]/);
++			}
++		expect(f.groups()[0].render(0)).toEqual([]);
++		expect(f.groups()[0].render(-1)).toEqual([]);
++		expect(f.groups()[0].render(0.5)).toEqual([]);
++	});
++	it("bounds records and leaves overflow as native cards, not silent eviction", async () => {
++		const f = display();
++		for (let n = 0; n < 65; n++) {
++			const s = start(`s-${n}`);
++			await f.emit(s);
++			await f.finish(s, ended(`RESULT_${n}`));
++		}
++		expect(f.view.chatContainer.children).toHaveLength(2);
++		expect(f.view.chatContainer.children[1]).toBeInstanceOf(ToolExecutionComponent);
++		expect(f.frame()).toContain("RESULT_64");
++		expect(f.frame()).toContain("more job rows");
++		f.groups()[0].setExpanded(true);
++		expect(f.frame()).toContain("RESULT_63");
++	});
++	it("bounds audit retention and leaves duplicate/overflow messages visible", () => {
++		const f = display();
++		for (let n = 0; n < 65; n++) f.view.addMessageToChat(audit(String(n)));
++		expect(f.groups()).toHaveLength(1);
++		expect(f.view.chatContainer.children).toHaveLength(2);
++		expect(f.frame()).toContain("64 call audits");
++		f.view.addMessageToChat(audit("0"));
++		expect(f.view.chatContainer.children).toHaveLength(3);
++	});
++	it("groups only exact ordinary audits; image/source/direct/error/custom content remains native", () => {
++		for (const change of [
++			(m: any) => {
++				m.details.isError = true;
++			},
++			(m: any) => {
++				m.details.kind = "unified_exec_completion";
++			},
++			(m: any) => m.content.push({ type: "image", data: tinyBmp(), mimeType: "image/bmp" }),
++			(m: any) => {
++				m.details.sourceEvidencePresent = true;
++			},
++			(m: any) => {
++				m.content[0].text = "IMPORTANT_EVIDENCE";
++			},
++			(m: any) => delete m.details.journalId,
++		]) {
++			const f = display(),
++				m = audit("x");
++			change(m);
++			expect(localJobAudit(m)).toBeUndefined();
++			f.view.addMessageToChat(m);
++			expect(f.groups()).toHaveLength(0);
++			expect(f.frame()).toContain("code-mode-evidence");
++		}
++	});
++	it("does not bypass an existing custom message renderer", () => {
++		const f = display(undefined, () => new Text("CUSTOM_EVIDENCE"));
++		f.view.addMessageToChat(audit("x"));
++		expect(f.groups()).toHaveLength(0);
++		expect(f.frame()).toContain("CUSTOM_EVIDENCE");
++	});
++	it("history replay has audit counts only, no restored running job claims or message mutation", () => {
++		const f = display(),
++			messages = [audit("1"), audit("2")],
++			before = JSON.stringify(messages);
++		f.view.renderSessionItems(messages);
++		expect(f.frame().split("\n")).toHaveLength(1);
++		expect(f.frame()).toContain("history only");
++		expect(f.frame()).not.toContain("running");
++		expect(JSON.stringify(messages)).toBe(before);
++		f.groups()[0].setExpanded(true);
++		expect(f.frame()).toContain("Code mode: exec_command returned.");
++		f.view.renderCurrentSessionState();
++		expect(f.groups()).toHaveLength(0);
++	});
++	it("reconstructs a still-pending scoped start after full redraw without losing its late result", async () => {
++		const f = display(),
++			s = start("slow-start");
++		await f.emit(s);
++		f.view.renderCurrentSessionState();
++		expect(f.frame()).toBe("");
++		await f.finish(s, ended("AFTER_REDRAW"));
++		expect(f.frame()).toContain("AFTER_REDRAW");
++		expect(f.view.pendingTools.size).toBe(0);
++	});
++	it("retains update prominence across redraw even when the terminal shape could otherwise compact", async () => {
++		const f = display(),
++			s = start("updated-start");
++		await f.emit(s);
++		await f.emit({
++			type: "tool_execution_update",
++			toolCallId: s.toolCallId,
++			toolName: s.toolName,
++			scopeId: s.scopeId,
++			args: s.args,
++			partialResult: text("BEFORE_REDRAW_UPDATE"),
++		});
++		f.view.renderCurrentSessionState();
++		await f.finish(s, ended("AFTER_UPDATED_REDRAW"));
++		expect(f.frame()).toContain("AFTER_UPDATED_REDRAW");
++		expect(f.frame().split("\n").length).toBeGreaterThan(2);
++	});
++	it("does not let foreground agent-end/start close the group or pending native call", async () => {
++		const f = display(),
++			s = start("long");
++		await f.emit(s);
++		await f.emit({ type: "agent_end", messages: [], willRetry: false });
++		await f.emit({ type: "agent_start" });
++		expect(f.groups()).toHaveLength(1);
++		expect(f.view.pendingTools.size).toBe(1);
++		await f.finish(s, ended());
++		expect(f.frame()).toContain("exited 0");
++	});
++	it("keeps an interrupted pending call visibly failed rather than indefinitely pending", async () => {
++		const f = display(),
++			s = start("interrupt");
++		await f.emit(s);
++		f.view.streamingComponent = { updateContent() {} };
++		await f.emit({
++			type: "message_end",
++			message: { role: "assistant", content: [], stopReason: "aborted", timestamp: 0 } as any,
++		});
++		expect(f.frame()).toContain("Operation aborted");
++		expect(f.frame()).toContain("error");
++		expect(f.view.pendingTools.size).toBe(0);
++	});
 +});
 diff --git a/vitest.base.ts b/vitest.base.ts
 index 9394bcb..4c47955 100644

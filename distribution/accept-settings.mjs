@@ -73,5 +73,5 @@ try{
   }finally{await session.extensionRunner.emit("session_shutdown",{});session.dispose();}
  }
  assert.equal(networkAttempts,0);
- console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,networkAttempts,frames}));
+ console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,compactLocalJobPresentation:true,networkAttempts,frames}));
 }finally{globalThis.fetch=priorFetch;}

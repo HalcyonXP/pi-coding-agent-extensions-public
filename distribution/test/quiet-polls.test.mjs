@@ -24,16 +24,30 @@ test("native polling bootstrap refuses a missing pinned dist entry instead of fo
 });
 const presentationFrames=()=>[
  {name:"local-poll-empty-hidden",text:""},{name:"local-poll-terminal-visible",text:"Local job update\nSynthetic terminal result"},
+ {name:"local-jobs-three-compact",text:"6 call audits\nRENDER_OK_0\nRENDER_OK_1\nRENDER_OK_2"},
+ {name:"local-jobs-expanded",text:"Scope: synthetic-group\nsession_id\nCode mode: exec_command returned."},
+ {name:"local-jobs-audit-history",text:"history only · 6 call audits"},
+ {name:"local-jobs-error-visible",text:"error (exit 7)\nSYNTHETIC_NONZERO"},
+ {name:"local-jobs-direct-unchanged",text:"exec_command\nSYNTHETIC_DIRECT"},
  ...["fast-before","fast-applying","fast-saved","capabilities-before","unified-search-stays-open","code-enabled","web-enabled","jobs-inside-openai","capabilities-restored","fast-after-exclusions","capabilities-excluded","jobs-after-exclusions"].map(name=>({name,text:"Synthetic existing native settings frame"}))
 ];
-test("profile frame contract retains twelve settings frames plus two polling frames",()=>assert.equal(validatePollingFrames(presentationFrames()),true));
+test("profile frame contract retains twelve settings and two polling contracts plus five compact-group frames",()=>assert.equal(validatePollingFrames(presentationFrames()),true));
 for(const [name,change]of [
- ["obsolete twelve-only list",frames=>frames.splice(0,2)],
+ ["obsolete twelve-only list",frames=>frames.splice(0,7)],
+ ["obsolete fourteen-only list",frames=>frames.splice(2,5)],
+ ["oversized compact group",frames=>frames[2].text+='\nextra row'],
+ ["lost compact output",frames=>frames[2].text=frames[2].text.replace('RENDER_OK_1','lost')],
+ ["raw collapsed metadata",frames=>frames[2].text+=' session_id'],
+ ["lost expandable details",frames=>frames[3].text='missing'],
+ ["restored running audit jobs",frames=>frames[4].text+=' running'],
+ ["concealed nonzero exit",frames=>frames[5].text='SYNTHETIC_NONZERO'],
+ ["grouped ordinary tool",frames=>frames[6].text+=' Local job'],
+
  ["quiet placeholder noise",frames=>frames[0].text=" "],
  ["missing local label",frames=>frames[1].text="Synthetic terminal result"],
  ["lost terminal result",frames=>frames[1].text="Local job update"],
- ["replaced original frame",frames=>frames[2].name="other"],
- ["blank original frame",frames=>frames[2].text=""]
+ ["replaced original frame",frames=>frames[7].name="other"],
+ ["blank original frame",frames=>frames[7].text=""]
 ])test(`profile frame contract refuses ${name}`,()=>{const frames=presentationFrames();change(frames);assert.throws(()=>validatePollingFrames(frames));});
 const rows=()=>{
  const common={modelRequestsDuringWork:2,shellStarts:3,quietPolls:4,quietCards:0,quietAudits:0,inFlightInputChanged:false,visibleMeaningfulResults:6,meaningfulResults:6,pendingPresentation:0,activeScopes:0,drainingScopes:0};
