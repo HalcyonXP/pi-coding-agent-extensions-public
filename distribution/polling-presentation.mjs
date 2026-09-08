@@ -12,6 +12,13 @@ export async function loadPollingPresentation(bundle,sdk) {
  const {LocalPollPresentation}=await import(pathToFileURL(join(bundle,"node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/local-poll-presentation.js")).href);
  return {InteractiveMode:sdk.InteractiveMode,LocalPollPresentation,Container,initTheme:sdk.initTheme};
 }
+// Preserve all twelve existing settings frames and require the two added poll frames.
+export function validatePollingFrames(frames) {
+ assert.deepEqual(frames.map(f=>f.name),["local-poll-empty-hidden","local-poll-terminal-visible","fast-before","fast-applying","fast-saved","capabilities-before","unified-search-stays-open","code-enabled","web-enabled","jobs-inside-openai","capabilities-restored","fast-after-exclusions","capabilities-excluded","jobs-after-exclusions"]);
+ assert.equal(frames[0].text,"");assert.match(frames[1].text,/Local job update/);assert.match(frames[1].text,/Synthetic terminal result/);
+ for(const frame of frames.slice(2))assert.ok(typeof frame.text==="string"&&frame.text.length>0,"Original settings frame missing");
+ return true;
+}
 export function pollingPresentation(session,{InteractiveMode,LocalPollPresentation,Container,initTheme}) {
  assert.equal(typeof InteractiveMode?.prototype?.subscribeToAgent,"function");
  assert.equal(typeof LocalPollPresentation,"function");initTheme("dark",false);

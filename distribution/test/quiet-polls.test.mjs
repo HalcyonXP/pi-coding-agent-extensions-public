@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {validateQuietPolling} from "../accept-quiet-polls.mjs";
-import {loadPollingPresentation} from "../polling-presentation.mjs";
+import {loadPollingPresentation,validatePollingFrames} from "../polling-presentation.mjs";
 import {mkdtemp,mkdir,writeFile,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -22,6 +22,19 @@ test("native polling bootstrap loads the fixed TUI main-only package entry witho
 test("native polling bootstrap refuses a missing pinned dist entry instead of following alternate main",async t=>{
  const root=await moduleFixture(t,{missingTui:true});await assert.rejects(loadPollingPresentation(root,{}),{code:"ERR_MODULE_NOT_FOUND"});
 });
+const presentationFrames=()=>[
+ {name:"local-poll-empty-hidden",text:""},{name:"local-poll-terminal-visible",text:"Local job update\nSynthetic terminal result"},
+ ...["fast-before","fast-applying","fast-saved","capabilities-before","unified-search-stays-open","code-enabled","web-enabled","jobs-inside-openai","capabilities-restored","fast-after-exclusions","capabilities-excluded","jobs-after-exclusions"].map(name=>({name,text:"Synthetic existing native settings frame"}))
+];
+test("profile frame contract retains twelve settings frames plus two polling frames",()=>assert.equal(validatePollingFrames(presentationFrames()),true));
+for(const [name,change]of [
+ ["obsolete twelve-only list",frames=>frames.splice(0,2)],
+ ["quiet placeholder noise",frames=>frames[0].text=" "],
+ ["missing local label",frames=>frames[1].text="Synthetic terminal result"],
+ ["lost terminal result",frames=>frames[1].text="Local job update"],
+ ["replaced original frame",frames=>frames[2].name="other"],
+ ["blank original frame",frames=>frames[2].text=""]
+])test(`profile frame contract refuses ${name}`,()=>{const frames=presentationFrames();change(frames);assert.throws(()=>validatePollingFrames(frames));});
 const rows=()=>{
  const common={modelRequestsDuringWork:2,shellStarts:3,quietPolls:4,quietCards:0,quietAudits:0,inFlightInputChanged:false,visibleMeaningfulResults:6,meaningfulResults:6,pendingPresentation:0,activeScopes:0,drainingScopes:0};
  return [{...common,aborted:false,terminalResults:3,collectedCell:true,followupAudits:6,expectedAudits:6},{...common,aborted:true,startsAfterAbort:0,errorResults:1}];
