@@ -37,7 +37,7 @@ test("Windows launch rejects missing and corrupted prebuilt helpers without crea
 	// development dependencies. Never modify a real artifact or installed bundle.
 	const parent = join(root, ".pi"); await mkdir(parent, { recursive: true });
 	const fixture = await mkdtemp(join(parent, "missing-shell-helper-"));
-	const files = ["unified-exec.ts", "utf8-output.ts", ...["artifact.mjs", "WindowsRuntime.cs", "build.mjs", "toolchain.mjs", "toolchain.json"].map(name => "runtime/native/" + name)];
+	const files = ["unified-exec.ts", "unified-completion.ts", "utf8-output.ts", ...["artifact.mjs", "WindowsRuntime.cs", "build.mjs", "toolchain.mjs", "toolchain.json"].map(name => "runtime/native/" + name)];
 	try {
 		for (const name of files) { const target = join(fixture, name); await mkdir(dirname(target), { recursive: true }); await copyFile(join(root, name), target); }
 		const api = await import(pathToFileURL(join(fixture, "unified-exec.ts")).href);

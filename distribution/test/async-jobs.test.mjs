@@ -1,0 +1,17 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
+import assert from "node:assert/strict";import test from "node:test";import {mkdtemp,rm} from "node:fs/promises";import {tmpdir} from "node:os";import {join} from "node:path";import {acceptAsyncCompletion} from "../accept-async-jobs.mjs";
+async function fixture(fault){
+ const cwd=await mkdtemp(join(tmpdir(),"async-helper-unit-")),calls=[],listeners=new Set(),details={kind:"unified_exec_completion",session_id:"synthetic-job",exit_code:7},message={role:"custom",details,content:[{type:"text",text:"Unified exec completed.\n"+JSON.stringify({...details,output:"ASYNC_DONE\n"})}]};let time=0,polls=0,unsubscribed=false;
+ const publish=()=>{session.messages.push(message);for(const listener of listeners)listener({type:"message_end",message});};
+ const session={messages:[],isStreaming:false,agent:{getToolGatewayInfo:()=>({activeScopes:0,drainingScopes:0})},sessionManager:{getEntries(){if(fault==="journal")return [];if(fault==="early-event")publish();return [{type:"custom",customType:"code-mode-protected-evidence",data:{details}}];}},subscribe(fn){listeners.add(fn);return()=>{unsubscribed=true;listeners.delete(fn);};},async prompt(){this.isStreaming=true;await faux.responses[0]({messages:[]});publish();if(fault==="duplicate")publish();await faux.responses[1]({messages:fault==="model-context"?[]:[{role:"user",content:message.content}]});this.isStreaming=false;}};
+ const faux={setResponses(responses){this.responses=responses;}},ai={fauxToolCall:(name,args)=>({name,args}),fauxAssistantMessage:(content,options)=>({content,options})};
+ const invoke=async(name,args)=>{calls.push({name,args});if(name==="exec_command"){assert.match(args.cmd,/existsSync\(''async-completion-release\.txt''\)/);assert.doesNotMatch(args.cmd,/"async-completion-release/);assert.match(args.cmd,/; exit \$LASTEXITCODE$/);return{session_id:details.session_id,running:true,output:"",supervisor_ready:false};}assert.equal(name,"write_stdin");assert.equal(args.session_id,details.session_id);if(++polls===1)return{session_id:details.session_id,running:true,output:"ASYNC_READY\n",supervisor_ready:true};if(fault==="lost-result")throw Error("Original returned ID lost");return{running:false,exit_code:7,output:"ASYNC_DONE\n"};};
+ try{
+  const result=await acceptAsyncCompletion(session,invoke,x=>x,faux,ai,cwd,{now:()=>time,pause:async ms=>{time+=fault==="short-gap"?Math.min(ms,1):ms;}});
+  assert.equal(result.nativeCompletionWithoutPolling,true);assert.equal(result.protectedJournalWhileStreaming,true);assert.equal(result.nextSafeModelRequest,true);assert.equal(result.lateOutputCollected,true);assert.equal(result.automaticIdleTurns,false);assert.equal(result.incrementalOutputStreaming,false);
+  assert.equal(calls.filter(c=>c.name==="exec_command").length,1);assert.equal(calls.filter(c=>c.name==="write_stdin").length,2);assert.equal(time,65000);return result;
+ }finally{assert.equal(calls.filter(c=>c.name==="exec_command").length,1,"No retry/relaunch even after a failed acceptance assertion");assert.equal(unsubscribed,true);assert.equal(listeners.size,0);await rm(cwd,{recursive:true,force:true});}
+}
+test("asynchronous acceptance requires journal, safe model input, one event and late original-ID collection",()=>fixture());
+for(const fault of ["journal","early-event","model-context","duplicate","lost-result","short-gap"])test(`asynchronous acceptance refuses ${fault} without relaunch`,async()=>{await assert.rejects(fixture(fault));});
