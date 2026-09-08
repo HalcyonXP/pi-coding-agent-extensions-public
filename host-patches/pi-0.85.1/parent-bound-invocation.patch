@@ -1,16 +1,19 @@
 diff --git a/packages/agent/src/agent-loop.ts b/packages/agent/src/agent-loop.ts
-index 193e3fa..da58233 100644
+index 193e3fa..51f98e6 100644
 --- a/packages/agent/src/agent-loop.ts
 +++ b/packages/agent/src/agent-loop.ts
-@@ -8,6 +8,7 @@ import {
+@@ -8,8 +8,10 @@ import {
  	type Context,
  	EventStream,
  	type ToolResultMessage,
 +	uuidv7,
  	validateToolArguments,
  } from "@earendil-works/pi-ai";
++import { emptyStdinPoll, quietStdinResult } from "./local-poll.ts";
  import { getDefaultStreamFn } from "./stream-fn.ts";
-@@ -18,7 +19,12 @@ import type {
+ import type {
+ 	AgentContext,
+@@ -18,7 +20,12 @@ import type {
  	AgentMessage,
  	AgentTool,
  	AgentToolCall,
@@ -23,7 +26,7 @@ index 193e3fa..da58233 100644
  	PrepareNextTurnContext,
  	StreamFn,
  } from "./types.ts";
-@@ -456,14 +462,13 @@ async function executeToolCallsSequential(
+@@ -456,14 +463,13 @@ async function executeToolCallsSequential(
  				isError: preparation.isError,
  			};
  		} else {
@@ -40,7 +43,7 @@ index 193e3fa..da58233 100644
  			);
  		}
  
-@@ -527,14 +532,13 @@ async function executeToolCallsParallel(
+@@ -527,14 +533,13 @@ async function executeToolCallsParallel(
  				await emitToolExecutionEnd(finalized, emit);
  				return finalized;
  			}
@@ -57,7 +60,7 @@ index 193e3fa..da58233 100644
  			);
  			await emitToolExecutionEnd(finalized, emit);
  			return finalized;
-@@ -565,6 +569,7 @@ type PreparedToolCall = {
+@@ -565,6 +570,7 @@ type PreparedToolCall = {
  	toolCall: AgentToolCall;
  	tool: AgentTool<any>;
  	args: unknown;
@@ -65,7 +68,7 @@ index 193e3fa..da58233 100644
  };
  
  type ImmediateToolCallOutcome = {
-@@ -611,7 +616,8 @@ async function prepareToolCall(
+@@ -611,7 +617,8 @@ async function prepareToolCall(
  	config: AgentLoopConfig,
  	signal: AbortSignal | undefined,
  ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
@@ -75,7 +78,7 @@ index 193e3fa..da58233 100644
  	if (!tool) {
  		return {
  			kind: "immediate",
-@@ -659,11 +665,21 @@ async function prepareToolCall(
+@@ -659,11 +666,21 @@ async function prepareToolCall(
  				isError: true,
  			};
  		}
@@ -98,7 +101,7 @@ index 193e3fa..da58233 100644
  		};
  	} catch (error) {
  		return {
-@@ -674,6 +690,307 @@ async function prepareToolCall(
+@@ -674,6 +691,332 @@ async function prepareToolCall(
  	}
  }
  
@@ -233,8 +236,18 @@ index 193e3fa..da58233 100644
 +						...(owningScope ? current!.getContext!() : context),
 +						tools: [...(current?.tools ?? [])],
 +					};
++					const pollTool = current?.tools.find((tool) => tool.name === name);
++					const localPoll = Boolean(
++						owningScope &&
++							name === "write_stdin" &&
++							pollTool?.localPolling === "empty-stdin" &&
++							emptyStdinPoll(input),
++					);
++					let pollEligible = false;
++					let hadUpdate = false;
 +					const childEmit: AgentEventSink = (event) => {
 +						if (event.type === "tool_execution_update") {
++							hadUpdate = true;
 +							if (!open || gatewaySignal.aborted || childSignal.aborted) return;
 +							assertParent();
 +						}
@@ -247,7 +260,13 @@ index 193e3fa..da58233 100644
 +						assertParent();
 +						childSignal.throwIfAborted();
 +						started = true;
-+						await emit({ type: "tool_execution_start", toolCallId: toolCall.id, toolName: name, args: input });
++						await emit({
++							type: "tool_execution_start",
++							toolCallId: toolCall.id,
++							toolName: name,
++							args: input,
++							...(localPoll ? { localPoll: "pending" as const } : {}),
++						});
 +						assertParent();
 +						childSignal.throwIfAborted();
 +						const preparation = await prepareToolCall(childContext, assistant, toolCall, config, childSignal);
@@ -255,7 +274,8 @@ index 193e3fa..da58233 100644
 +						childSignal.throwIfAborted();
 +						if (preparation.kind === "immediate")
 +							finalized = { toolCall, result: preparation.result, isError: preparation.isError };
-+						else
++						else {
++							pollEligible = localPoll && preparation.tool === pollTool && emptyStdinPoll(preparation.args);
 +							finalized = await executePreparedAndFinalize(
 +								childContext,
 +								assistant,
@@ -267,6 +287,8 @@ index 193e3fa..da58233 100644
 +								budget,
 +								owningScope,
 +							);
++							pollEligible &&= emptyStdinPoll(preparation.args);
++						}
 +						assertParent();
 +						childSignal.throwIfAborted();
 +					} catch (error) {
@@ -278,7 +300,12 @@ index 193e3fa..da58233 100644
 +					}
 +					// No orphan events for queued work cancelled before its genuine start.
 +					// Child calls are never synthetic model transcript turns.
-+					if (started) await emitToolExecutionEnd(finalized, emit);
++					const quietLocalPoll =
++						pollEligible && !hadUpdate && quietStdinResult(finalized.result, finalized.isError);
++					if (started)
++						await emitToolExecutionEnd(finalized, (event) =>
++							emit({ ...event, ...(quietLocalPoll ? { localPoll: "quiet" as const } : {}) }),
++						);
 +					assertParent();
 +					childSignal.throwIfAborted();
 +					if (owningScope)
@@ -288,6 +315,7 @@ index 193e3fa..da58233 100644
 +							scopeId: owningScope.id,
 +							result: finalized.result,
 +							isError: finalized.isError,
++							...(quietLocalPoll ? { quietLocalPoll: true as const } : {}),
 +						});
 +					assertParent();
 +					childSignal.throwIfAborted();
@@ -406,7 +434,7 @@ index 193e3fa..da58233 100644
  async function executePreparedToolCall(
  	prepared: PreparedToolCall,
  	signal: AbortSignal | undefined,
-@@ -759,7 +1076,7 @@ async function finalizeExecutedToolCall(
+@@ -759,7 +1102,7 @@ async function finalizeExecutedToolCall(
  
  	return {
  		toolCall: prepared.toolCall,
@@ -633,6 +661,94 @@ index 0de7edd..526ce19 100644
  		if (!signal) {
  			throw new Error("Agent listener invoked outside active run");
  		}
+diff --git a/packages/agent/src/local-poll.ts b/packages/agent/src/local-poll.ts
+new file mode 100644
+index 0000000..6c09aed
+--- /dev/null
++++ b/packages/agent/src/local-poll.ts
+@@ -0,0 +1,82 @@
++// Native presentation classification, not guest authority or a token/billing meter.
++// Tools opt in only when empty stdin is local I/O. Unknown/changed outcomes stay visible.
++function dataObject(value: unknown): Record<string, unknown> | undefined {
++	if (!value || typeof value !== "object" || Array.isArray(value)) return;
++	const prototype = Object.getPrototypeOf(value);
++	if (prototype !== Object.prototype && prototype !== null) return;
++	const result: Record<string, unknown> = Object.create(null);
++	for (const key of Reflect.ownKeys(value)) {
++		if (typeof key !== "string") return;
++		const descriptor = Object.getOwnPropertyDescriptor(value, key);
++		if (!descriptor || !("value" in descriptor)) return;
++		result[key] = descriptor.value;
++	}
++	return result;
++}
++
++export function emptyStdinPoll(args: unknown): boolean {
++	try {
++		const value = dataObject(args);
++		return Boolean(
++			value &&
++				Object.keys(value).every((key) =>
++					["session_id", "chars", "yield_time_ms", "max_output_tokens"].includes(key),
++				) &&
++				typeof value.session_id === "string" &&
++				value.session_id.length > 0 &&
++				value.session_id.length <= 1024 &&
++				(!Object.hasOwn(value, "chars") || value.chars === ""),
++		);
++	} catch {
++		return false;
++	}
++}
++
++export function quietStdinResult(result: unknown, isError: boolean): boolean {
++	try {
++		if (isError !== false) return false;
++		const value = dataObject(result);
++		if (!value) return false;
++		// Native hooks may retain these absent optional fields; any defined value stays visible.
++		for (const key of ["usage", "terminate"]) if (value[key] === undefined) delete value[key];
++		if (Object.keys(value).some((key) => !["content", "details", "isError"].includes(key))) return false;
++		if (Object.hasOwn(value, "isError") && value.isError !== false) return false;
++		const details = dataObject(value.details);
++		// Unified exec's JS record has termination: undefined; its JSON intentionally omits it.
++		if (details?.termination === undefined) delete details?.termination;
++		if (
++			!details ||
++			Object.keys(details).some(
++				(key) =>
++					!["session_id", "output", "exit_code", "running", "supervisor_ready", "truncated_bytes"].includes(key),
++			) ||
++			typeof details.session_id !== "string" ||
++			!details.session_id ||
++			details.session_id.length > 1024 ||
++			details.running !== true ||
++			details.exit_code !== null ||
++			details.output !== "" ||
++			details.truncated_bytes !== 0 ||
++			(Object.hasOwn(details, "supervisor_ready") && typeof details.supervisor_ready !== "boolean")
++		)
++			return false;
++		if (!Array.isArray(value.content) || value.content.length !== 1) return false;
++		const block = dataObject(value.content[0]);
++		if (
++			!block ||
++			Object.keys(block).length !== 2 ||
++			block.type !== "text" ||
++			typeof block.text !== "string" ||
++			block.text.length > 4096
++		)
++			return false;
++		const text = dataObject(JSON.parse(block.text));
++		return Boolean(
++			text &&
++				Object.keys(text).length === Object.keys(details).length &&
++				Object.keys(details).every((key) => Object.hasOwn(text, key) && text[key] === details[key]),
++		);
++	} catch {
++		return false;
++	}
++}
 diff --git a/packages/agent/src/tool-scopes.ts b/packages/agent/src/tool-scopes.ts
 new file mode 100644
 index 0000000..5927ed4
@@ -950,7 +1066,7 @@ index 0000000..5927ed4
 +	}
 +}
 diff --git a/packages/agent/src/types.ts b/packages/agent/src/types.ts
-index eebb5dc..20f1a2d 100644
+index eebb5dc..3ffb9d3 100644
 --- a/packages/agent/src/types.ts
 +++ b/packages/agent/src/types.ts
 @@ -14,6 +14,7 @@ import type {
@@ -983,7 +1099,7 @@ index eebb5dc..20f1a2d 100644
  
  	/**
  	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
-@@ -383,10 +399,83 @@ export interface AgentToolResult<T> {
+@@ -383,10 +399,87 @@ export interface AgentToolResult<T> {
   */
  export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
  
@@ -1011,6 +1127,8 @@ index eebb5dc..20f1a2d 100644
 +	details?: Record<string, unknown>;
 +}
 +export interface AgentScopedResult {
++	/** Native finalized local no-op classification; never a guest/result-supplied flag. */
++	readonly quietLocalPoll?: true;
 +	toolName: string;
 +	toolCallId: string;
 +	scopeId: string;
@@ -1062,17 +1180,23 @@ index eebb5dc..20f1a2d 100644
  export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> {
  	/** Human-readable label for UI display. */
  	label: string;
++	/** Trusted declaration: empty stdin uses local I/O, not model inference. Native scoped calls only. */
++	localPolling?: "empty-stdin";
 +	/** Host adapter: bind a scoped invocation without exposing handlers to generated code. */
 +	withInvocation?: (invocation: AgentToolInvocation) => AgentTool<TParameters, TDetails>;
  	/**
  	 * Optional compatibility shim for raw tool-call arguments before schema validation.
  	 * Must return an object that matches `TParameters`.
-@@ -428,7 +517,8 @@ export interface AgentContext {
+@@ -428,7 +521,12 @@ export interface AgentContext {
   * listeners for that event are still part of run settlement. The agent becomes
   * idle only after those listeners finish.
   */
 -export type AgentEvent =
-+export type AgentEvent = AgentRuntimeEvent & { readonly scopeId?: string };
++export type AgentEvent = AgentRuntimeEvent & {
++	readonly scopeId?: string;
++	/** Native presentation hint only; events/accounting/approvals are never skipped. */
++	readonly localPoll?: "pending" | "quiet";
++};
 +type AgentRuntimeEvent =
  	// Agent lifecycle
  	| { type: "agent_start" }
@@ -1101,10 +1225,10 @@ index d3255df..1334304 100644
  	it("should prepare tool arguments for validation", async () => {
 diff --git a/packages/agent/test/tool-invocation.test.ts b/packages/agent/test/tool-invocation.test.ts
 new file mode 100644
-index 0000000..08397a6
+index 0000000..1c53cff
 --- /dev/null
 +++ b/packages/agent/test/tool-invocation.test.ts
-@@ -0,0 +1,723 @@
+@@ -0,0 +1,817 @@
 +// Native scoped invocation regression fixtures.
 +import { type AssistantMessage, type AssistantMessageEvent, EventStream } from "@earendil-works/pi-ai";
 +import { Type } from "typebox";
@@ -1828,13 +1952,108 @@ index 0000000..08397a6
 +		}
 +	});
 +});
++
++describe("native local polling presentation metadata", () => {
++	for (const mode of [
++		"quiet",
++		"undeclared",
++		"unscoped",
++		"input",
++		"guest-flag",
++		"update",
++		"output",
++		"terminal",
++		"blocked",
++		"changed-args",
++		"changed-result",
++		"replaced",
++	]) {
++		it(`keeps native accounting and fails visible for ${mode}`, async () => {
++			const finalized: Array<{ quietLocalPoll?: true }> = [];
++			let executed = 0;
++			const args = {
++				session_id: "synthetic",
++				...(mode === "input" ? { chars: "input" } : {}),
++				...(mode === "guest-flag" ? { localPolling: "empty-stdin" } : {}),
++			};
++			const f = fixture(async (invocation) => {
++				if (mode === "unscoped") {
++					await invocation.invoke("write_stdin", args);
++					return;
++				}
++				const scope = invocation.openScope({
++					onResult: async (event) => {
++						finalized.push(event);
++					},
++				});
++				try {
++					await scope.invoke("write_stdin", args);
++				} finally {
++					await scope.close();
++				}
++			});
++			const poll: AgentTool = {
++				name: "write_stdin",
++				label: "Synthetic local I/O",
++				description: "Offline metadata fixture",
++				localPolling: mode === "undeclared" ? undefined : "empty-stdin",
++				parameters: Type.Object(
++					{ session_id: Type.String(), chars: Type.Optional(Type.String()) },
++					{ additionalProperties: false },
++				),
++				execute: async (_id, _args, _signal, update) => {
++					executed++;
++					const details = {
++						session_id: "synthetic",
++						output: mode === "output" ? "data" : "",
++						exit_code: mode === "terminal" ? 0 : null,
++						running: mode !== "terminal",
++						truncated_bytes: 0,
++						termination: undefined,
++					};
++					if (mode === "update") update?.(text("visible update"));
++					return { content: [{ type: "text", text: JSON.stringify(details) }], details };
++				},
++			};
++			f.agent.state.tools = [f.agent.state.tools[0], poll];
++			f.agent.publishToolEvidence = async () => {};
++			f.agent.beforeToolCall = async (call) => {
++				if (call.toolCall.name !== "write_stdin") return;
++				if (mode === "blocked") return { block: true, reason: "synthetic denial" };
++				if (mode === "changed-args") (call.args as Record<string, unknown>).chars = "input";
++				if (mode === "replaced")
++					f.agent.state.tools = [f.agent.state.tools[0], { ...poll, localPolling: undefined }];
++			};
++			f.agent.afterToolCall = async (call) =>
++				call.toolCall.name === "write_stdin" && mode === "changed-result"
++					? { content: [{ type: "text", text: "important result hook" }] }
++					: undefined;
++			await f.agent.prompt("offline local-poll fixture");
++			const events = f.events.filter(
++				(e) =>
++					(e.type === "tool_execution_start" || e.type === "tool_execution_end") && e.toolName === "write_stdin",
++			);
++			expect(events).toHaveLength(2);
++			expect(events[1].localPoll).toBe(mode === "quiet" ? "quiet" : undefined);
++			expect(events[0].localPoll).toBe(
++				["undeclared", "unscoped", "input", "guest-flag"].includes(mode) ? undefined : "pending",
++			);
++			expect(executed).toBe(["guest-flag", "blocked", "replaced"].includes(mode) ? 0 : 1);
++			if (mode !== "replaced" && mode !== "unscoped")
++				expect(finalized[0].quietLocalPoll).toBe(mode === "quiet" ? true : undefined);
++			expect(f.agent.state.pendingToolCalls.size).toBe(0);
++			expect(f.agent.getToolGatewayInfo()).toMatchObject({ activeScopes: 0, drainingScopes: 0 });
++		});
++	}
++});
 diff --git a/packages/agent/test/tool-scopes.test.ts b/packages/agent/test/tool-scopes.test.ts
 new file mode 100644
-index 0000000..317db63
+index 0000000..12e265b
 --- /dev/null
 +++ b/packages/agent/test/tool-scopes.test.ts
-@@ -0,0 +1,385 @@
+@@ -0,0 +1,487 @@
 +import { describe, expect, it, vi } from "vitest";
++import { emptyStdinPoll, quietStdinResult } from "../src/local-poll.ts";
 +import { ToolScopeRegistry } from "../src/tool-scopes.ts";
 +import type { AgentToolResourceScope } from "../src/types.ts";
 +
@@ -2219,6 +2438,107 @@ index 0000000..317db63
 +		epoch.abort();
 +	});
 +});
++
++describe("local polling is a strict presentation classification", () => {
++	const details = {
++		session_id: "synthetic",
++		output: "",
++		exit_code: null,
++		running: true,
++		supervisor_ready: true,
++		truncated_bytes: 0,
++	};
++	const result = (changes: Record<string, unknown> = {}) => {
++		const value = { ...details, ...changes };
++		return { content: [{ type: "text", text: JSON.stringify(value) }], details: value };
++	};
++	it("accepts only empty input arguments, never guest presentation flags or control input", () => {
++		expect(emptyStdinPoll({ session_id: "synthetic" })).toBe(true);
++		expect(emptyStdinPoll({ session_id: "synthetic", chars: "", yield_time_ms: 250 })).toBe(true);
++		for (const value of [
++			null,
++			[],
++			{},
++			{ session_id: "" },
++			{ session_id: "x", chars: "\u0003" },
++			{ session_id: "x", chars: "\u0004" },
++			{ session_id: "x", chars: "command" },
++			{ session_id: "x", chars: undefined },
++			{ session_id: "x", localPolling: "empty-stdin" },
++		])
++			expect(emptyStdinPoll(value)).toBe(false);
++	});
++	it("recognizes only unchanged, complete empty-running pipe results", () => {
++		expect(quietStdinResult(result(), false)).toBe(true);
++		expect(quietStdinResult(result({ supervisor_ready: false }), false)).toBe(true);
++		const absent = { ...result({ termination: undefined }), usage: undefined, terminate: undefined, isError: false };
++		expect(quietStdinResult(absent, false)).toBe(true);
++		expect(Object.hasOwn(absent.details, "termination")).toBe(true);
++		expect(quietStdinResult({ ...result(), usage: { totalTokens: 0 } }, false)).toBe(false);
++		expect(quietStdinResult({ ...result(), terminate: false }, false)).toBe(false);
++		expect(quietStdinResult(result({ termination: "" }), false)).toBe(false);
++		for (const changes of [
++			{ output: "data" },
++			{ running: false },
++			{ exit_code: 0 },
++			{ truncated_bytes: 1 },
++			{ termination: "cancelled" },
++			{ sourceEvidencePresent: true },
++			{ session_id: "" },
++			{ supervisor_ready: "yes" },
++		])
++			expect(quietStdinResult(result(changes), false)).toBe(false);
++		expect(quietStdinResult(result(), true)).toBe(false);
++	});
++	it("preserves text/image/metadata changes and malformed results", () => {
++		for (const changed of [
++			null,
++			{ ...result(), addedToolNames: ["new"] },
++			{ ...result(), terminate: true },
++			{ ...result(), isError: true },
++			{ ...result(), content: [{ type: "text", text: "important" }] },
++			{ ...result(), content: [{ type: "image", data: "bounded", mimeType: "image/png" }] },
++			{ ...result(), content: [...result().content, { type: "text", text: "extra" }] },
++			{ ...result(), content: [{ type: "text", text: "{" }] },
++		])
++			expect(quietStdinResult(changed, false)).toBe(false);
++	});
++	it("does not invoke accessors or serializers to decide visibility", () => {
++		let reads = 0;
++		expect(
++			emptyStdinPoll({
++				get session_id() {
++					reads++;
++					return "x";
++				},
++			}),
++		).toBe(false);
++		expect(
++			quietStdinResult(
++				{
++					get details() {
++						reads++;
++						return details;
++					},
++				},
++				false,
++			),
++		).toBe(false);
++		expect(
++			quietStdinResult(
++				{
++					...result(),
++					toJSON() {
++						reads++;
++						return result();
++					},
++				},
++				false,
++			),
++		).toBe(false);
++		expect(reads).toBe(0);
++	});
++});
 diff --git a/packages/agent/vitest.config.ts b/packages/agent/vitest.config.ts
 index 379c3c7..c9df7de 100644
 --- a/packages/agent/vitest.config.ts
@@ -2531,7 +2851,7 @@ index 3346645..1a25f71 100644
  				runner.assertActive();
  				runner.compactFn(options);
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index eaff3a8..a6a2643 100644
+index eaff3a8..46cac79 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
 @@ -10,6 +10,8 @@
@@ -2554,7 +2874,20 @@ index eaff3a8..a6a2643 100644
  	/** UI methods for user interaction */
  	ui: ExtensionUIContext;
  	/** Current run mode. Use "tui" to guard terminal-only UI such as custom components. */
-@@ -940,7 +946,7 @@ export interface CustomToolCallEvent extends ToolCallEventBase {
+@@ -478,6 +484,12 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
+ 	 */
+ 	executionMode?: ToolExecutionMode;
+ 
++	/** Trusted local-I/O declaration, not a model parameter or a quota measurement.
++	 * Only native scoped empty-stdin polls with unchanged empty-running results may be hidden.
++	 * Direct calls, updates, output, errors and terminal results remain visible.
++	 */
++	localPolling?: "empty-stdin";
++
+ 	/** Execute the tool. */
+ 	execute(
+ 		toolCallId: string,
+@@ -940,7 +952,7 @@ export interface CustomToolCallEvent extends ToolCallEventBase {
   * Fired before a tool executes. Can block.
   *
   * `event.input` is mutable. Mutate it in place to patch tool arguments before execution.
@@ -2563,7 +2896,7 @@ index eaff3a8..a6a2643 100644
   */
  export type ToolCallEvent =
  	| BashToolCallEvent
-@@ -1724,6 +1730,8 @@ export interface ExtensionContextActions {
+@@ -1724,6 +1736,8 @@ export interface ExtensionContextActions {
  	hasPendingMessages: () => boolean;
  	shutdown: () => void;
  	getContextUsage: () => ContextUsage | undefined;
@@ -2609,6 +2942,26 @@ index 9084a1d..8cc7472 100644
  		execute: async (toolCallId, params, signal, onUpdate) => {
  			const activeBefore = runner.getActiveTools();
  			const result = await execute(toolCallId, params, signal, onUpdate);
+diff --git a/packages/coding-agent/src/core/tools/tool-definition-wrapper.ts b/packages/coding-agent/src/core/tools/tool-definition-wrapper.ts
+index ab01a06..0d474d1 100644
+--- a/packages/coding-agent/src/core/tools/tool-definition-wrapper.ts
++++ b/packages/coding-agent/src/core/tools/tool-definition-wrapper.ts
+@@ -14,6 +14,7 @@ export function wrapToolDefinition<TDetails = unknown>(
+ 		constrainedSampling: definition.constrainedSampling,
+ 		prepareArguments: definition.prepareArguments,
+ 		executionMode: definition.executionMode,
++		localPolling: definition.localPolling,
+ 		execute: (toolCallId, params, signal, onUpdate, ctx?: ExtensionContext) =>
+ 			definition.execute(toolCallId, params, signal, onUpdate, ctx ?? (ctxFactory?.() as ExtensionContext)),
+ 	};
+@@ -42,6 +43,7 @@ export function createToolDefinitionFromAgentTool(tool: AgentTool<any>): ToolDef
+ 		constrainedSampling: tool.constrainedSampling,
+ 		prepareArguments: tool.prepareArguments,
+ 		executionMode: tool.executionMode,
++		localPolling: tool.localPolling,
+ 		execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
+ 	};
+ }
 diff --git a/packages/coding-agent/src/modes/interactive/components/custom-message.ts b/packages/coding-agent/src/modes/interactive/components/custom-message.ts
 index b5ee926..63c0364 100644
 --- a/packages/coding-agent/src/modes/interactive/components/custom-message.ts
@@ -2644,19 +2997,164 @@ index b5ee926..63c0364 100644
 +		}
  	}
  }
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index 8db1b80..66d21ef 100644
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -154,6 +154,7 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
+ import { UserMessageComponent } from "./components/user-message.ts";
+ import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+ import { editInExternalEditor } from "./external-editor.ts";
++import { LocalPollPresentation } from "./local-poll-presentation.ts";
+ import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
+ import { getModelSearchText } from "./model-search.ts";
+ import { shareSession } from "./session-share.ts";
+@@ -429,6 +430,7 @@ export class InteractiveMode {
+ 
+ 	// Tool execution tracking: toolCallId -> component
+ 	private pendingTools = new Map<string, ToolExecutionComponent>();
++	private localPollPresentation = new LocalPollPresentation();
+ 
+ 	// Tool output expansion state
+ 	private toolOutputExpanded = false;
+@@ -2007,6 +2009,7 @@ export class InteractiveMode {
+ 		this.streamingComponent = undefined;
+ 		this.streamingMessage = undefined;
+ 		this.pendingTools.clear();
++		this.localPollPresentation.resetPresentation(this.session.agent.state.pendingToolCalls);
+ 		this.renderInitialMessages();
+ 	}
+ 
+@@ -3158,10 +3161,18 @@ export class InteractiveMode {
+ 
+ 	private subscribeToAgent(): void {
+ 		this.unsubscribe = this.session.subscribe(async (event) => {
+-			await this.handleEvent(event);
++			// Native events remain intact for SDK/RPC/extension observers. Presentation only.
++			const visible = this.localPollPresentation.accept(event);
++			await Promise.all(visible.map((entry) => this.handleEvent(entry)));
+ 		});
+ 	}
+ 
++	private pruneFinishedTools(): void {
++		for (const id of this.pendingTools.keys()) {
++			if (!this.session.agent.state.pendingToolCalls.has(id)) this.pendingTools.delete(id);
++		}
++	}
++
+ 	private async handleEvent(event: AgentSessionEvent): Promise<void> {
+ 		if (!this.isInitialized) {
+ 			await this.init();
+@@ -3171,7 +3182,7 @@ export class InteractiveMode {
+ 
+ 		switch (event.type) {
+ 			case "agent_start":
+-				this.pendingTools.clear();
++				this.pruneFinishedTools();
+ 				// Restore main escape handler if retry handler is still active
+ 				// (retry success event fires later, but we need main handler now)
+ 				if (this.retryEscapeHandler) {
+@@ -3324,6 +3335,9 @@ export class InteractiveMode {
+ 			case "tool_execution_start": {
+ 				let component = this.pendingTools.get(event.toolCallId);
+ 				if (!component) {
++					if (event.scopeId && event.localPoll === "pending") {
++						this.chatContainer.addChild(new Text(theme.fg("dim", "Local job update"), 0, 0));
++					}
+ 					component = new ToolExecutionComponent(
+ 						event.toolName,
+ 						event.toolCallId,
+@@ -3374,7 +3388,7 @@ export class InteractiveMode {
+ 					this.streamingComponent = undefined;
+ 					this.streamingMessage = undefined;
+ 				}
+-				this.pendingTools.clear();
++				this.pruneFinishedTools();
+ 
+ 				this.ui.requestRender();
+ 				break;
+@@ -3688,6 +3702,7 @@ export class InteractiveMode {
+ 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
+ 	): void {
+ 		this.pendingTools.clear();
++		this.localPollPresentation.resetPresentation(this.session.agent.state.pendingToolCalls);
+ 		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
+ 		// Cache-miss notices are not persisted; re-derive them from the full entry
+ 		// list and re-inject them after the assistant messages that paid for them.
+diff --git a/packages/coding-agent/src/modes/interactive/local-poll-presentation.ts b/packages/coding-agent/src/modes/interactive/local-poll-presentation.ts
+new file mode 100644
+index 0000000..cfc6ff6
+--- /dev/null
++++ b/packages/coding-agent/src/modes/interactive/local-poll-presentation.ts
+@@ -0,0 +1,50 @@
++import type { AgentSessionEvent } from "../../core/agent-session.ts";
++
++type Start = Extract<AgentSessionEvent, { type: "tool_execution_start" }>;
++
++/** Presentation only: raw native events, approvals and ownership remain untouched.
++ * Hold at most the native two scopes × four outstanding calls. Overflow stays visible.
++ * Normal agent_end is not scope completion; deferred calls survive foreground turns.
++ */
++export class LocalPollPresentation {
++	private pending = new Map<string, { start: Start; revealed: boolean }>();
++
++	accept(event: AgentSessionEvent): AgentSessionEvent[] {
++		if (event.type === "tool_execution_start") {
++			if (
++				event.scopeId &&
++				event.toolName === "write_stdin" &&
++				event.localPoll === "pending" &&
++				!this.pending.has(event.toolCallId) &&
++				this.pending.size < 8
++			) {
++				this.pending.set(event.toolCallId, { start: event, revealed: false });
++				return [];
++			}
++		} else if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
++			const held = this.pending.get(event.toolCallId);
++			if (held && held.start.scopeId === event.scopeId && held.start.toolName === event.toolName) {
++				if (event.type === "tool_execution_end") {
++					this.pending.delete(event.toolCallId);
++					if (!held.revealed && event.localPoll === "quiet" && event.isError === false) return [];
++				}
++				if (held.revealed) return [event];
++				held.revealed = true;
++				return [held.start, event];
++			}
++		}
++		return [event];
++	}
++
++	/** A history redraw is not cancellation. Re-present surviving native calls on their next result. */
++	resetPresentation(nativePending: ReadonlySet<string>): void {
++		for (const [id, held] of this.pending) {
++			if (!nativePending.has(id)) this.pending.delete(id);
++			else held.revealed = false;
++		}
++	}
++
++	clear(): void {
++		this.pending.clear();
++	}
++}
 diff --git a/packages/coding-agent/test/suite/tool-invocation.test.ts b/packages/coding-agent/test/suite/tool-invocation.test.ts
 new file mode 100644
-index 0000000..a9cddc4
+index 0000000..842380b
 --- /dev/null
 +++ b/packages/coding-agent/test/suite/tool-invocation.test.ts
-@@ -0,0 +1,446 @@
+@@ -0,0 +1,531 @@
 +// Native scoped invocation regression fixtures.
 +import type { AgentToolInvocation, AgentToolResult, AgentToolScope } from "@earendil-works/pi-agent-core";
 +import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 +import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
++import { Container } from "@earendil-works/pi-tui";
 +import { Type } from "typebox";
 +import { afterEach, describe, expect, it } from "vitest";
++import type { AgentSessionEvent } from "../../src/core/agent-session.ts";
 +import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
++import { InteractiveMode } from "../../src/modes/interactive/interactive-mode.ts";
++import { LocalPollPresentation } from "../../src/modes/interactive/local-poll-presentation.ts";
++import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
 +import { createHarness, type Harness } from "./harness.ts";
 +
 +function text(value: string): AgentToolResult<unknown> {
@@ -3095,6 +3593,86 @@ index 0000000..a9cddc4
 +			await cell?.close();
 +		}
 +	});
++});
++
++describe("native local polling across history redraw", () => {
++	for (const revealFirst of [false, true])
++		it(`preserves active poll result after redraw, prior update ${revealFirst}`, async () => {
++			initTheme("dark", false);
++			const active = new Set(["poll"]);
++			let sink!: (event: AgentSessionEvent) => Promise<void>;
++			// Only presentation is bootstrapped; these events do not mint invocation authority.
++			const view = Object.create(InteractiveMode.prototype) as Record<string, any>;
++			Object.assign(view, {
++				isInitialized: true,
++				localPollPresentation: new LocalPollPresentation(),
++				pendingTools: new Map(),
++				chatContainer: new Container(),
++				loadedResourcesContainer: new Container(),
++				pendingMessagesContainer: new Container(),
++				footer: { invalidate() {} },
++				ui: { requestRender() {}, terminal: { setProgress() {} } },
++				getRegisteredToolDefinition: () => undefined,
++				renderInitialMessages() {},
++				runtimeHost: {
++					session: {
++						agent: { state: { pendingToolCalls: active } },
++						settingsManager: { getShowImages: () => false, getImageWidthCells: () => 80 },
++						sessionManager: { getCwd: () => "." },
++						subscribe: (listener: typeof sink) => {
++							sink = listener;
++							return () => {};
++						},
++					},
++				},
++			});
++			view.subscribeToAgent();
++			const start = {
++				type: "tool_execution_start",
++				toolCallId: "poll",
++				toolName: "write_stdin",
++				scopeId: "synthetic",
++				localPoll: "pending",
++				args: { session_id: "synthetic" },
++			} as AgentSessionEvent;
++			await sink(start);
++			if (revealFirst)
++				await sink({
++					type: "tool_execution_update",
++					toolCallId: "poll",
++					toolName: "write_stdin",
++					scopeId: "synthetic",
++					args: {},
++					partialResult: text("earlier update"),
++				});
++			view.renderCurrentSessionState();
++			expect(view.chatContainer.render(80)).toEqual([]);
++			active.delete("poll");
++			await sink({
++				type: "tool_execution_end",
++				toolCallId: "poll",
++				toolName: "write_stdin",
++				scopeId: "synthetic",
++				result: text("RESULT_AFTER_REDRAW"),
++				isError: false,
++			});
++			expect(view.chatContainer.render(80).join("\n")).toContain("RESULT_AFTER_REDRAW");
++			expect(view.pendingTools.size).toBe(0);
++			const p = new LocalPollPresentation();
++			expect(p.accept(start)).toEqual([]);
++			p.resetPresentation(new Set());
++			expect(
++				p.accept({
++					type: "tool_execution_end",
++					toolCallId: "poll",
++					toolName: "write_stdin",
++					scopeId: "synthetic",
++					localPoll: "quiet",
++					result: text(""),
++					isError: false,
++				}),
++			).toHaveLength(1);
++		});
 +});
 diff --git a/vitest.base.ts b/vitest.base.ts
 index 9394bcb..4c47955 100644

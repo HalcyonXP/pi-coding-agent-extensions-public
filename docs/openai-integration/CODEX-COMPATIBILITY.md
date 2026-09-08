@@ -30,6 +30,7 @@ The existing native publisher journals before context publication. History/UI de
 | Schemas/formatting/errors | Partial audit only. Exported schemas/formatters, ID types, units and shell/environment options need pin-specific verification; internal Rust arguments do not establish the exposed contract. |
 | PTY/terminal | Gap: Pi is pipe-only with tty:false, not ConPTY/terminal emulation. |
 | Approval/sandbox | Adaptation: preserve real native Pi policy. Delegated shell runs with full OS permissions; do not accept sandbox/permission fields without enforcement. |
+| Local polling visibility | Pi adaptation: updated native TUI hides opted-in cell-owned no-input/no-output running polls; corresponding ordinary audits do not enter model input. Meaningful/direct calls and native events/limits remain. No billed-token measurement or Codex UI parity claim. |
 | Code mode | Further catalog/runtime/helper/lifecycle audit required. Preserve restricted coordination, native delegation, original cell ownership and confirmed cleanup. |
 | Web/image | Existing bounded subsets remain compatibility work, not blanket exclusions. Audit schema/continuation/citations/references/errors while preserving authentication, originals and evidence boundaries. |
 | Session recovery | Unverified upstream recovery parity; Pi does not restore jobs/authority after reload or crash. Saved menu preferences are separate. |

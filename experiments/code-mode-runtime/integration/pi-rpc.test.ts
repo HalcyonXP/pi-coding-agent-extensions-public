@@ -7,13 +7,16 @@ import { deflateSync } from "node:zlib";
 import type { AgentToolScope } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { registerFauxProvider, streamSimple } from "@earendil-works/pi-ai/compat";
-import { getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
+import { Container, getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AgentSessionEvent } from "../../src/core/agent-session.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { withFileMutationQueue } from "../../src/core/tools/file-mutation-queue.ts";
 import { CustomMessageComponent } from "../../src/modes/interactive/components/custom-message.ts";
+import { InteractiveMode } from "../../src/modes/interactive/interactive-mode.ts";
+import { LocalPollPresentation } from "../../src/modes/interactive/local-poll-presentation.ts";
 import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "../utilities.ts";
 import { createHarness, type Harness } from "./harness.ts";
@@ -2338,4 +2341,140 @@ it("normal native preflight reports platform support without authentication or a
 		await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
 		h.cleanup();
 	}
+});
+
+describe("native quiet-poll TUI presentation", () => {
+	const start = (id = "poll", extra: Partial<AgentSessionEvent> = {}) =>
+		({
+			type: "tool_execution_start",
+			toolCallId: id,
+			toolName: "write_stdin",
+			scopeId: "native-scope",
+			localPoll: "pending",
+			args: { session_id: "synthetic" },
+			...extra,
+		}) as AgentSessionEvent;
+	const end = (id = "poll", extra: Partial<AgentSessionEvent> = {}) =>
+		({
+			type: "tool_execution_end",
+			toolCallId: id,
+			toolName: "write_stdin",
+			scopeId: "native-scope",
+			localPoll: "quiet",
+			result: text(""),
+			isError: false,
+			...extra,
+		}) as AgentSessionEvent;
+	function display() {
+		initTheme("dark", false);
+		let listener!: (event: AgentSessionEvent) => Promise<void>;
+		const pending = new Set<string>(),
+			render = vi.fn();
+		// Presentation bootstrap only: real native subscription/handler/components, no terminal or fake gateway.
+		const view = Object.create(InteractiveMode.prototype) as Record<string, any>;
+		Object.assign(view, {
+			isInitialized: true,
+			localPollPresentation: new LocalPollPresentation(),
+			pendingTools: new Map(),
+			chatContainer: new Container(),
+			footer: { invalidate() {} },
+			ui: { requestRender: render, terminal: { setProgress() {} } },
+			toolOutputExpanded: false,
+			getRegisteredToolDefinition: () => undefined,
+			clearStatusIndicator: () => {},
+			runtimeHost: {
+				session: {
+					agent: { state: { pendingToolCalls: pending } },
+					settingsManager: {
+						getShowImages: () => false,
+						getImageWidthCells: () => 80,
+						getShowTerminalProgress: () => false,
+					},
+					sessionManager: { getCwd: () => "." },
+					subscribe: (fn: typeof listener) => {
+						listener = fn;
+						return () => {};
+					},
+				},
+			},
+		});
+		view.subscribeToAgent();
+		return {
+			view,
+			pending,
+			render,
+			emit: (event: AgentSessionEvent) => listener(event),
+			frame: () =>
+				view.chatContainer
+					.render(80)
+					.join("\n")
+					.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""),
+		};
+	}
+	it("creates no cards, gaps or renders for repeated finalized empty local polls", async () => {
+		const f = display();
+		for (let n = 0; n < 40; n++) {
+			await f.emit(start(String(n)));
+			await f.emit(end(String(n)));
+		}
+		expect(f.frame()).toBe("");
+		expect(f.view.chatContainer.children).toHaveLength(0);
+		expect(f.render).not.toHaveBeenCalled();
+		expect(f.view.pendingTools.size).toBe(0);
+	});
+	for (const kind of ["output", "terminal", "error"])
+		it(`reveals the original native call and ${kind}`, async () => {
+			const f = display();
+			await f.emit(start());
+			expect(f.frame()).toBe("");
+			await f.emit(
+				end("poll", { localPoll: undefined, result: text(`VISIBLE_${kind}`), isError: kind === "error" }),
+			);
+			expect(f.frame()).toContain("Local job update");
+			expect(f.frame()).toContain(`VISIBLE_${kind}`);
+			expect(f.view.pendingTools.size).toBe(0);
+		});
+	it("keeps direct/model calls and input/control calls visible immediately", async () => {
+		const f = display();
+		await f.emit(start("direct", { scopeId: undefined, localPoll: undefined }));
+		await f.emit(start("input", { localPoll: undefined }));
+		expect(f.view.chatContainer.children).toHaveLength(2);
+		expect(f.frame()).toContain("write_stdin");
+		await f.emit(end("direct", { scopeId: undefined, localPoll: undefined }));
+		await f.emit(end("input", { localPoll: undefined }));
+		expect(f.view.pendingTools.size).toBe(0);
+	});
+	it("preserves updates and scoped tool components across foreground agent-end/start", async () => {
+		const f = display();
+		f.pending.add("poll");
+		await f.emit(start());
+		await f.emit({ type: "agent_end", messages: [], willRetry: false });
+		expect(f.frame()).toBe("");
+		await f.emit({
+			type: "tool_execution_update",
+			toolCallId: "poll",
+			toolName: "write_stdin",
+			scopeId: "native-scope",
+			args: {},
+			partialResult: text("PARTIAL_VISIBLE"),
+		});
+		expect(f.frame()).toContain("PARTIAL_VISIBLE");
+		await f.emit({ type: "agent_start" });
+		await f.emit({ type: "agent_end", messages: [], willRetry: false });
+		expect(f.view.pendingTools.size).toBe(1);
+		f.pending.delete("poll");
+		await f.emit(end("poll", { localPoll: undefined, result: text("TERMINAL_VISIBLE") }));
+		expect(f.frame()).toContain("TERMINAL_VISIBLE");
+		expect(f.view.pendingTools.size).toBe(0);
+	});
+	it("bounds held presentation and does not consume foreign events or suppress errors", () => {
+		const p = new LocalPollPresentation();
+		for (let n = 0; n < 8; n++) expect(p.accept(start(String(n)))).toEqual([]);
+		expect(p.accept(start("overflow"))).toHaveLength(1);
+		expect(p.accept(end("0", { scopeId: "foreign" }))).toHaveLength(1);
+		expect(p.accept(end("0"))).toEqual([]);
+		expect(p.accept(end("1", { isError: true }))).toHaveLength(2);
+		p.clear();
+		expect(p.accept(end("2"))).toHaveLength(1);
+	});
 });
