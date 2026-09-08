@@ -35,13 +35,17 @@ export class Utf8OutputBuffer {
 		this.dropped += drop;
 		this.buffer = drop ? Buffer.from(combined.subarray(drop)) : combined;
 	}
-	read(maxBytes: number): { output: string; truncatedBytes: number } {
+	/** Non-consuming bounded snapshot for native terminal publication; not another retained buffer. */
+	peek(maxBytes: number): { output: string; truncatedBytes: number; remainingBytes: number } {
 		if (!Number.isFinite(maxBytes)) throw new Error("Invalid UTF-8 output read limit.");
-		let take = Math.max(4, Math.min(Math.floor(maxBytes), 64 * 1024));
+		let take = Math.min(this.buffer.length, Math.max(4, Math.min(Math.floor(maxBytes), 64 * 1024)));
 		while (take < this.buffer.length && (this.buffer[take] & 0xc0) === 0x80) take--;
-		const output = this.buffer.subarray(0, take).toString("utf8");
-		this.buffer = Buffer.from(this.buffer.subarray(take));
-		const truncatedBytes = this.dropped; this.dropped = 0;
+		return { output: this.buffer.subarray(0, take).toString("utf8"), truncatedBytes: this.dropped, remainingBytes: this.buffer.length - take };
+	}
+	read(maxBytes: number): { output: string; truncatedBytes: number } {
+		const { output, truncatedBytes } = this.peek(maxBytes);
+		this.buffer = Buffer.from(this.buffer.subarray(Buffer.byteLength(output)));
+		this.dropped = 0;
 		return { output, truncatedBytes };
 	}
 }

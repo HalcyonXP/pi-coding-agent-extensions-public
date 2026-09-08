@@ -1,6 +1,6 @@
 # Integration guide and glossary
 
-This guide describes the public source's implementation and constraints, not an inherited private project's approval history. Read [architecture](ARCHITECTURE.md), [supported/deviating surface](FINAL-ACCEPTANCE.md), [validation](VALIDATION.md), [security](SECURITY.md), [local preview versus public release](LOCAL-PREVIEW.md) and [isolated installation](PRIVATE-RELEASE.md).
+This guide describes the public source's implementation and constraints, not an inherited private project's approval history. The target is **Codex-compatible observable tool behavior within Pi**, not merely similar names. See the pinned [compatibility contract and remaining gaps](CODEX-COMPATIBILITY.md). Read [architecture](ARCHITECTURE.md), [supported/deviating surface](FINAL-ACCEPTANCE.md), [validation](VALIDATION.md), [security](SECURITY.md), [local preview versus public release](LOCAL-PREVIEW.md) and [isolated installation](PRIVATE-RELEASE.md).
 
 | Term | Agreed meaning |
 | --- | --- |
@@ -10,7 +10,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
 | Supervisor readiness | Private shell-supervisor preamble received; not child acknowledgement receipt, user-command success or native authority |
 | Scope/context identity | Native branded authority and lifecycle identity, not guest IDs, metadata or strings |
-| Protected evidence | Finalized native descendants persisted/published outside guest text projection; not another live model turn or fsync/crash recovery |
+| Protected evidence | Finalized native descendants or direct completion evidence persisted/published through native ownership outside guest text projection; not another live model turn or fsync/crash recovery |
 | Draining | Native resources/publication whose closure is not yet confirmed; still consumes admission |
 | Profile | New isolated configuration/workspace bound to an immutable bundle; not an imported active installation |
 | Source acceptance | Exact-head local/hosted validation and labelled review; distinct from reproducible artifact and installed-profile acceptance |
@@ -29,7 +29,11 @@ This guide describes the public source's implementation and constraints, not an 
 | Saved preference | Profile-local Fast or capability choice restored across new sessions/reload/restart; not credentials, jobs, entitlement or native authority |
 | Effective switch | Saved choice currently applicable under route/ownership/exclusions/preflight; an inactive choice is retained, not permission to bypass a gate |
 | Direct job | Returned shell owned by the original native conversation context; cell jobs additionally require their original scope |
-| Completion collection | Explicit write_stdin polling of output/status; not automatic notification, a new assistant turn or process resurrection |
+| Completion collection | Consuming write_stdin read of output/status; a terminal result without session_id finishes collection |
+| Completion report | Once-only native asynchronous terminal evidence for a direct job whose initial response was running; a bounded non-consuming snapshot of uncollected output, not the whole transcript or diagnostic metadata |
+| Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |
+| Idle turn | New assistant/model execution without another user request; completion reporting does not start one |
+| Result retention | Up to eight in-memory process/output records; no completed-result poll TTL; eligible completed least-recently-collected records can be evicted for capacity |
 | Settings availability | Passive route/ownership/preflight snapshot on open/change; unavailable rows explain why and cannot override exclusions |
 | Standing project authorization | Delegated in-scope decisions and delivery planning; never a waiver of technical/privacy gates or permission to bypass guards |
 

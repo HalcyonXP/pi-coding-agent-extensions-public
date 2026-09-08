@@ -9,6 +9,7 @@ import { Type } from "typebox";
 import type { CapabilityLease } from "./capability-policy.ts";
 import { Utf8OutputBuffer } from "./utf8-output.ts";
 import { verifiedExecutable } from "./runtime/native/artifact.mjs";
+import { completionEvidence } from "./unified-completion.ts";
 
 const MAX_PROCESSES = 4;
 const MAX_RETAINED = 8;
@@ -42,9 +43,16 @@ export interface NativeJobScope {
 	ownResource(close: () => Promise<void>): () => void;
 }
 interface JobAccess { scope?: NativeJobScope; context?: AbortSignal }
+export interface NativeCompletion extends ExecResult {
+	running: false;
+	session_id: string;
+	output_remaining_bytes: number;
+}
 export interface NativeJobBinding extends JobAccess {
 	resource: NativeJobScope;
 	finish?: () => Promise<void>;
+	/** Genuine direct-scope publication, never a retained handler update callback. */
+	publishCompletion?: (completion: NativeCompletion) => Promise<void>;
 }
 interface ProcessRecord {
 	access?: JobAccess;
@@ -61,6 +69,9 @@ interface ProcessRecord {
 	created: number;
 	touched: number;
 	done: Promise<void>;
+	settled?: Promise<void>;
+	completionFailed?: boolean;
+	returned?: boolean;
 	stop?: Promise<void>;
 	stopSettled?: boolean;
 }
@@ -73,6 +84,11 @@ export interface ExecResult {
 	supervisor_ready?: boolean;
 	truncated_bytes: number;
 	termination?: string;
+}
+
+function cleanOutput(output: string): string {
+	return output.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g, "")
+		.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
 }
 
 /** Pipe-backed process ownership, not a security sandbox or PTY. No detached session survives a reset. */
@@ -98,7 +114,9 @@ export class UnifiedExecManager {
 			if (!record.closed && (now - record.created >= this.lifetimeMs || now - record.touched >= this.idleMs)) {
 				await this.stop(record, "Process lifetime or idle limit reached.");
 			}
-			if (record.closed && now - record.touched > 60_000) this.processes.delete(record.id);
+			// Finished output is bounded by MAX_RETAINED/the output buffer, not by
+			// time since a poll while the process may still have been running.
+			// Collection, capacity eviction, explicit cancellation and reset remove it.
 		}
 	}
 	async start(owner: string, command: string, cwd: string, yieldMs: number, maxBytes: number, signal?: AbortSignal, binding?: NativeJobBinding): Promise<ExecResult> {
@@ -113,10 +131,12 @@ export class UnifiedExecManager {
 		// before native resource registration or the synchronous spawn/map insertion.
 		signal?.throwIfAborted(); binding?.resource.signal.throwIfAborted(); binding?.context?.throwIfAborted();
 		if (generation !== this.generation) throw new Error("Unified exec session changed before launch.");
-		if ([...this.processes.values()].some((p) => p.revoked && !p.closed)) throw new Error("Unified exec is blocked: previous process cleanup is incomplete.");
+		if ([...this.processes.values()].some((p) => (p.revoked && !p.closed) || p.completionFailed)) throw new Error("Unified exec is blocked: previous process cleanup or completion reporting is incomplete.");
 		if ([...this.processes.values()].filter((p) => !p.closed).length >= MAX_PROCESSES) throw new Error("Unified exec concurrent process limit reached.");
 		if (this.processes.size >= MAX_RETAINED) {
-			for (const [id, record] of this.processes) { if (record.closed) { this.processes.delete(id); break; } }
+			const eligible = [...this.processes.values()].filter(record => record.closed && !record.settled && !record.completionFailed);
+			eligible.sort((a, b) => a.touched - b.touched); // completed least-recent collection; stable insertion order on ties
+			if (eligible[0]) this.processes.delete(eligible[0].id);
 			if (this.processes.size >= MAX_RETAINED) throw new Error("Unified exec retained-session limit reached.");
 		}
 		let ownedRecord: ProcessRecord | undefined;
@@ -132,7 +152,8 @@ export class UnifiedExecManager {
 			signal?.throwIfAborted(); binding?.resource.signal.throwIfAborted(); binding?.context?.throwIfAborted();
 			child = spawn(launch.executable, launch.args, { cwd: directory, windowsHide: true, detached: process.platform !== "win32", stdio: "pipe" });
 		} catch (error) { release?.(); throw error; }
-		let done!: () => void;
+		let done!: () => void, initialDone!: () => void;
+		const initial = new Promise<void>(resolve => { initialDone = resolve; });
 		const record: ProcessRecord = { id: randomUUID(), owner, child, access: binding ? {scope:binding.scope,context:binding.context} : undefined, output: new Utf8OutputBuffer(), exitCode: null, closed: false, ready: !launch.supervised, supervised: launch.supervised === true, created: Date.now(), touched: Date.now(), done: new Promise((resolve) => { done = resolve; }) };
 		ownedRecord = record;
 		this.processes.set(record.id, record);
@@ -169,11 +190,35 @@ export class UnifiedExecManager {
 			record.output.end("stdout"); record.output.end("stderr");
 			record.closed = true; record.exitCode = code;
 			if (exitSignal && !record.termination) record.termination = `Process terminated (${exitSignal}).`;
-			release?.(); // independent, genuinely confirmed close can reconcile failed cleanup
-			void binding?.finish?.().catch(() => { record.termination = "Native scope cleanup could not be confirmed."; });
+			release?.(); // physical closure is confirmed; publication has separate native ownership
+			record.settled = (async () => {
+				await initial; // decide whether an active job was actually returned
+				let publicationFailed = false;
+				if (record.returned && !binding?.scope && !record.revoked && !binding?.context?.aborted && !binding?.resource.signal.aborted && binding?.publishCompletion) {
+					const snapshot = record.output.peek(64 * 1024);
+					try {
+						await binding.publishCompletion({ session_id: record.id, output: cleanOutput(snapshot.output), exit_code: record.exitCode, running: false, ...(record.supervised ? {supervisor_ready:record.ready} : {}), truncated_bytes: snapshot.truncatedBytes, output_remaining_bytes: snapshot.remainingBytes, termination: record.termination });
+					} catch { publicationFailed = true; }
+				}
+				try { await binding?.finish?.(); }
+				catch { record.completionFailed = true; }
+				// A revoked, successfully drained context can quarantine a publication.
+				// A genuine publisher/cleanup failure is never silently retried or cleared.
+				if (publicationFailed && !record.revoked && !binding?.context?.aborted) record.completionFailed = true;
+				if (record.completionFailed) record.termination = "Native completion reporting or scope cleanup could not be confirmed.";
+			})().catch(() => {
+				record.completionFailed = true; record.termination = "Native completion reporting or scope cleanup could not be confirmed.";
+			}).finally(() => { record.settled = undefined; });
 			done();
 		});
-		return this.collect(record, yieldMs, maxBytes, signal);
+		let first: ExecResult;
+		try {
+			first = await this.collect(record, yieldMs, maxBytes, signal, true);
+			record.returned = first.running && Boolean(first.session_id);
+		} finally { initialDone(); }
+		if (record.closed) { await record.settled; this.assertSettled(record); }
+		if (!first.session_id) this.processes.delete(record.id);
+		return first;
 	}
 	private owned(id: string, owner: string, access?: JobAccess): ProcessRecord {
 		const record = this.processes.get(id);
@@ -195,7 +240,10 @@ export class UnifiedExecManager {
 		}
 		return this.collect(record, yieldMs, maxBytes, signal);
 	}
-	private async collect(record: ProcessRecord, yieldMs: number, maxBytes: number, signal?: AbortSignal): Promise<ExecResult> {
+	private assertSettled(record: ProcessRecord) {
+		if (record.completionFailed) throw new Error("Unified exec completion reporting or native cleanup is unconfirmed; preserve Jobs state.");
+	}
+	private async collect(record: ProcessRecord, yieldMs: number, maxBytes: number, signal?: AbortSignal, initial = false): Promise<ExecResult> {
 		record.touched = Date.now();
 		const abort = () => { void this.stop(record, "Tool call cancelled.").catch(() => {}); };
 		signal?.addEventListener("abort", abort, { once: true });
@@ -204,13 +252,12 @@ export class UnifiedExecManager {
 		try {
 			await Promise.race([record.done, new Promise<void>((resolve) => { timer = setTimeout(resolve, Math.max(0, Math.min(yieldMs, 30_000))); })]);
 			if (signal?.aborted) { await this.stop(record, "Tool call cancelled."); signal.throwIfAborted(); }
+			if (!initial && record.closed) { await record.settled; this.assertSettled(record); }
 			const chunk = record.output.read(maxBytes);
-			const output = chunk.output
-				.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g, "")
-				.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+			const output = cleanOutput(chunk.output);
 			const dropped = chunk.truncatedBytes;
 			const retained = !record.closed || record.output.byteLength > 0;
-			if (!retained) this.processes.delete(record.id);
+			if (!retained && !initial) this.processes.delete(record.id);
 			return { session_id: retained ? record.id : undefined, output, exit_code: record.exitCode, running: !record.closed, ...(record.supervised ? { supervisor_ready: record.ready } : {}), truncated_bytes: dropped, termination: record.termination };
 		} finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
 	}
@@ -240,12 +287,13 @@ export class UnifiedExecManager {
 		const records = [...this.processes.values()];
 		for (const record of records) record.revoked = true;
 		await Promise.all(records.map((record) => this.stop(record, "OpenAI session/provider changed or capability disabled.")));
-		for (const record of records) if (record.closed) this.processes.delete(record.id);
-		if (records.some((record) => !record.closed)) throw new Error("Unified exec could not confirm cleanup of a native process; further launches are blocked.");
+		await Promise.all(records.map(record => record.settled));
+		for (const record of records) if (record.closed && !record.completionFailed) this.processes.delete(record.id);
+		if (records.some((record) => !record.closed || record.completionFailed)) throw new Error("Unified exec could not confirm native process/reporting cleanup; further launches are blocked.");
 	}
 	inspect(owner: string) {
-		return [...this.processes.values()].filter((record) => record.owner === owner && (!record.revoked || !record.closed))
-			.map((record) => ({ session_id: record.id, cleanup_pending: Boolean(!record.closed && (record.revoked || record.stop)), ownership: record.access?.scope ? "cell" : "conversation", pid: record.child.pid, running: !record.closed, buffered_bytes: record.output.byteLength, age_seconds: Math.floor((Date.now() - record.created) / 1000) }));
+		return [...this.processes.values()].filter((record) => record.owner === owner && (!record.revoked || !record.closed || record.completionFailed))
+			.map((record) => ({ session_id: record.id, cleanup_pending: Boolean(record.completionFailed || record.settled || (!record.closed && (record.revoked || record.stop))), ownership: record.access?.scope ? "cell" : "conversation", pid: record.child.pid, running: !record.closed, buffered_bytes: record.output.byteLength, age_seconds: Math.floor((Date.now() - record.created) / 1000) }));
 	}
 	async cancel(owner: string, id: string): Promise<void> {
 		// Explicit user control may cancel a same-conversation cell job; model-facing
@@ -255,6 +303,7 @@ export class UnifiedExecManager {
 		if (!record.closed && record.stopSettled) record.stop = undefined;
 		await this.stop(record, "Cancelled by user.");
 		if (!record.closed) throw new Error("OS process termination was not confirmed.");
+		await record.settled; this.assertSettled(record);
 		this.processes.delete(id);
 	}
 	async close(): Promise<void> { clearInterval(this.sweep); this.sweep = undefined; await this.reset(); }
@@ -279,7 +328,8 @@ const WriteParams = Type.Object({
 export function unifiedOwner(ctx: ExtensionContext): string { return `${ctx.sessionManager.getSessionId()}:${ctx.cwd}`; }
 interface NativeInvocation {
 	origin: "direct" | "nested"; contextSignal: AbortSignal; scope?: NativeJobScope;
-	openScope(): NativeJobScope & {close(): Promise<void>};
+	parentToolCallId: string;
+	openScope(options: {onResult: () => Promise<void>}): NativeJobScope & {close(): Promise<void>;publishEvidence(evidence: ReturnType<typeof completionEvidence>): Promise<void>};
 }
 function nativeAccess(ctx: ExtensionContext): JobAccess {
 	const invocation = (ctx as ExtensionContext & {tools?: NativeInvocation}).tools;
@@ -289,34 +339,47 @@ function nativeAccess(ctx: ExtensionContext): JobAccess {
 	if (invocation.origin === "nested" && (!invocation.scope || typeof invocation.scope.ownResource !== "function")) throw new Error("Nested Unified exec requires a native durable owning scope.");
 	return {scope:invocation.origin === "nested" ? invocation.scope : undefined,context:invocation.contextSignal};
 }
-function nativeBinding(ctx: ExtensionContext): NativeJobBinding | undefined {
+async function nativeBinding(ctx: ExtensionContext, getLease: (signal: AbortSignal) => CapabilityLease): Promise<NativeJobBinding | undefined> {
 	const access = nativeAccess(ctx);
 	const invocation = (ctx as ExtensionContext & {tools?: NativeInvocation}).tools;
 	if (!invocation) return;
 	if (access.scope) return {...access,resource:access.scope};
-	if (typeof invocation.openScope !== "function") throw new Error("Native shell ownership metadata is unavailable.");
-	const scope = invocation.openScope();
-	return {...access,resource:scope,finish:()=>scope.close()};
+	const info = (ctx as ExtensionContext & {toolGatewayInfo?: {version: number;protectedResults: boolean}}).toolGatewayInfo;
+	if (typeof invocation.openScope !== "function" || info?.version !== 1 || !info.protectedResults || typeof invocation.parentToolCallId !== "string" || !invocation.parentToolCallId || invocation.parentToolCallId.length > 1024) throw new Error("Native shell ownership and protected completion metadata are unavailable.");
+	// Unlike the initiating handler signal, this lease lives with the native context.
+	const publication = getLease(invocation.contextSignal), toolCallId = invocation.parentToolCallId;
+	let scope: ReturnType<NativeInvocation["openScope"]>;
+	try { scope = invocation.openScope({onResult: async () => { throw new Error("Direct shell scope cannot publish delegated descendants."); }}); }
+	catch (error) { publication.release(); throw error; }
+	if (typeof scope.publishEvidence !== "function") {
+		try { await scope.close(); } finally { publication.release(); }
+		throw new Error("Native protected completion publication is unavailable.");
+	}
+	let finishing: Promise<void> | undefined;
+	return {...access,resource:scope,
+		async publishCompletion(value) { publication.assertCurrent(); await scope.publishEvidence(completionEvidence(toolCallId, value)); publication.assertCurrent(); },
+		finish() { return finishing ??= (async () => { try { await scope.close(); } finally { publication.release(); } })(); },
+	};
 }
 function result(value: ExecResult) {
 	return { content: [{ type: "text" as const, text: JSON.stringify(value) }], details: value, isError: false };
 }
 export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (name: "exec_command" | "write_stdin", ctx: ExtensionContext, signal?: AbortSignal) => CapabilityLease) {
 	return [{
-		name: "exec_command", label: "Unified exec", description: "Start a native local command, collect bounded output, and keep a same-context session for polling/stdin. Full OS permissions; no sandbox or PTY. The patched host shares TWO active/draining native scopes across direct jobs and Code mode, separately from the four-process manager limit. A third direct start can be refused without cancelling earlier jobs. running:true with supervisor_ready:false means startup is unconfirmed, not command success. Poll write_stdin promptly for readiness/completion; there are no automatic completion messages or new assistant turns. Never relaunch just to wait. Jobs are not restored after reload/context changes; session/lifetime/output expiry applies. Does not replace Pi's PowerShell tool.",
+		name: "exec_command", label: "Unified exec", description: "Start a native local command, collect bounded output, and keep a same-context session for polling/stdin. Full OS permissions; no sandbox or PTY. The patched host shares TWO active/draining native scopes across direct jobs and Code mode, separately from the four-process manager limit. A third direct start can be refused without cancelling earlier jobs. running:true with supervisor_ready:false means startup is unconfirmed, not command success. On the compatible patched host, returned direct jobs publish a bounded completion snapshot through the native protected history/UI and next safe model request; this does not interrupt a request or start an idle turn. Poll write_stdin for readiness/input/remaining output. Completed results are retained until collected, capacity-evicted, cancelled or reset, not a one-minute poll deadline. Nested jobs still belong to their original cell. Never relaunch just to wait. Jobs are not restored after reload/context changes; native context and process lifetime/idle limits still apply. Does not replace Pi's PowerShell tool.",
 		parameters: ExecParams,
 		async execute(_id, params, signal, _update, ctx) {
 			const lease = getLease("exec_command", ctx, signal);
 			let binding: NativeJobBinding | undefined;
 			try {
-				binding = nativeBinding(ctx);
+				binding = await nativeBinding(ctx, contextSignal => getLease("exec_command", ctx, contextSignal));
 				const value = await manager.start(unifiedOwner(ctx), params.cmd, path.resolve(ctx.cwd, params.workdir ?? "."), params.yield_time_ms ?? 1000, (params.max_output_tokens ?? 4096) * 4, lease.signal, binding);
 				lease.assertCurrent(); return result(value);
 			} catch (error) { await binding?.finish?.(); throw error; }
 			finally { lease.release(); }
 		},
 	} satisfies ToolDefinition<typeof ExecParams>, {
-		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. IDs cannot adopt another cell or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. IDs expire on provider/session changes or reload.",
+		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. A nested call cannot adopt another cell's ID or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. IDs expire on provider/session changes or reload.",
 		parameters: WriteParams,
 		async execute(_id, params, signal, _update, ctx) {
 			const lease = getLease("write_stdin", ctx, signal);
@@ -325,5 +388,5 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 				lease.assertCurrent(); return result(value);
 			} finally { lease.release(); }
 		},
-	} satisfies ToolDefinition<typeof WriteParams>];
+	} satisfies ToolDefinition<typeof WriteParams>] as const;
 }
