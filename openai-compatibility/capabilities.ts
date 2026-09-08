@@ -10,14 +10,18 @@ import { subscriptionStatus } from "./subscription.ts";
 import { ToolOwnership } from "./tool-ownership.ts";
 import { CodeMode, createCodeModeTools, toolGatewayInfo } from "./code-mode.ts";
 import type { SettingsRow, JobsController } from "./settings-menu.ts";
+import { CAPABILITY_NAMES, DEFAULT_CAPABILITIES, type CapabilityName, type CapabilityPreferences, type CapabilityPreferenceStore } from "./capability-preferences.ts";
 
 /** Trusted composition only, never a model parameter. The normal entry point
- * explicitly selects the D14 verified subset; no profile activates tools by itself.
+ * selects the D14 Web protocol subset and profile-local preference storage;
+ * neither stored choices nor protocol selection supplies execution authority.
  */
 export interface CapabilityOptions {
 	webSearch?: { transport: typeof fetch; timeoutMs?: number; profile?: WebSearchProfile };
 	openSettings?: (ctx: ExtensionContext, focus?: string) => Promise<void>;
 	fastCommand?: (args: string, ctx: ExtensionContext) => Promise<void>;
+	/** Trusted profile-local storage, not a model/tool parameter. Omitted in isolated compositions. */
+	preferences?: CapabilityPreferenceStore;
 }
 class CapabilityPreferenceError extends Error {}
 export interface CapabilitySettings {
@@ -39,6 +43,9 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 	const menuBoundaries = new Set<() => void>();
 	let turnId = randomUUID();
 	const enabled = new Set(["imagegen"]);
+	let preferences: CapabilityPreferences = { ...DEFAULT_CAPABILITIES };
+	let preferenceError: string | undefined;
+	const groups: Record<CapabilityName, string[]> = { imagegen: ["imagegen"], web_search: ["web_search"], unified_exec: ["exec_command", "write_stdin"], code_mode: ["exec", "wait"] };
 	const definitions = new Map<string, ToolDefinition>();
 	const pending = new Map<string, CapabilityLease>();
 	const ownership = new ToolOwnership(pi, definitions);
@@ -102,14 +109,35 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		for (const close of [...menuBoundaries]) { try { close(); } catch { /* UI must not prevent native cleanup. */ } }
 		return closing;
 	}
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", async (_event, ctx) => {
 		// Stock/older hosts keep ordinary exec/wait names untouched. The marker is
 		// compatibility metadata only; execution still requires genuine authority.
 		if (toolGatewayInfo(ctx)) for (const tool of createCodeModeTools(codeMode)) if (!definitions.has(tool.name)) add(tool);
 		// All extension factories are loaded and Pi's metadata API is now bound.
 		// Reserve our names fail-closed, but never replace another handler.
 		try { ownership.install(); } catch { /* status and execution report fixed ownership errors */ }
-		pending.clear(); enabled.clear(); enabled.add("imagegen"); return boundaryReset(ctx);
+		pending.clear(); enabled.clear();
+		const closing = boundaryReset(ctx), revision = preferenceEpoch;
+		preferenceError = undefined;
+		try { preferences = options.preferences?.read() ?? { ...DEFAULT_CAPABILITIES }; }
+		catch {
+			preferences = { imagegen: false, web_search: false, unified_exec: false, code_mode: false };
+			preferenceError = "Saved capability preferences could not be read. All capability choices are off; preserve the profile file.";
+			ctx.ui.notify(preferenceError, "warning");
+		}
+		// Restore choices, never authority or jobs. Passive inspection cannot launch,
+		// authenticate or relax native admission. A newer boundary wins this race.
+		const [shell, code] = await Promise.all([
+			preferences.unified_exec ? nativeShellStatus() : undefined,
+			preferences.code_mode ? codeMode.status(ctx) : undefined,
+			closing,
+		]);
+		if (revision !== preferenceEpoch) return;
+		for (const name of CAPABILITY_NAMES) {
+			if (!preferences[name] || (name === "web_search" && !search) || (name === "unified_exec" && !shell?.available) || (name === "code_mode" && !code?.available)) continue;
+			for (const tool of groups[name]) enabled.add(tool);
+		}
+		sync(ctx);
 	});
 	pi.on("model_select", (_event, ctx) => boundaryReset(ctx));
 	pi.on("session_before_switch", () => boundaryReset());
@@ -144,9 +172,9 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			async cancel(id, signal) { signal.throwIfAborted(); assertCurrent(); await processes.cancel(owner, id); },
 		};
 	}
-	const groups: Record<string, string[]> = { imagegen: ["imagegen"], web_search: ["web_search"], unified_exec: ["exec_command", "write_stdin"], code_mode: ["exec", "wait"] };
-	async function changePreference(name: string, action: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
-		if (!Object.hasOwn(groups, name) || !["on", "off"].includes(action)) throw new CapabilityPreferenceError("Unknown capability setting.");
+	async function changePreference(input: string, action: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
+		if (!Object.hasOwn(groups, input) || !["on", "off"].includes(action)) throw new CapabilityPreferenceError("Unknown capability setting.");
+		const name = input as CapabilityName;
 		signal?.throwIfAborted();
 		if (name === "web_search" && !search) throw new CapabilityPreferenceError("Web search unavailable: this composition has no configured search transport/profile.");
 		if (name === "unified_exec" && action === "on") {
@@ -163,6 +191,12 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			if (!status.available) throw new CapabilityPreferenceError(`Code mode unavailable: ${status.reason}. No compiler or unrestricted fallback.`);
 			if (!["exec", "wait"].every(tool => ownership.owns(tool))) throw new CapabilityPreferenceError("Code mode unavailable: exec/wait namespace is conflicting, excluded or replaced.");
 		}
+		signal?.throwIfAborted();
+		if (action === "on" && !groups[name].every(tool => ownership.owns(tool))) throw new CapabilityPreferenceError("Capability unavailable: tool namespace is conflicting, excluded or replaced; saved preference was not changed.");
+		try { options.preferences?.write(name, action === "on"); }
+		catch { throw new CapabilityPreferenceError("Could not save capability preference; the current selection was not changed. Preserve the profile file."); }
+		preferences[name] = action === "on";
+		preferenceError = undefined;
 		for (const tool of groups[name]) { if (action === "on") enabled.add(tool); else enabled.delete(tool); }
 		await reset(ctx);
 	}
@@ -180,17 +214,19 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		const descriptions: Record<string, string> = {
 			imagegen: "Generate/edit images; preserve canonical originals. Codex OAuth and service access checked at execution.",
 			web_search: "Bounded search or public-URL open. Codex OAuth and service access checked at execution.",
-			unified_exec: "Full-OS shell commands with pipes, not a shell sandbox or PTY. Session only.",
-			code_mode: "Bounded JavaScript coordinating native tools. Delegated shell commands retain full OS permissions. Session only.",
+			unified_exec: "Full-OS shell commands with pipes, not a shell sandbox or PTY. Jobs are not saved or automatically announced; poll them. Two native scopes are shared with Code mode.",
+			code_mode: "Bounded JavaScript coordinating native tools. Delegated shell commands retain full OS permissions. Cells/jobs are not restored.",
 		};
 		const active = pi.getActiveTools();
-		const rows: SettingsRow[] = Object.entries(groups).map(([id, names]) => {
+		const rows: SettingsRow[] = CAPABILITY_NAMES.map(id => {
+			const names = groups[id];
 			const reason = !trusted ? "Select an official native OpenAI route." : id === "web_search" && !search ? "No search transport configured."
 				: !names.every(name => ownership.owns(name)) ? "Tool names are excluded, conflicting or replaced."
 				: id === "unified_exec" && !shell.available ? shell.reason
 				: id === "code_mode" && !code.available ? codeReasons[code.reason ?? ""] ?? "Native runtime is unavailable." : undefined;
-			return { id, label: labels[id], value: reason ? "unavailable" : names.every(name => active.includes(name)) ? "on" : "off",
-				description: reason ? `${reason} Session preference: ${names.every(name => enabled.has(name)) ? "on" : "off"}; no tool is enabled by this row.` : descriptions[id], values: reason ? undefined : ["off", "on"] };
+			const saved = `${options.preferences ? "Saved for this Pi profile" : "Session preference"}: ${preferences[id] ? "on" : "off"}.`;
+			return { id, label: labels[id], value: reason ? "unavailable" : preferences[id] ? "on" : "off",
+				description: `${preferenceError ?? saved} ${reason ? `${reason} Inactive; no tool is enabled by this row.` : `${descriptions[id]} ${names.every(name => active.includes(name)) ? "Active in this session." : "Inactive in this session."}`}`, values: reason ? undefined : ["off", "on"] };
 		});
 		const auth = trusted ? subscriptionStatus(ctx) : "Not inspected on an unsupported route.";
 		const ownedJobs = jobs(ctx).read();
@@ -237,12 +273,12 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			const searchStatus = !search ? "unavailable; no configured search transport/profile"
 				: pi.getActiveTools().includes("web_search")
 					? options.webSearch?.profile === "verified-v1" ? "enabled; verified search/public-URL-open subset, direct or native protected scope; current entitlement checked at execution" : "enabled for isolated validation; source-contract-only, no opaque replay"
-					: "off (session only); /openai-tools web_search on";
+					: "off; /openai-tools web_search on";
 			const [codeStatus, shellStatus] = await Promise.all([codeMode.status(ctx), nativeShellStatus()]);
 			const codeDescription = !codeStatus.available ? `unavailable; ${codeStatus.reason}`
 				: `${pi.getActiveTools().includes("exec") ? "enabled" : "off; /openai-tools code_mode on"}; Windows x64 native preflight ready (launch rechecked); native scopes ${codeStatus.native!.activeScopes} active, ${codeStatus.native!.drainingScopes} draining / 2${codeStatus.native!.drainingScopes ? "; new native admission blocked until confirmed cleanup" : ""}`;
 			const conflicts = [...definitions.keys()].filter(name => !ownership.owns(name));
-			ctx.ui.notify(`OpenAI capabilities (${reason})\nTool ownership: ${conflicts.length ? `unavailable/conflicting/excluded: ${conflicts.join(", ")}` : "verified (Pi 0.85 schema identity)"}\nSubscription: ${auth}\nImage generation: ${pi.getActiveTools().includes("imagegen") ? "enabled; Codex OAuth required at execution" : "unavailable/disabled"}\nWeb search: ${searchStatus}\nCode mode: ${codeDescription}\nUnified exec: ${!shellStatus.available ? `unavailable; ${shellStatus.reason}` : pi.getActiveTools().includes("exec_command") ? "enabled (full OS permissions, pipes only)" : "off; /openai-tools unified_exec on"}\nNo API fallback. Historical conversation images are not removed by this policy.`, "info");
+			ctx.ui.notify(`OpenAI capabilities (${reason})\nTool ownership: ${conflicts.length ? `unavailable/conflicting/excluded: ${conflicts.join(", ")}` : "verified (Pi 0.85 schema identity)"}\nSubscription: ${auth}\nImage generation: ${pi.getActiveTools().includes("imagegen") ? "enabled; Codex OAuth required at execution" : "unavailable/disabled"}\nWeb search: ${searchStatus}\nCode mode: ${codeDescription}\nUnified exec: ${!shellStatus.available ? `unavailable; ${shellStatus.reason}` : pi.getActiveTools().includes("exec_command") ? "enabled (full OS permissions, pipes only)" : "off; /openai-tools unified_exec on"}\n${preferenceError ?? `${options.preferences ? "Saved profile preferences" : "Session preferences"}: ${CAPABILITY_NAMES.map(name => `${name}=${preferences[name] ? "on" : "off"}`).join(", ")}.`}\nDirect jobs share two native scopes with Code mode; draining blocks admission. Poll for completion: no automatic completion message or new assistant turn. Jobs/cells are not restored.\nNo API fallback. Historical conversation images are not removed by this policy.`, "info");
 		},
 	});
 	return {

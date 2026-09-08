@@ -49,6 +49,7 @@ try{
     panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));assert.ok(!session.getActiveToolNames().includes("imagegen"));
     for(const char of "Unified")panel.handleInput(char);panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));assert.ok(session.getActiveToolNames().includes("exec_command"));assert.match(capture("unified-search-stays-open",panel),/→ Unified exec\s+on/);
     for(let i=0;i<7;i++)panel.handleInput("\x7f");for(const char of "Code mode")panel.handleInput(char);panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));assert.ok(session.getActiveToolNames().includes("exec"));assert.ok(session.getActiveToolNames().includes("wait"));assert.match(capture("code-enabled",panel),/→ Code mode\s+on/);
+    for(let i=0;i<9;i++)panel.handleInput("\x7f");for(const char of "Web search")panel.handleInput(char);panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));assert.ok(session.getActiveToolNames().includes("web_search"));assert.match(capture("web-enabled",panel),/→ Web search\s+on/);
    };
    await session.prompt("/openai-tools");assert.ok(session.getActiveToolNames().includes("read"));assert.ok(session.getActiveToolNames().includes("write"));assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
    drive=async panel=>{
@@ -59,8 +60,15 @@ try{
    await session.prompt("/openai-tools jobs");assert.equal(notices.length,0,"Jobs navigation stays inside the OpenAI menu");
    await session.prompt("/openai-tools jobs status");assert.equal(notices.at(-1),"[]");
    await session.prompt("/openai-tools status");assert.match(notices.at(-1),/OpenAI capabilities/);
+   assert.deepEqual(JSON.parse(await readFile(join(profile,"openai-compatibility-capabilities.json"),"utf8")),{version:1,capabilities:{imagegen:false,web_search:true,unified_exec:true,code_mode:true}});
+   if(!excluded){
+    const oldContext=session.extensionRunner.createContext();await session.reload();assert.throws(()=>oldContext.toolGatewayInfo);
+    assert.ok(!session.getActiveToolNames().includes("imagegen"));for(const name of capabilities.filter(name=>name!=="imagegen"))assert.ok(session.getActiveToolNames().includes(name),`Saved capability restored: ${name}`);
+    drive=async panel=>{const view=capture("capabilities-restored",panel);assert.match(view,/→ Image generation\s+off/);for(const name of ["Web search","Unified exec","Code mode"])assert.ok(new RegExp(`${name}\\s+on`).test(view));assert.match(view,/Saved for this Pi profile: off/);};
+    await session.prompt("/openai-tools");assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
+   }
   }finally{await session.extensionRunner.emit("session_shutdown",{});session.dispose();}
  }
  assert.equal(networkAttempts,0);
- console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,sessionOnlyCapabilities:true,consolidatedJobs:true,noNotificationSpam:true,networkAttempts,frames}));
+ console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,networkAttempts,frames}));
 }finally{globalThis.fetch=priorFetch;}

@@ -6,7 +6,7 @@ This guide describes the public source's implementation and constraints, not an 
 | --- | --- |
 | Native/upstream models | Pi 0.85.1's own catalog/auth/transport/cache behavior; no extension provider factory or model backport |
 | Patched/private host | Genuine pinned Pi source plus the explicit fifteen-path native patch; not stock Pi, an official upstream binary, or a visibility claim |
-| Code mode | Session-opt-in paired exec/wait with bounded QuickJS cells and native ownership; not ambient Node/V8 |
+| Code mode | Independently opted-in paired exec/wait with a saved profile choice, bounded QuickJS cells and current native ownership; not ambient Node/V8 |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
 | Supervisor readiness | Private shell-supervisor preamble received; not child acknowledgement receipt, user-command success or native authority |
 | Scope/context identity | Native branded authority and lifecycle identity, not guest IDs, metadata or strings |
@@ -23,10 +23,13 @@ This guide describes the public source's implementation and constraints, not an 
 | Runtime payload | Manifested files delivered in the immutable archive; not every build input or upstream example |
 | Retained build inputs | Original locked host tarballs and excluded demo files preserved byte-identically beside the build output, outside the delivered archive |
 | Redistribution review | [Actual package, bundled-code and embedded-work coverage](REDISTRIBUTION.md); notice candidates and zero returned advisories are not clearance |
-| OpenAI controls | One `/openai-tools` entry point with Fast, session capabilities and the nested owned-jobs view; explicit Fast/jobs subcommands retain non-TUI control |
+| OpenAI controls | One `/openai-tools` entry point with saved Fast/capability preferences and the nested owned-jobs view; explicit subcommands retain non-TUI control |
 | Cell diagnostics | Fixed guest phase plus host-observed delegation/result counters and shell categories; not exception text, application success or proof of external effects |
 | Jobs snapshot | Passive same-session process records; cancellation is explicit user control over owned handles, not arbitrary-PID lookup or automatic retry |
-| Settings value | Current saved Fast preference or applicable session tool switch; not service entitlement or native execution authority |
+| Saved preference | Profile-local Fast or capability choice restored across new sessions/reload/restart; not credentials, jobs, entitlement or native authority |
+| Effective switch | Saved choice currently applicable under route/ownership/exclusions/preflight; an inactive choice is retained, not permission to bypass a gate |
+| Direct job | Returned shell owned by the original native conversation context; cell jobs additionally require their original scope |
+| Completion collection | Explicit write_stdin polling of output/status; not automatic notification, a new assistant turn or process resurrection |
 | Settings availability | Passive route/ownership/preflight snapshot on open/change; unavailable rows explain why and cannot override exclusions |
 | Standing project authorization | Delegated in-scope decisions and delivery planning; never a waiver of technical/privacy gates or permission to bypass guards |
 

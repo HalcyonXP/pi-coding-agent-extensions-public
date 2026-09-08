@@ -303,7 +303,7 @@ function result(value: ExecResult) {
 }
 export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (name: "exec_command" | "write_stdin", ctx: ExtensionContext, signal?: AbortSignal) => CapabilityLease) {
 	return [{
-		name: "exec_command", label: "Unified exec", description: "Start a native local command, collect bounded output, and keep a session for polling/stdin. Full OS permissions; no sandbox or PTY. Session/lifetime limits apply. Does not replace Pi's PowerShell tool.",
+		name: "exec_command", label: "Unified exec", description: "Start a native local command, collect bounded output, and keep a same-context session for polling/stdin. Full OS permissions; no sandbox or PTY. The patched host shares TWO active/draining native scopes across direct jobs and Code mode, separately from the four-process manager limit. A third direct start can be refused without cancelling earlier jobs. running:true with supervisor_ready:false means startup is unconfirmed, not command success. Poll write_stdin promptly for readiness/completion; there are no automatic completion messages or new assistant turns. Never relaunch just to wait. Jobs are not restored after reload/context changes; session/lifetime/output expiry applies. Does not replace Pi's PowerShell tool.",
 		parameters: ExecParams,
 		async execute(_id, params, signal, _update, ctx) {
 			const lease = getLease("exec_command", ctx, signal);

@@ -272,7 +272,7 @@ test("uses upstream cache handling for GPT-5.6 and Astra with no local transport
 	}
 });
 
-test("cohesive entry keeps direct capabilities, session opt-ins and provider-switch revocation on native Pi", async (t) => {
+test("cohesive entry keeps saved opt-ins and provider-switch revocation on native Pi", async (t) => {
 	const h = await createHarness(t);
 	const auth = t.mock.method(h.registry, "getProviderAuth", async () => { throw new Error("No auth in registration/policy fixtures"); });
 	await h.emit("session_start");
@@ -294,7 +294,7 @@ test("cohesive entry keeps direct capabilities, session opt-ins and provider-swi
 	await h.emit("model_select");
 	assert.ok(h.active().includes("imagegen"));
 	await h.emit("session_start");
-	assert.deepEqual(h.active(), ["read", "powershell", "imagegen"]);
+	assert.deepEqual(new Set(h.active()), new Set(["read", "powershell", "imagegen", "web_search", "exec_command", "write_stdin"]));
 	assert.equal(auth.mock.callCount(), 0);
 });
 
