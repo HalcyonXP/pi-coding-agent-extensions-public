@@ -23,8 +23,8 @@
     },
     {
       "path": "artifacts/earendil-works-pi-coding-agent-0.85.1.tgz",
-      "bytes": 7002934,
-      "sha256": "a0d5113e54705fcce0f67b02495356ac5781f46b275021bcc3a0157caa95bea9"
+      "bytes": 7018265,
+      "sha256": "986fd54be59e21f17644f721f5952bedaf025d070fee4db8b57c029067e9ced6"
     },
     {
       "path": "artifacts/earendil-works-pi-telemetry-0.85.1.tgz",

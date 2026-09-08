@@ -5,7 +5,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Term | Agreed meaning |
 | --- | --- |
 | Native/upstream models | Pi 0.85.1's own catalog/auth/transport/cache behavior; no extension provider factory or model backport |
-| Patched/private host | Genuine pinned Pi source plus the explicit nineteen-path native patch; not stock Pi, an official upstream binary, or a visibility claim |
+| Patched/private host | Genuine pinned Pi source plus the explicit twenty-path native patch; not stock Pi, an official upstream binary, or a visibility claim |
 | Code mode | Independently opted-in paired exec/wait with a saved profile choice, bounded QuickJS cells and current native ownership; not ambient Node/V8 |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
 | Supervisor readiness | Private shell-supervisor preamble received; not child acknowledgement receipt, user-command success or native authority |
@@ -34,6 +34,8 @@ This guide describes the public source's implementation and constraints, not an 
 | Quiet local poll | Opted-in native cell-owned empty-stdin call with unchanged empty-running output; hidden in the updated native TUI and omitted from ordinary model-facing audits, not from native accounting |
 | Tool-return audit | A finalized invocation returned; background work may still run. Not a process-completion report or a new model request |
 | Poll visibility | Direct/model-issued calls, input/control, updates, output/loss, errors and terminal results remain visible; no inference about billed quota from card counts |
+| Compact local-job group | Native TUI-only scoped shell-call view: short safe output/status rows, expandable original cards/audit text/correlation, no new execution or persistence authority |
+| Audit-only replay | Grouped recorded returned-call text without restored running jobs, process status or cleanup claims; not a Jobs snapshot |
 | Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |
 | Idle turn | New assistant/model execution without another user request; completion reporting does not start one |
 | Result retention | Up to eight in-memory process/output records; no completed-result poll TTL; eligible completed least-recently-collected records can be evicted for capacity |

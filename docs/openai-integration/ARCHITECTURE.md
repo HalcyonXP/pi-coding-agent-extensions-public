@@ -10,7 +10,7 @@ Policy persists beyond individual handler leases. Saved preferences are restored
 
 ## Genuine native gateway
 
-The nineteen-path patch runs delegated calls through Pi's actual preparation, approval, post-approval normalization/validation, before/result hooks, image normalization and lifecycle—not copied handlers. Trusted ownership fields follow caller parameters. Current registry identity is checked before execution.
+The twenty-path patch runs delegated calls through Pi's actual preparation, approval, post-approval normalization/validation, before/result hooks, image normalization and lifecycle—not copied handlers. Trusted ownership fields follow caller parameters. Current registry identity is checked before execution.
 
 Native ancestry supplies direct/nested origin; guest IDs cannot impersonate a parent. Recursion and orchestration tool nesting are denied. A normal invocation expires with its handler. A separately issued branded native scope can own durable resources after that return, using native context identity. contextSignal reports context lifetime, not execution authority.
 
@@ -43,6 +43,16 @@ The first-party `write_stdin` definition opts into native `localPolling: "empty-
 The native TUI holds at most eight pending presentation records (two scopes times four outstanding calls) and does not create cards or blank rows for quiet completions. Any meaningful/unknown result reveals the original native call and result, labelled Local job update. Foreground agent-end is not scope closure; active components survive it, and history redraw retains still-pending native calls. Native SDK/RPC events, approvals, hooks, call limits and ownership are unchanged; clients can use the hints without losing diagnostic events.
 
 The broker still validates/observes every finalized descendant. A natively classified no-op receives no ordinary protected audit publication, so it does not fill the model-context queue. Images/retrieved sources stay mandatory even if a hint is misplaced. Other ordinary audits say returned or failed, not completed. Coordinator-selected `text()` output and meaningful audits remain model-facing at safe boundaries. This removes unnecessary poll-derived context, not the cost of generating coordinator code, ordinary model work or explicitly forwarded output; no live quota/caching claim follows, and an arbitrary delegated program may independently perform service work. Old hosts without the hints remain visible rather than guessing. Nested polling/cleanup, execution budgets and lack of automatic idle turns are unchanged.
+
+## Compact local-job groups
+
+The native TUI groups same-scope `exec_command` and empty-input `write_stdin` calls without custom renderers. Normal starts and successful bounded shell results update a single group in place, with one short status/output preview per observed job rather than a padded JSON card per invocation. The default group shows at most eight job rows plus an explicit extra-row count; full original native cards, call arguments/correlation and ordinary audit text remain available through the native tool-expand control or clicking the group. Each group retains at most 64 call and 64 audit components; overflow falls back to ordinary visible components. Groups live in the existing transcript container, not a second unbounded ownership registry.
+
+Only matching plain data/JSON shell results with known fields can be compacted. Defined usage/termination, output loss, nonzero exits, native updates, input/control, unknown results/metadata, images/sources and custom renderers keep prominent ordinary rendering. Known optional undefined JS fields are removed only from copied classification data. Preview control/directional text is sanitized, horizontal clipping is marked, and earlier output remains previewed when a final collection has no new text. Full results are not truncated or rewritten by the preview. Direct/model-issued calls are unchanged.
+
+Exact ordinary successful shell audits are grouped visually, not withheld from their protected journal/history/provider input. Other custom messages, errors, direct completion reports and mandatory image/source evidence remain ordinary native evidence. Group IDs only correlate display; they cannot authorize execution or make a restored process. On a full history rebuild, only the already-recorded audits can be reconstructed and are labelled history only, never running jobs. Pending scoped starts survive presentation redraw in the same eight-entry native presentation tracker. Session reset/reload does not create job authority or new persistence.
+
+This changes neither schemas, execution/accounting, source evidence, model input, provider ownership nor any runtime budget. A compact row is not a completion/cleanup certificate or a new model request. Nested automatic terminal publication, streaming output and idle inference are separate features, not side effects of grouping.
 
 ## Returned shell resources and Windows containment
 

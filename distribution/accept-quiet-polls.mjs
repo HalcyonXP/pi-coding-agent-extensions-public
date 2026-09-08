@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import {setTimeout as pause} from "node:timers/promises";
 import {pollingPresentation} from "./polling-presentation.mjs";
+import {validateCompactLocalJobs} from "./accept-local-jobs.mjs";
 const auditCount=messages=>messages.flatMap(m=>typeof m.content==="string"?[{type:"text",text:m.content}]:m.content??[]).filter(b=>b.type==="text"&&/^Code mode: (exec_command|write_stdin) (returned|failed)\.$/.test(b.text)).length;
 
 export function validateQuietPolling(rows) {
@@ -51,8 +52,13 @@ export async function acceptQuietPolling(session,invoke,outcome,faux,ai,native) 
     const collected=outcome(await invoke("wait",{cell_id:cell.cell_id,yield_time_ms:1000}));assert.equal(collected.status,"completed");assert.equal(collected.result.status,"ok");for(let n=0;n<3;n++)assert.ok(collected.output.includes('QUIET_DONE_'+n));
     row.collectedCell=true;row.expectedAudits=journal.length;row.followupAudits=inputs[2];
    }else assert.ok(session.messages.some(m=>m.role==="assistant"&&m.stopReason==="aborted"));
+   const before=JSON.stringify(session.messages),compact=ui.groupFrame(),groups=ui.groups();
+   row.groupCount=groups.length;row.compactLines=compact.split("\n").length;row.compactOutputs=[0,1,2].filter(n=>compact.includes('QUIET_TIMER_'+n)).length;
+   row.groupAudits=groups.reduce((n,g)=>n+g.audits.size,0);row.prominentAbort=compact.includes('error');
+   ui.expand(true);const expanded=ui.groupFrame();row.expandedNativeDetails=expanded.includes('Scope:')&&expanded.includes('Call:')&&expanded.includes('session_id');ui.expand(false);
+   row.presentationMutatedHistory=JSON.stringify(session.messages)!==before;
    rows.push(row);
   }finally{off();session.agent.streamFunction=stream;ui.close();}
  }
- return validateQuietPolling(rows);
+ return {quietLocalPolling:validateQuietPolling(rows),compactLocalJobs:validateCompactLocalJobs(rows)};
 }

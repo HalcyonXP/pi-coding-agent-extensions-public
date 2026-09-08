@@ -21,7 +21,7 @@ assert.equal(git(["status","--porcelain"]),"","Build only a committed clean sour
 const sourceCommit=git(["rev-parse","HEAD"]),{provenance,patch}=verifyHostArtifacts();
 const copySource=async(path,target)=>{await mkdir(dirname(target),{recursive:true});await writeFile(target,run("git",["show",`${sourceCommit}:${path}`],{cwd:root,encoding:null}),{flag:"wx"});};
 assert.equal(git(["rev-parse","HEAD"],{cwd:host}),provenance.commit);
-const patchBytes=await readFile(patch),paths=[...patchBytes.toString().matchAll(/^diff --git a\/(.+) b\/.+$/gm)].map(m=>m[1]);assert.equal(paths.length,19);
+const patchBytes=await readFile(patch),paths=[...patchBytes.toString().matchAll(/^diff --git a\/(.+) b\/.+$/gm)].map(m=>m[1]);assert.equal(paths.length,20);
 const changed=git(["diff","--name-only","HEAD"],{cwd:host}).split(/\r?\n/).filter(Boolean);assert.ok(changed.every(p=>paths.includes(p)),"Unreviewed native source changes");
 const extra=git(["ls-files","--others","--exclude-standard"],{cwd:host}).split(/\r?\n/).filter(Boolean);assert.ok(extra.every(p=>paths.includes(p)||p==="packages/coding-agent/test/suite/code-mode-rpc.test.ts"),"Unreviewed native inputs");
 const index=join(root,".pi",`package-proof-${randomUUID()}.index`),indexEnv={...process.env,GIT_INDEX_FILE:index};
