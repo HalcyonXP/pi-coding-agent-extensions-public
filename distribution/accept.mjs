@@ -14,6 +14,7 @@ import {verifyCuration} from "./curate-payload.mjs";
 import {acceptReturnedJobs} from "./accept-returned-jobs.mjs";
 import {acceptAsyncCompletion} from "./accept-async-jobs.mjs";
 import {acceptQuietPolling} from "./accept-quiet-polls.mjs";
+import {loadPollingPresentation} from "./polling-presentation.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32"&&process.arch==="x64","Usage: node distribution/accept.mjs <private Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -74,9 +75,7 @@ try{
  await session.prompt("/openai-tools jobs status");assert.ok(JSON.parse(notices.at(-1)).some(row=>row.session_id===job.session_id));await session.prompt(`/openai-tools jobs cancel ${job.session_id}`);assert.match(notices.at(-1),/job cancelled/);await session.prompt("/openai-tools jobs status");assert.deepEqual(JSON.parse(notices.at(-1)),[]);assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
  const returnedJobs=await acceptReturnedJobs(session,invoke,outcome);
  const asyncCompletion=await acceptAsyncCompletion(session,invoke,outcome,faux,ai,cwd);
- const {LocalPollPresentation}=await import(pathToFileURL(join(bundle,"node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/local-poll-presentation.js")).href);
- const {Container}=await load("@earendil-works/pi-tui");
- const quietLocalPolling=await acceptQuietPolling(session,invoke,outcome,faux,ai,{InteractiveMode:sdk.InteractiveMode,LocalPollPresentation,Container,initTheme:sdk.initTheme});
+ const quietLocalPolling=await acceptQuietPolling(session,invoke,outcome,faux,ai,await loadPollingPresentation(bundle,sdk));
  const oldContext=session.extensionRunner.createContext();await session.reload();faux=compat.registerFauxProvider();for(const name of ["exec","wait","web_search","exec_command","write_stdin"])assert.ok(session.getActiveToolNames().includes(name),"Saved choices restore, not prior resources");assert.throws(()=>oldContext.toolGatewayInfo);assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
  await session.prompt("/openai-tools code_mode on");assert.equal((await invoke("wait",{cell_id:oldId})).isError,true);
  r=outcome(await invoke("exec",{code:'if(load("artifact")!==undefined||load("image")!==undefined)throw Error("stale store retained");'}));assert.equal(r.result.status,"ok");

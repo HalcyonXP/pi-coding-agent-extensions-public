@@ -9,7 +9,7 @@ import {join,resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {verifyBundle} from "./lib.mjs";
 import {verifyCuration} from "./curate-payload.mjs";
-import {pollingPresentationFrames} from "./polling-presentation.mjs";
+import {loadPollingPresentation,pollingPresentationFrames} from "./polling-presentation.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32","Usage: node distribution/accept-settings.mjs <Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -23,8 +23,7 @@ const capture=(name,panel)=>{const lines=panel.render(80).map(clean);assert.ok(l
 const until=async predicate=>{const end=performance.now()+10000;while(performance.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,10));}throw Error("Settings interaction did not settle");};
 try{
  const sdk=await import(pathToFileURL(join(bundle,"node_modules/@earendil-works/pi-coding-agent/dist/index.js")).href);sdk.initTheme("dark",false);
- const {LocalPollPresentation}=await import(pathToFileURL(join(bundle,"node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/local-poll-presentation.js")).href);
- const {Container}=await import(pathToFileURL(join(bundle,"node_modules/@earendil-works/pi-tui/dist/index.js")).href);
+ const pollingNative=await loadPollingPresentation(bundle,sdk);
  for(const excluded of [false,true]){
   const settings=sdk.SettingsManager.inMemory(),resources=new sdk.DefaultResourceLoader({cwd,agentDir:profile,settingsManager:settings,additionalExtensionPaths:[join(bundle,"extensions/openai-compatibility/index.ts")],noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true});
   await resources.reload();assert.deepEqual(resources.getExtensions().errors,[]);
@@ -37,7 +36,7 @@ try{
     let done=false;const panel=await factory({requestRender(){}},ui.theme,{},()=>{done=true;});
     try{assert.ok(panel.children.some(child=>child.constructor.name==="SettingsList"));await drive(panel);panel.handleInput("\x1b");assert.equal(done,true);}finally{panel.dispose?.();}
    }}});
-   if(!excluded)frames.push(...await pollingPresentationFrames(session,{InteractiveMode:sdk.InteractiveMode,LocalPollPresentation,Container,initTheme:sdk.initTheme}));
+   if(!excluded)frames.push(...await pollingPresentationFrames(session,pollingNative));
    drive=async panel=>{
     const initial=capture(excluded?"fast-after-exclusions":"fast-before",panel);assert.match(initial,/→ Fast mode\s+(on|off)/);
     if(excluded){assert.match(initial,/→ Fast mode\s+on/);assert.match(initial,/Image generation\s+unavailable/);return;}

@@ -3,6 +3,15 @@
 // Source-only acceptance bootstrap: actual installed native subscription, handlers and
 // components; no real terminal, keyboard/profile discovery or execution authority.
 import assert from "node:assert/strict";
+import {join} from "node:path";
+import {pathToFileURL} from "node:url";
+// The caller has verified this immutable bundle. Fixed pinned dist entries only:
+// pi-tui 0.85.1 uses main, not the SDK/AI conditional-exports layout. No fallback.
+export async function loadPollingPresentation(bundle,sdk) {
+ const {Container}=await import(pathToFileURL(join(bundle,"node_modules/@earendil-works/pi-tui/dist/index.js")).href);
+ const {LocalPollPresentation}=await import(pathToFileURL(join(bundle,"node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/local-poll-presentation.js")).href);
+ return {InteractiveMode:sdk.InteractiveMode,LocalPollPresentation,Container,initTheme:sdk.initTheme};
+}
 export function pollingPresentation(session,{InteractiveMode,LocalPollPresentation,Container,initTheme}) {
  assert.equal(typeof InteractiveMode?.prototype?.subscribeToAgent,"function");
  assert.equal(typeof LocalPollPresentation,"function");initTheme("dark",false);
