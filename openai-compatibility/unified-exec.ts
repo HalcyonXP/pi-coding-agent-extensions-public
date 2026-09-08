@@ -379,7 +379,9 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 			finally { lease.release(); }
 		},
 	} satisfies ToolDefinition<typeof ExecParams>, {
-		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. A nested call cannot adopt another cell's ID or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. IDs expire on provider/session changes or reload.",
+		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. A nested call cannot adopt another cell's ID or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. On the matching updated native host, unchanged empty-running cell polls are local work hidden from the TUI and ordinary audit context; direct calls, input, output/loss, errors and terminal results remain visible. Print meaningful changes rather than each unchanged poll. No extra model request is made per local poll; explicitly printed output still becomes model input. IDs expire on provider/session changes or reload.",
+		// Native-only declaration; never exposed as a model/guest permission parameter.
+		localPolling: "empty-stdin",
 		parameters: WriteParams,
 		async execute(_id, params, signal, _update, ctx) {
 			const lease = getLease("write_stdin", ctx, signal);
@@ -388,5 +390,5 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 				lease.assertCurrent(); return result(value);
 			} finally { lease.release(); }
 		},
-	} satisfies ToolDefinition<typeof WriteParams>] as const;
+	} satisfies ToolDefinition<typeof WriteParams> & { localPolling: "empty-stdin" }] as const;
 }

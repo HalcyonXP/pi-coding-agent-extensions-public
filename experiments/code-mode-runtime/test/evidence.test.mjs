@@ -52,3 +52,35 @@ test("reference retention expires monotonically even without a provider change",
  const ref=f.broker.project(outcome(e)).result.content[0].ref;now=EVIDENCE_LIMITS.lifetimeMs;
  assert.throws(()=>f.broker.resolveImage(ref));f.broker.close();
 });
+
+function pollEvent(changes={}, nativeQuiet=true) {
+ const details={session_id:"synthetic",output:"",exit_code:null,running:true,supervisor_ready:true,truncated_bytes:0,...changes};
+ return {...event([{type:"text",text:JSON.stringify(details)}],"write_stdin"),result:{content:[{type:"text",text:JSON.stringify(details)}],details},...(nativeQuiet?{quietLocalPoll:true}:{})};
+}
+test("native quiet polls are observed without publication or consuming a protected queue slot",async()=>{
+ const published=[];const f=fixture(async e=>published.push(e));
+ for(let n=0;n<40;n++){const e=pollEvent();await f.broker.capture(f.scope,e);assert.deepEqual(f.broker.project(outcome(e)),outcome(e));}
+ assert.equal(published.length,0);f.broker.close();
+});
+test("missing native hint and result/guest hints cannot suppress an ordinary audit",async()=>{
+ const published=[];const f=fixture(async e=>published.push(e));
+ for(const e of [pollEvent({},false),pollEvent({quietLocalPoll:true},false),{...pollEvent(),toolName:"exec_command"}])await f.broker.capture(f.scope,e);
+ assert.equal(published.length,3);assert.equal(published[0].content[0].text,"Code mode: write_stdin returned.");assert.equal(published[2].content[0].text,"Code mode: exec_command returned.");f.broker.close();
+});
+test("native hint never hides terminal data, output loss, error or unrecognized content",async()=>{
+ const published=[];const f=fixture(async e=>published.push(e));
+ for(const changes of [{output:"visible"},{running:false,exit_code:0},{truncated_bytes:1},{termination:"cancelled"}])await f.broker.capture(f.scope,pollEvent(changes));
+ await f.broker.capture(f.scope,{...pollEvent(),isError:true});
+ const e=pollEvent();e.result.content=[{type:"text",text:"important result hook"}];await f.broker.capture(f.scope,e);
+ assert.equal(published.length,6);assert.equal(published[4].content[0].text,"Code mode: write_stdin failed.");f.broker.close();
+});
+test("mandatory images and retrieved source evidence survive a misplaced quiet hint",async()=>{
+ const published=[];const f=fixture(async e=>published.push(e));
+ await f.broker.capture(f.scope,{...event(undefined,"write_stdin"),quietLocalPoll:true});
+ const e=pollEvent({sourceEvidencePresent:true});e.result.content=[{type:"text",text:"https://example.com/source synthetic evidence"}];await f.broker.capture(f.scope,e);
+ assert.equal(published.length,2);assert.equal(published[0].content[0].data,png);assert.equal(published[1].content[0].text,e.result.content[0].text);f.broker.close();
+});
+test("quiet classification never bypasses original native scope or revocation checks",async()=>{
+ const f=fixture(),e=pollEvent();await assert.rejects(f.broker.capture({...f.scope,publishEvidence:undefined},e),/UNAVAILABLE/);
+ await assert.rejects(f.broker.capture({...f.scope,id:"other"},e),/UNAVAILABLE/);f.controller.abort();await assert.rejects(f.broker.capture(f.scope,e));f.broker.close();
+});

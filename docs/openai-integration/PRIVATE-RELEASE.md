@@ -34,6 +34,8 @@ The menu saves all selectable choices across new sessions, reload and CLI restar
 
 Jobs, cells and execution authority are not saved. Direct shell jobs share two native scope slots with Code mode; draining retains admission. Returned direct completions publish a bounded uncollected-output report through protected native history/UI and the next safe model request. There is no new idle assistant turn or incremental output stream. Poll `write_stdin` for readiness/input/remaining output; completed records use eight-record capacity/collection retention, not a one-minute last-poll timer. A returned `supervisor_ready: false` can mean startup is still in progress, not command success. Context changes, abort/reload and expiry can invalidate IDs even while the terminal stays open. Cell jobs must be polled in the original cell and close with it; do not bypass cleanup. Preserve ambiguous failures rather than replay commands.
 
+The matching updated native TUI hides routine cell-owned empty-running polls and omits their ordinary audit injection into model input. Actual local output/error/terminal results remain visible as Local job update; direct/model-issued calls and input/control are never hidden. Native events and limits still count every call. Older hosts without this native metadata stay visible. This is not a quota meter: code generation, model work and coordinator-printed output still use tokens normally.
+
 /openai-tools fast on and /openai-tools fast status control the separate persistent priority preference. Subscription capability usage, ordinary conversation billing and Fast costs are distinct. User-directed service use is not an automated validation allowance.
 
 ## Rollback and side-by-side updates

@@ -33,7 +33,16 @@ export class CellEvidence {
     // Ordinary text can still be filtered by the coordinator. Images and retrieved
     // source evidence cannot, even when an intermediate native tool discards them.
     if (!content.some(block => block.type === "image") && event.toolName !== "web_search" && !result.details?.sourceEvidencePresent) {
-      await scope.publishEvidence({content:[{type:"text",text:`Code mode: ${event.toolName} ${event.isError ? "failed" : "completed"}.`}], details:{toolName:event.toolName,toolCallId:event.toolCallId,isError:event.isError,auditOnly:true}});
+      // Native classification is outside the result/guest namespace. Still check the
+      // no-op shape here; absent/unknown metadata and all meaningful evidence stay visible.
+      const details = result.details;
+      if (event.quietLocalPoll === true && event.toolName === "write_stdin" && event.isError === false
+        && details?.running === true && details.exit_code === null && details.output === "" && details.truncated_bytes === 0
+        && Object.keys(details).every(key => ["session_id", "output", "exit_code", "running", "supervisor_ready", "truncated_bytes"].includes(key))
+        && content.length === 1 && content[0].type === "text" && content[0].text === JSON.stringify(details)) {
+        this.#assert(); scope.signal.throwIfAborted(); return;
+      }
+      await scope.publishEvidence({content:[{type:"text",text:`Code mode: ${event.toolName} ${event.isError ? "failed" : "returned"}.`}], details:{toolName:event.toolName,toolCallId:event.toolCallId,isError:event.isError,auditOnly:true}});
       this.#assert(); return;
     }
     const key = hash(json + String(event.isError));

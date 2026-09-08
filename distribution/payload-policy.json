@@ -13,8 +13,8 @@
     },
     {
       "path": "artifacts/earendil-works-pi-agent-core-0.85.1.tgz",
-      "bytes": 682912,
-      "sha256": "0436174a84c3c06c2a28f0cdaf16b030fb2b24865a32e509f39d5dd4e30f8a82"
+      "bytes": 687605,
+      "sha256": "b3d338489622692992317ec7e1bf9b01c010903a9e7d9326f426e63f5a7cec1c"
     },
     {
       "path": "artifacts/earendil-works-pi-ai-0.85.1.tgz",
@@ -23,8 +23,8 @@
     },
     {
       "path": "artifacts/earendil-works-pi-coding-agent-0.85.1.tgz",
-      "bytes": 6997088,
-      "sha256": "0b6e47bd388fd2af34e911ccd7912bdaf2915d8d1e5917a71c066df3368573f2"
+      "bytes": 7002934,
+      "sha256": "a0d5113e54705fcce0f67b02495356ac5781f46b275021bcc3a0157caa95bea9"
     },
     {
       "path": "artifacts/earendil-works-pi-telemetry-0.85.1.tgz",

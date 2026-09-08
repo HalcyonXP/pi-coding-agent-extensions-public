@@ -10,7 +10,7 @@ Policy persists beyond individual handler leases. Saved preferences are restored
 
 ## Genuine native gateway
 
-The fifteen-path patch runs delegated calls through Pi's actual preparation, approval, post-approval normalization/validation, before/result hooks, image normalization and lifecycle—not copied handlers. Trusted ownership fields follow caller parameters. Current registry identity is checked before execution.
+The nineteen-path patch runs delegated calls through Pi's actual preparation, approval, post-approval normalization/validation, before/result hooks, image normalization and lifecycle—not copied handlers. Trusted ownership fields follow caller parameters. Current registry identity is checked before execution.
 
 Native ancestry supplies direct/nested origin; guest IDs cannot impersonate a parent. Recursion and orchestration tool nesting are denied. A normal invocation expires with its handler. A separately issued branded native scope can own durable resources after that return, using native context identity. contextSignal reports context lifetime, not execution authority.
 
@@ -35,6 +35,14 @@ The host observes descendants only after genuine approvals, validation, hooks, i
 Broker bounds: 16 MiB per result; 32 MiB retained logical bytes; 64 records; 16 PNGs of at most 8 MiB each; six-minute monotonic retention; bounded 8,192-character views. Native publication is bounded to 16 MiB per publication, 32 MiB/32 queued-or-next-context entries, four pending/64 total records. References are bounded before the unchanged 64 KiB RPC limit. Native referenced_image_refs resolution occurs before auth, without a filesystem fallback.
 
 Publication persists before context projection and participates in native settlement. Failed publication stays owned/draining; no automatic repair/retry/replay into another context. Revocation withdraws pending/reference authority in its original context, not recorded history. Native TUI rendering displays images or a bounded fallback. A receipt is not immediate separate live-model visibility, fsync, durable crash recovery or a new LLM turn.
+
+## Local polling presentation
+
+The first-party `write_stdin` definition opts into native `localPolling: "empty-stdin"`. This is trusted registration metadata, never an exposed model parameter, guest permission or token meter. Only genuine owning-scope calls can carry the native pending/quiet presentation hints. Post-approval arguments and current tool identity are checked again; direct/model-issued calls never use this path. Final classification requires local empty input, no updates, and a well-formed empty-running result with no error, output loss, termination, source/image evidence or other defined metadata. Known absent optional JS fields remain absent, not fabricated status. Here empty-running refers to output and process state, not whole-record equality: supervisor readiness alone may change and still be quiet. Quiet is a presentation classification, not a claim of no native activity or OS effects.
+
+The native TUI holds at most eight pending presentation records (two scopes times four outstanding calls) and does not create cards or blank rows for quiet completions. Any meaningful/unknown result reveals the original native call and result, labelled Local job update. Foreground agent-end is not scope closure; active components survive it, and history redraw retains still-pending native calls. Native SDK/RPC events, approvals, hooks, call limits and ownership are unchanged; clients can use the hints without losing diagnostic events.
+
+The broker still validates/observes every finalized descendant. A natively classified no-op receives no ordinary protected audit publication, so it does not fill the model-context queue. Images/retrieved sources stay mandatory even if a hint is misplaced. Other ordinary audits say returned or failed, not completed. Coordinator-selected `text()` output and meaningful audits remain model-facing at safe boundaries. This removes unnecessary poll-derived context, not the cost of generating coordinator code, ordinary model work or explicitly forwarded output; no live quota/caching claim follows, and an arbitrary delegated program may independently perform service work. Old hosts without the hints remain visible rather than guessing. Nested polling/cleanup, execution budgets and lack of automatic idle turns are unchanged.
 
 ## Returned shell resources and Windows containment
 
