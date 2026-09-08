@@ -36,6 +36,10 @@ This guide describes the public source's implementation and constraints, not an 
 | Poll visibility | Direct/model-issued calls, input/control, updates, output/loss, errors and terminal results remain visible; no inference about billed quota from card counts |
 | Compact local-job group | Native TUI-only scoped shell-call view: short safe output/status rows, expandable original cards/audit text/correlation, no new execution or persistence authority |
 | Audit-only replay | Grouped recorded returned-call text without restored running jobs, process status or cleanup claims; not a Jobs snapshot |
+| Coordinator output | Guest-selected text() strings; prefer concise labelled facts for people, JSON only when needed/requested. Not protected evidence or authoritative job status |
+| Readable Code result | Native exec/wait TUI status plus literal coordinator text; expandable cell metadata, unchanged wire/history, no guessed summaries of arbitrary JSON |
+| Cell completion | The cell returned a terminal result; a failed cell is labelled failed. Not a blanket assertion that all delegated jobs succeeded |
+| Output omission | Bytes already omitted by the existing guest-output budget; prominently reported, not recoverable merely by expanding the UI |
 | Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |
 | Idle turn | New assistant/model execution without another user request; completion reporting does not start one |
 | Result retention | Up to eight in-memory process/output records; no completed-result poll TTL; eligible completed least-recently-collected records can be evicted for capacity |
