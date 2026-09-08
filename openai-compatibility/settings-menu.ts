@@ -70,7 +70,7 @@ export class OpenAISettingsPanel extends Container {
 		this.feedback = new Text(theme.fg("dim", "Changes apply immediately. Tool changes cancel running capability work."), 1, 0);
 		this.addChild(new DynamicBorder(text => theme.fg("border", text)));
 		this.addChild(new Text(theme.fg("accent", "OpenAI settings"), 1, 0));
-		this.addChild(new Text(theme.fg("muted", "Fast: saved for this profile · Tools: this session only"), 1, 0));
+		this.addChild(new Text(theme.fg("muted", "Preferences saved for this profile · Jobs are not restored"), 1, 0));
 		this.addChild(this.list);
 		this.addChild(this.feedback);
 		this.addChild(new DynamicBorder(text => theme.fg("border", text)));

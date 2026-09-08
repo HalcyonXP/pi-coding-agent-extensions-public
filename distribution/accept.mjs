@@ -11,6 +11,7 @@ import {deflateSync} from "node:zlib";
 import {verifyBundle,sha256,run} from "./lib.mjs";
 import {shellAcceptanceDiagnostic,shellReadinessCode,createShellObserver} from "./acceptance-diagnostics.mjs";
 import {verifyCuration} from "./curate-payload.mjs";
+import {acceptReturnedJobs} from "./accept-returned-jobs.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32"&&process.arch==="x64","Usage: node distribution/accept.mjs <private Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -69,11 +70,12 @@ try{
  r=outcome(await invoke("exec",{code:'let r=await tools.exec_command({cmd:"Write-Output DIAGNOSTIC_READY; exit 7",yield_time_ms:1});for(let n=0;n<30&&r.result.details.running;n++)r=await tools.write_stdin({session_id:r.result.details.session_id,yield_time_ms:300});throw Error("synthetic diagnostic detail")',max_output_tokens:0}));assert.equal(r.status,"completed");assert.equal(r.result.code,"EXECUTION_FAILED");assert.equal(r.result.diagnostics.guest_phase,"await");assert.ok(r.result.diagnostics.delegated_calls>=1);assert.equal(r.result.diagnostics.returned_results,r.result.diagnostics.delegated_calls);assert.equal(r.result.diagnostics.last_delegation.shell.exit_code,7);assert.equal(r.result.diagnostics.last_delegation.shell.running,false);assert.equal(r.result.diagnostics.effects,"not_determined");assert.deepEqual(r.output,[]);assert.ok(!JSON.stringify(r).includes("synthetic diagnostic detail"));
  const job=outcome(await invoke("exec_command",{cmd:"Write-Output OWNED_JOB; Start-Sleep -Seconds 30",yield_time_ms:1}));assert.equal(job.running,true);
  await session.prompt("/openai-tools jobs status");assert.ok(JSON.parse(notices.at(-1)).some(row=>row.session_id===job.session_id));await session.prompt(`/openai-tools jobs cancel ${job.session_id}`);assert.match(notices.at(-1),/job cancelled/);await session.prompt("/openai-tools jobs status");assert.deepEqual(JSON.parse(notices.at(-1)),[]);assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
- const oldContext=session.extensionRunner.createContext();await session.reload();faux=compat.registerFauxProvider();assert.ok(!session.getActiveToolNames().includes("exec"));assert.throws(()=>oldContext.toolGatewayInfo);
+ const returnedJobs=await acceptReturnedJobs(session,invoke,outcome);
+ const oldContext=session.extensionRunner.createContext();await session.reload();faux=compat.registerFauxProvider();for(const name of ["exec","wait","web_search","exec_command","write_stdin"])assert.ok(session.getActiveToolNames().includes(name),"Saved choices restore, not prior resources");assert.throws(()=>oldContext.toolGatewayInfo);assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
  await session.prompt("/openai-tools code_mode on");assert.equal((await invoke("wait",{cell_id:oldId})).isError,true);
  r=outcome(await invoke("exec",{code:'if(load("artifact")!==undefined||load("image")!==undefined)throw Error("stale store retained");'}));assert.equal(r.result.status,"ok");
  session.agent.state.model=faux.getModel();await session.extensionRunner.emit({type:"model_select",model:faux.getModel(),previousModel:official,source:"set"});assert.ok(!session.getActiveToolNames().includes("exec"));assert.equal((await invoke("exec",{code:'text("must not run")'})).isError,true);assert.equal(auth,3);assert.equal(requests,3);
- console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,originalPngSha256:sha256(image)}));
+ console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,savedCapabilityPreferences:true,returnedJobs,originalPngSha256:sha256(image)}));
 }finally{
  if(session){session.agent.abort();await session.extensionRunner.emit({type:"session_shutdown",reason:"quit"});session.dispose();}
  faux?.unregister();globalThis.fetch=oldFetch;

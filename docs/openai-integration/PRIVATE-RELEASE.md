@@ -19,7 +19,7 @@ Keep the accepted extracted bundle immutable and in place. Choose a new absolute
 
 The launcher verifies the profile's bound absolute bundle path/digest, starts in its workspace and discovers only the explicit cohesive entry. It holds an exclusive lifetime lock until the genuine CLI exits. Additional --extension <path> is an explicit trusted-user choice, not automatic migration of active settings.
 
-Authenticate normally using /login for OpenAI Codex in this **new** profile. No auth is imported. Choose a native official model (for example openai-codex/gpt-6-astra). Eligible-route imagegen starts enabled; Web, Unified exec and Code mode have independent session opt-ins:
+Authenticate normally using /login for OpenAI Codex in this **new** profile. No auth is imported. Choose a native official model (for example openai-codex/gpt-6-astra). In a fresh profile, eligible-route imagegen starts enabled; Web, Unified exec and Code mode start off. All four choices are saved independently for this profile:
 
     /openai-tools status
     /openai-tools web_search on
@@ -30,7 +30,11 @@ Windows Unified exec also requires the verified prebuilt helper. It loads its in
 
 In the terminal, `/openai-tools` is the single native searchable menu, including Fast and the owned-jobs view. There are no standalone Fast/jobs commands. `/openai-tools fast` or `/openai-tools jobs` focuses the corresponding row in that same menu. Values and selected-row explanations stay visible while you change settings with Enter/Space. Esc closes without undoing applied changes. Unavailable or rollback-excluded tools stay read-only; their reasons are shown. Route/OAuth/runtime information is passive, not an entitlement probe. Explicit status/on/off subcommands remain available in every mode. The Jobs view is a passive snapshot; cancellation requires confirmation and never undoes completed effects or clears unknown ownership. Refresh resets only the jobs filter; Esc returns to the parent menu.
 
-Those opt-ins reset off on reload/new session. /openai-tools fast on and /openai-tools fast status control the separate persistent priority preference. Subscription capability usage, ordinary conversation billing and Fast costs are distinct. User-directed service use is not an automated validation allowance.
+The menu saves all selectable choices across new sessions, reload and CLI restart. Capability choices live in the profile-local `openai-compatibility-capabilities.json`; Fast's existing file/flag remain unchanged. Restoring a choice checks current route/ownership/exclusions/preflight without authenticating or launching work; execution checks authority again. Invalid/unreadable saved capability state restores all four off and reports a warning without overwriting it. Do not copy configuration or credentials from another profile as an automatic migration.
+
+Jobs, cells and execution authority are not saved. Direct shell jobs share two native scope slots with Code mode; draining retains admission. Poll `write_stdin` promptly to collect completion/output—there are no automatic completion messages or new assistant turns. A returned `supervisor_ready: false` can mean startup is still in progress, not command success. Context changes, abort/reload and expiry can invalidate IDs even while the terminal stays open. Cell jobs must be polled in the original cell and close with it; do not bypass cleanup. Preserve ambiguous failures rather than replay commands.
+
+/openai-tools fast on and /openai-tools fast status control the separate persistent priority preference. Subscription capability usage, ordinary conversation billing and Fast costs are distinct. User-directed service use is not an automated validation allowance.
 
 ## Rollback and side-by-side updates
 

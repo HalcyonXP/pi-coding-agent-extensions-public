@@ -24,7 +24,7 @@ const env={...process.env,PI_OFFLINE:"1",PI_TELEMETRY:"0"};
 run(process.execPath,[installer,"--create",profile],{env});assert.throws(()=>run(process.execPath,[installer,"--create",profile],{env}),/existing profile/);
 const originals=join(profile,"workspace","preserved-originals");await mkdir(originals);await writeFile(join(originals,"original.bin"),Buffer.from([1,2,3,4]));await writeFile(join(profile,"auth.json"),"{}\n");
 const authBefore=sha256(await readFile(join(profile,"auth.json"))),originalBefore=sha256(await readFile(join(originals,"original.bin")));
-async function cli(rolledBack){
+async function cli(rolledBack,restarted=false){
  const child=spawn(process.execPath,[launcher,"--profile",profile,"--mode","rpc","--provider","openai","--model","gpt-6-astra"],{env,stdio:["pipe","pipe","pipe"],windowsHide:true});
  const frames=[];let stderr="";child.stderr.on("data",bytes=>{stderr+=bytes;if(stderr.length>65536)child.kill();});
  const input=createInterface({input:child.stdout});input.on("line",line=>{try{frames.push(JSON.parse(line));}catch{stderr+=line;}});
@@ -37,20 +37,27 @@ async function cli(rolledBack){
   assert.match(await prompt(rolledBack?"/openai-tools fast status":"/openai-tools fast on"),/Fast mode: ON/,"Fast preference persists across native CLI restart and rollback");
   const status=await prompt("/openai-tools status");assert.match(status,/native preflight ready/);
   assert.throws(()=>run(process.execPath,[installer,"--rollback",profile],{env}),/EEXIST/,"Active native CLI ownership blocks rollback");
-  if(!rolledBack){assert.match(status,/Image generation: enabled/);assert.match(await prompt("/openai-tools code_mode on"),/Code mode: enabled/);}
-  else{assert.match(status,/Image generation: unavailable\/disabled/);assert.match(await prompt("/openai-tools code_mode on"),/namespace is conflicting/);assert.match(await prompt("/openai-tools imagegen on"),/Image generation: unavailable\/disabled/);}
+  if(!rolledBack&&!restarted){
+   assert.match(status,/Image generation: enabled/);assert.match(await prompt("/openai-tools imagegen off"),/Image generation: unavailable\/disabled/);
+   assert.match(await prompt("/openai-tools web_search on"),/Web search: enabled/);assert.match(await prompt("/openai-tools unified_exec on"),/Unified exec: enabled/);assert.match(await prompt("/openai-tools code_mode on"),/Code mode: enabled/);
+  }else if(!rolledBack){
+   assert.match(status,/Image generation: unavailable\/disabled/);for(const name of ["Web search","Code mode","Unified exec"])assert.ok(status.includes(`${name}: enabled`),"Every saved capability restores across genuine CLI restart");assert.match(status,/Saved profile preferences: imagegen=off, web_search=on, unified_exec=on, code_mode=on/);
+  }else{assert.match(status,/Image generation: unavailable\/disabled/);assert.match(await prompt("/openai-tools code_mode on"),/namespace is conflicting/);assert.match(await prompt("/openai-tools imagegen on"),/namespace is conflicting, excluded/);}
  }finally{
   const closed=once(child,"close");child.stdin.end();const timer=setTimeout(()=>child.kill(),10000);await closed;clearTimeout(timer);input.close();
  }
  assert.equal(existsSync(join(profile,"openai-running.json")),false,"Confirmed ordinary CLI exit releases profile coordination");
 }
 await cli(false);
+const preferencePath=join(profile,"openai-compatibility-capabilities.json"),preferencesBefore=sha256(await readFile(preferencePath));
+assert.deepEqual(JSON.parse(await readFile(preferencePath,"utf8")),{version:1,capabilities:{imagegen:false,web_search:true,unified_exec:true,code_mode:true}});
+await cli(false,true);assert.equal(sha256(await readFile(preferencePath)),preferencesBefore);
 // Ordinary settings can change through normal native UI; rollback preserves them.
 const settings=JSON.parse(await readFile(join(profile,"settings.json"),"utf8"));settings.defaultThinkingLevel="low";await writeFile(join(profile,"settings.json"),JSON.stringify(settings,null,2)+"\n");
 const settingsBefore=sha256(await readFile(join(profile,"settings.json")));
 run(process.execPath,[installer,"--rollback",profile],{env});assert.equal(sha256(await readFile(join(profile,"settings.json"))),settingsBefore);
-await cli(true);
+await cli(true);assert.equal(sha256(await readFile(preferencePath)),preferencesBefore,"Rollback/excluded on commands never erase or change saved choices");
 assert.equal(sha256(await readFile(join(profile,"auth.json"))),authBefore);assert.equal(sha256(await readFile(join(originals,"original.bin"))),originalBefore);
 const settingsMenu=JSON.parse(run(process.execPath,[fileURLToPath(new URL("./accept-settings.mjs",import.meta.url)),bundle],{env}));
-assert.equal(settingsMenu.status,"passed");assert.equal(settingsMenu.networkAttempts,0);assert.equal(settingsMenu.normalAndExcludedContexts,true);assert.equal(settingsMenu.consolidatedJobs,true);assert.equal(settingsMenu.frames.length,10);
-console.log(JSON.stringify({status:"passed",bundle,profile,nativeCli:"actual bundled RPC",rollback:"native exclusions, Fast retained",credentialsCopied:false,hostedRequests:0,settingsAndOriginalsPreserved:true,settingsMenu}));
+assert.equal(settingsMenu.status,"passed");assert.equal(settingsMenu.networkAttempts,0);assert.equal(settingsMenu.normalAndExcludedContexts,true);assert.equal(settingsMenu.consolidatedJobs,true);assert.equal(settingsMenu.savedCapabilityPreferences,true);assert.equal(settingsMenu.frames.length,12);
+console.log(JSON.stringify({status:"passed",bundle,profile,nativeCli:"actual bundled RPC",rollback:"native exclusions, Fast retained",credentialsCopied:false,hostedRequests:0,settingsAndOriginalsPreserved:true,savedCapabilityPreferences:true,settingsMenu}));

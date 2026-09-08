@@ -2,11 +2,11 @@
 
 ## Composition and trust
 
-openai-compatibility/index.ts is the single normal entry. Native Pi owns model/provider catalogs and transports. capabilities.ts owns shared policy, paired reserved tool registration and independent session opt-ins. tool-ownership.ts checks winning schema/definition identity: conflicting, excluded or replaced reserved tools are not overwritten. Stock/older hosts leave ordinary tool names intact.
+openai-compatibility/index.ts is the single normal entry. Native Pi owns model/provider catalogs and transports. capabilities.ts owns shared policy, paired reserved tool registration and independent capability opt-ins. The normal entry supplies profile-local capability-preferences.ts storage: four bounded versioned booleans, atomic replacement and conservative invalid-state handling. Fast's existing storage is separate and unchanged. tool-ownership.ts checks winning schema/definition identity: conflicting, excluded or replaced reserved tools are not overwritten. Stock/older hosts leave ordinary tool names intact.
 
 Hosted imagegen/Web require eligible official conversation routes and genuine Codex service configuration before authentication. Provider/model names are insufficient; custom overrides/proxies are denied. Auth and service selection never fall back to paid API credentials. Ordinary conversation billing and Fast priority usage are separate.
 
-Policy persists beyond individual handler leases. Session/reload reset increments a preference epoch so an old asynchronous command cannot re-enable a newer session. Captured calls are rechecked around async boundaries. Native runner invalidation, model/provider/registry/transcript replacement and context revocation invalidate old authority even after switching back. Recorded history remains history.
+Policy persists beyond individual handler leases. Saved preferences are restored on session start only after passive compatibility inspection; they cannot restore jobs or authority. Session/reload reset increments a preference epoch so an old asynchronous command or delayed restoration cannot re-enable a newer session. Captured calls are rechecked around async boundaries. Native runner invalidation, model/provider/registry/transcript replacement and context revocation invalidate old authority even after switching back. Recorded history remains history.
 
 ## Genuine native gateway
 
@@ -38,7 +38,7 @@ Publication persists before context projection and participates in native settle
 
 ## Returned shell resources and Windows containment
 
-Unified exec owns cleanup before OS launch. Returned jobs and stdin remain bound to exact native scope/context after handler return. Real child close releases ownership; cached stop failure is superseded by confirmed closure, not by apparent process death or cancellation. Unconfirmed cleanup/admission is retained; explicit same-owner retry is distinct from automatic repair.
+Unified exec owns cleanup before OS launch. Each direct native job uses one of the two shared active/draining scope slots, independently of the extension's four-process ceiling. Returned jobs and stdin remain bound to exact native scope/context after handler return. Ordinary work or another denied admission does not itself revoke those jobs. Completion output is collected by explicit polling, not automatic messages or new assistant turns; completed buffers have bounded retention and context/lifetime changes still revoke access. Real child close releases ownership; cached stop failure is superseded by confirmed closure, not by apparent process death or cancellation. Unconfirmed cleanup/admission is retained; explicit same-owner retry is distinct from automatic repair.
 
 Windows holds supervisor/parent process identities and uses a private readiness/acknowledgement gate before running the command. The startup gate is bounded to ten seconds/four KiB; normal stdin/EOF cannot acknowledge it, and startup frames are not guest output. Parent death terminates the owned Job Object through held identity, not later PID lookup. No forced PID-reuse or malicious-shell-containment claim follows.
 

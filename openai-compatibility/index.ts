@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { registerCapabilities } from "./capabilities.ts";
+import { capabilityPreferenceStore } from "./capability-preferences.ts";
 import { showOpenAISettings, type SettingsRow } from "./settings-menu.ts";
 
 export const FAST_ICON = "⚡";
@@ -315,10 +316,11 @@ function formatError(error: unknown): string {
 export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 	// Pi 0.85.1+ owns catalogs, auth, transports and cache compatibility.
 	// This extension composes capability policy, Fast mode and the shared footer.
-	// D14 verified this bounded Web subset. Registration stays session opt-in
-	// and neither requests a service nor changes global/user settings.
+	// D14 verified this bounded Web subset. Profile choices persist; restoration
+	// remains passive and never substitutes for current execution authority.
 	const capabilitySettings = registerCapabilities(pi, withFileMutationQueue, {
 		webSearch: { transport: fetch, profile: "verified-v1" },
+		preferences: capabilityPreferenceStore(getAgentDir()),
 		openSettings: (ctx, focus) => openSettings(ctx, focus ?? "imagegen"),
 		fastCommand: (args, ctx) => fastCommand(args, ctx),
 	});

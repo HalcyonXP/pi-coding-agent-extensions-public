@@ -2256,8 +2256,12 @@ describe("normal cohesive Code mode registration and native policy", () => {
 							// Real reload clears global conversational transports too. Restore only
 							// the synthetic conversation driver, never an official-provider override.
 							conversation = registerFauxProvider();
-							expect(harness.session.getActiveToolNames()).not.toContain("exec");
-							await harness.session.prompt("/openai-tools code_mode on");
+							// Restore the saved choice, never the old cell, store or native resources.
+							expect(harness.session.getActiveToolNames()).toEqual(
+								expect.arrayContaining(["exec", "wait", "ordinary"]),
+							);
+							expect(harness.session.agent.getToolGatewayInfo().activeScopes).toBe(0);
+							expect(harness.session.agent.getToolGatewayInfo().drainingScopes).toBe(0);
 						}
 						expect((await invoke("wait", { cell_id: r.cell_id })).isError).toBe(true);
 						expect(outcome(await invoke("exec", { code: 'text(load("old")===undefined);' })).output).toEqual([
