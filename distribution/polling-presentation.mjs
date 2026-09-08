@@ -44,10 +44,12 @@ export function pollingPresentation(session,{InteractiveMode,LocalPollPresentati
   frame(width=80){return view.chatContainer.render(width).map(line=>line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,"")).join("\n");},
   groups(){return view.chatContainer.children.filter(c=>typeof c.hasCall==="function"&&typeof c.addAudit==="function");},
   groupFrame(width=80){return this.groups().flatMap(c=>c.render(width)).map(line=>line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,"")).join("\n");},
+  toolFrame(id,width=80){return view.chatContainer.children.filter(c=>c.toolCallId===id).flatMap(c=>c.render(width)).map(line=>line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,"")).join("\n");},
   expand(value){view.setToolsExpanded(value);},
   // Re-render only the supplied synthetic/owned history; this performs no profile discovery.
   history(messages){view.chatContainer.clear();view.renderSessionItems(messages);},
   pending(){return view.pendingTools.size;},
+  historySnapshot(){return JSON.stringify(session.messages);},
   close(){view.unsubscribe?.();view.localPollPresentation.clear();},
  };
 }

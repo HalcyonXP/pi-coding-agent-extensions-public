@@ -9,6 +9,7 @@ import {
 	type CellRuntimeStatus,
 } from "./runtime/availability.mjs";
 import { validToolName, RPC_LIMITS } from "./runtime/rpc-protocol.mjs";
+import { renderCodeResult } from "./code-mode-presentation.ts";
 
 /** Passive private-host ABI information, never a substitute invocation capability. */
 export interface ToolGatewayInfo {
@@ -198,7 +199,7 @@ const Exec = Type.Object(
 			minLength: 1,
 			maxLength: 65536,
 			description:
-				"Restricted QuickJS async function-body source, not an unrestricted Node REPL. Use text(JSON.stringify(value)) for objects.",
+				"Restricted QuickJS async function-body source, not an unrestricted Node REPL. For human-facing results, use text() with concise labelled lines of selected facts. Use JSON.stringify only when structured JSON is requested or needed for further processing; do not dump full delegated result objects by default.",
 		}),
 		yield_time_ms: yieldTime,
 		max_output_tokens: tokens,
@@ -226,8 +227,9 @@ export function createCodeModeTools(code: CodeMode): ToolDefinition[] {
 			name: "exec",
 			label: "Code mode",
 			description:
-				"Run one bounded restricted JavaScript cell. Fresh QuickJS isolate; no Node/import/filesystem/auth globals. TOOL_NAMES lists eligible active tools; await tools.NAME(args) delegates through genuine native controls and returns {result,isError}. text() emits primitive text; image(ref)/evidence(ref) use native references, store/load retain bounded same-context JSON, yield_control() yields. Delegated shell keeps full OS permissions. A running cell_id is distinct from a shell session_id; use wait on that cell, never relaunch to poll. Mandatory finalized image/source evidence cannot be suppressed by guest output limits. For Unified exec, inspect r.isError and r.result.details (output, exit_code, running, session_id), not r.output; poll tools.write_stdin within the same owning cell. Cell completion closes its returned jobs/normal descendants, including background GUI processes. This is not a built-in desktop-control API. Failure diagnostics report bounded guest phase and delegation observations, never exception text or proof that OS effects did/did not occur. Do not blindly replay a failed action.",
+				"Run one bounded restricted JavaScript cell. Fresh QuickJS isolate; no Node/import/filesystem/auth globals. TOOL_NAMES lists eligible active tools; await tools.NAME(args) delegates through genuine native controls and returns {result,isError}. text() emits primitive text. Prefer concise human-readable final summaries (label, actual output, exit/error and requested aggregate counts), not nested JSON dumps, initial snapshots or repeated IDs. Accumulate output locally; never omit failures, warnings or output-loss facts just to shorten a summary. Use JSON.stringify only for requested/needed machine-readable output. image(ref)/evidence(ref) use native references, store/load retain bounded same-context JSON, yield_control() yields. Delegated shell keeps full OS permissions. A running cell_id is distinct from a shell session_id; use wait on that cell, never relaunch to poll. Mandatory finalized image/source evidence cannot be suppressed by guest output limits. For Unified exec, inspect r.isError and r.result.details (output, exit_code, running, session_id), not r.output; poll tools.write_stdin within the same owning cell. Cell completion closes its returned jobs/normal descendants, including background GUI processes. This is not a built-in desktop-control API. Failure diagnostics report bounded guest phase and delegation observations, never exception text or proof that OS effects did/did not occur. Do not blindly replay a failed action.",
 			parameters: Exec,
+			renderResult: renderCodeResult,
 			async execute(_id, params, signal, _update, ctx) {
 				return result(await code.exec(ctx, params, signal));
 			},
@@ -238,6 +240,7 @@ export function createCodeModeTools(code: CodeMode): ToolDefinition[] {
 			description:
 				"Poll or terminate the same owned Code mode cell. Does not re-execute source or adopt a foreign context. max_tokens limits guest text only; protected native evidence is separate. Draining means cleanup is not yet confirmed, not successful completion. A terminated cell cannot retain returned shell jobs.",
 			parameters: Wait,
+			renderResult: renderCodeResult,
 			async execute(_id, params, signal, _update, ctx) {
 				return result(await code.wait(ctx, params, signal));
 			},

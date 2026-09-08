@@ -10,6 +10,7 @@ import {pathToFileURL} from "node:url";
 import {verifyBundle} from "./lib.mjs";
 import {verifyCuration} from "./curate-payload.mjs";
 import {loadPollingPresentation,pollingPresentationFrames} from "./polling-presentation.mjs";
+import {readableCodeFrames,validateReadableFrames} from "./code-result-presentation.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32","Usage: node distribution/accept-settings.mjs <Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -17,7 +18,7 @@ const profile=await mkdtemp(join(tmpdir(),"pi settings acceptance ")),cwd=join(p
 process.env.PI_CODING_AGENT_DIR=profile;process.env.PI_OFFLINE="1";process.env.PI_TELEMETRY="0";
 let networkAttempts=0;const priorFetch=globalThis.fetch;
 globalThis.fetch=async()=>{networkAttempts++;throw Error("Settings acceptance forbids network");};
-const frames=[],capabilities=["imagegen","web_search","exec","wait","exec_command","write_stdin"];
+const frames=[],codeFrames=[],capabilities=["imagegen","web_search","exec","wait","exec_command","write_stdin"];
 const clean=s=>s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,"");
 const capture=(name,panel)=>{const lines=panel.render(80).map(clean);assert.ok(lines.every(line=>line.length<160));frames.push({name,text:lines.join("\n")});return lines.join("\n");};
 const until=async predicate=>{const end=performance.now()+10000;while(performance.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,10));}throw Error("Settings interaction did not settle");};
@@ -69,9 +70,10 @@ try{
     assert.ok(!session.getActiveToolNames().includes("imagegen"));for(const name of capabilities.filter(name=>name!=="imagegen"))assert.ok(session.getActiveToolNames().includes(name),`Saved capability restored: ${name}`);
     drive=async panel=>{const view=capture("capabilities-restored",panel);assert.match(view,/→ Image generation\s+off/);for(const name of ["Web search","Unified exec","Code mode"])assert.ok(new RegExp(`${name}\\s+on`).test(view));assert.match(view,/Saved for this Pi profile: off/);};
     await session.prompt("/openai-tools");assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
+    codeFrames.push(...await readableCodeFrames(session,pollingNative));
    }
   }finally{await session.extensionRunner.emit("session_shutdown",{});session.dispose();}
  }
- assert.equal(networkAttempts,0);
- console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,compactLocalJobPresentation:true,networkAttempts,frames}));
+ assert.equal(networkAttempts,0);frames.push(...codeFrames);validateReadableFrames(frames);
+ console.log(JSON.stringify({status:"passed",nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,compactLocalJobPresentation:true,readableCodePresentation:true,networkAttempts,frames}));
 }finally{globalThis.fetch=priorFetch;}
