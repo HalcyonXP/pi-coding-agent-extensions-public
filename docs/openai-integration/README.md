@@ -39,7 +39,9 @@ This guide describes the public source's implementation and constraints, not an 
 | Compact local-job group | Native TUI-only scoped shell-call view: short safe output/status rows, expandable original cards/audit text/correlation, no new execution or persistence authority |
 | Audit-only replay | Grouped recorded returned-call text without restored running jobs, process status or cleanup claims; not a Jobs snapshot |
 | Coordinator output | Guest-selected text() strings; prefer concise labelled facts for people, JSON only when needed/requested. Not protected evidence or authoritative job status |
-| Readable Code result | Native exec/wait TUI status plus literal coordinator text; expandable cell metadata, unchanged wire/history, no guessed summaries of arbitrary JSON |
+| Readable Code result | Native exec/wait TUI status plus literal coordinator text; expansion does not change wire/history. Exact historical JSON and current text/details remain readable; no guessed summaries of arbitrary JSON |
+| Direct Code output | Model-facing script status, measured call time and literal coordinator text; structured outcome remains in native details, not a direct JSON envelope or a nested projection |
+| Code call wall time | Monotonic elapsed milliseconds around one awaited exec/wait operation, recorded as `details.code_result`; not cell age, delegated-process runtime, CPU usage or billing |
 | Cell completion | The cell returned a terminal result; a failed cell is labelled failed. Not a blanket assertion that all delegated jobs succeeded |
 | Output omission | Bytes already omitted by the existing guest-output budget; prominently reported, not recoverable merely by expanding the UI |
 | Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |
@@ -51,7 +53,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Nested projection | Tool-specific object/string returned to coordinator JavaScript; distinct from provider-facing direct output, native evidence and the current Pi result/isError wrapper |
 | Output schema metadata | Source metadata that may inform nested descriptions; not necessarily serialized into a direct provider request |
 
-The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) describes the deliberate input transition and unresolved result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
+The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) describes the deliberate input/direct-output transitions, SDK migration to structured details and unresolved nested/result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
 
 Original first-party documentation in this directory is licensed under [Apache-2.0](LICENSE); see [scope and attribution](NOTICE). Other source components and third-party works retain their own terms.
 

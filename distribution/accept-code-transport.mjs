@@ -3,6 +3,7 @@
 // Genuine installed provider/parser/agent/extension/gateway/QuickJS boundaries.
 // Only synthetic per-request transports, a newly owned session and native read.
 import assert from "node:assert/strict";
+import {readCodeOutcome} from "./code-output-contract.mjs";
 
 const cases=["raw", "bad-pragma", "legacy-options", "hook-arguments", "hook-block", "hook-result"];
 export function validateNativeCodeTransport(rows) {
@@ -17,7 +18,7 @@ export function validateNativeCodeTransport(rows) {
  }
  return {nativeResponses:true,nativeCodexResponses:true,rawJavaScriptInput:true,customHistoryReplay:true,legacyOptionsRefused:true,pragmaAndHookRefusals:true,finalizedHookFeedbackVisible:true,ordinaryToolsRetained:true,nestedWrapperPreserved:true,syntheticModelRequests:24,scenarios:12,liveServiceCalls:0};
 }
-function responseEvents(item) {
+export function responseEvents(item) {
  const events=[{type:"response.output_item.added",output_index:0,item:{...item,status:"in_progress",...(item.type==="message"?{content:[]}:item.type==="custom_tool_call"?{input:""}:{arguments:""})}}];
  if(item.type==="message"){
   const part=item.content[0];events.push({type:"response.content_part.added",output_index:0,content_index:0,part:{...part,text:""}}, {type:"response.output_text.delta",output_index:0,content_index:0,delta:part.text},{type:"response.output_text.done",output_index:0,content_index:0,text:part.text});
@@ -81,7 +82,7 @@ export async function acceptNativeCodeTransport(session,runtime,resources,native
     if(scenario==="raw"||scenario==="hook-result"){
      assert.equal(observed.length,1);assert.equal(observed[0].toolName,"read");delegations++;
      if(scenario==="raw"){
-      assert.equal(result.isError,false);const value=JSON.parse(result.content[0].text);assert.equal(value.status,"completed");assert.equal(value.result.status,"ok");assert.deepEqual(value.output,["NATIVE_RAW 雪 🌊","artifact native read"]);assert.equal(output.output,result.content[0].text);
+      assert.equal(result.isError,false);const value=readCodeOutcome(result);assert.equal(value.status,"completed");assert.equal(value.result.status,"ok");assert.deepEqual(value.output,["NATIVE_RAW 雪 🌊","artifact native read"]);assert.equal(output.output,result.content[0].text);
      }else{assert.equal(result.isError,true);assert.equal(output.output,"SYNTHETIC_NATIVE_CODE_HOOK_FEEDBACK");}
     }else{
      assert.equal(result.isError,true);assert.equal(observed.length,0,"Refused input/hook must not delegate");

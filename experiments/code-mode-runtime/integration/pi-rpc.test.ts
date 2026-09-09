@@ -2058,7 +2058,26 @@ describe("normal cohesive Code mode registration and native policy", () => {
 				expect(message.isError).toBe(false);
 				const item = message.content.find((c) => c.type === "text");
 				if (!item || item.type !== "text") throw Error("Missing result");
-				return JSON.parse(item.text) as CellResult;
+				const value = Reflect.get(message, "details") as CellResult & {
+					code_result: { version: number; wall_time_ms: number };
+				};
+				expect(value.code_result.version).toBe(1);
+				expect(Number.isSafeInteger(value.code_result.wall_time_ms)).toBe(true);
+				expect(value.code_result.wall_time_ms).toBeGreaterThanOrEqual(0);
+				const status =
+					value.result?.status === "error"
+						? "Script failed"
+						: value.status === "running"
+							? `Script running with cell ID ${value.cell_id}`
+							: value.status === "draining"
+								? `Script draining with cell ID ${value.cell_id} · cleanup unconfirmed`
+								: value.status === "terminated"
+									? "Script terminated"
+									: "Script completed";
+				const seconds = (Math.round(value.code_result.wall_time_ms / 100) / 10).toFixed(1);
+				expect(item.text.startsWith(`${status}\nWall time ${seconds} seconds\nOutput:\n`)).toBe(true);
+				for (const output of value.output) expect(item.text).toContain(output);
+				return value;
 			};
 			try {
 				const entry = (await import(/* @vite-ignore */ entryUrl)).default;
