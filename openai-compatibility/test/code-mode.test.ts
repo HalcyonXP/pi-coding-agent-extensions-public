@@ -12,6 +12,7 @@ function fixture() {
 		signal = new AbortController();
 	let opens = 0;
 	const ctx = {
+		model: { api: "openai-codex-responses", compat: { supportsOpenAIGrammarTools: true } },
 		sessionManager: {},
 		toolGatewayInfo: {
 			version: 1,
@@ -124,15 +125,13 @@ test("metadata overflow and nested invocation cannot widen or launch a coordinat
 	await assert.rejects(code.exec(f.view, { code: "text(1)" }), /direct native/);
 	assert.equal(f.opens, 0);
 });
-test("production JSON schemas expose no owner, native context, launcher or helper-selection flags", () => {
+test("native internal schemas expose only source for custom exec and JSON for wait, never authority", () => {
 	const tools = createCodeModeTools(new CodeMode(() => [])),
 		exec = tools.find((t) => t.name === "exec")!,
 		wait = tools.find((t) => t.name === "wait")!;
 	assert.ok(
 		Value.Check(exec.parameters, {
-			code: "text(1)",
-			max_output_tokens: 0,
-			yield_time_ms: 0,
+			code: '// @exec: {"max_output_tokens":0,"yield_time_ms":0}\ntext(1)',
 		}),
 	);
 	assert.ok(
@@ -143,6 +142,8 @@ test("production JSON schemas expose no owner, native context, launcher or helpe
 		}),
 	);
 	for (const name of [
+		"yield_time_ms",
+		"max_output_tokens",
 		"owner",
 		"invocation",
 		"toolGatewayInfo",

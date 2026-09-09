@@ -32,7 +32,7 @@ export async function acceptQuietPolling(session,invoke,outcome,faux,ai,native) 
   try{
    const durations=cancel?[12000,14000,16000]:[2500,3500,4500];
    const code=`const jobs=[];for(const [n,ms] of ${JSON.stringify(durations)}.entries()){const r=await tools.exec_command({cmd:'Start-Sleep -Milliseconds '+ms+'; Write-Output QUIET_TIMER_'+n,yield_time_ms:1});if(r.isError||!r.result.details.running)throw Error('synthetic start refused');jobs.push({id:r.result.details.session_id,n});}yield_control();for(const job of jobs){let r,output='';do{r=await tools.write_stdin({session_id:job.id,yield_time_ms:250});if(r.isError)throw Error('synthetic poll refused');output+=r.result.details.output;}while(r.result.details.running);if(r.result.details.exit_code!==0||!output.includes('QUIET_TIMER_'+job.n))throw Error('synthetic output missing');text('QUIET_DONE_'+job.n);}`;
-   faux.setResponses([ai.fauxAssistantMessage([ai.fauxToolCall("exec",{code,yield_time_ms:1000})],{stopReason:"toolUse"}),async()=>{
+   faux.setResponses([ai.fauxAssistantMessage([ai.fauxToolCall("exec",{code:'// @exec: {"yield_time_ms":1000}\n'+code})],{stopReason:"toolUse"}),async()=>{
     const began=performance.now();while(performance.now()-began<8000){
      assert.equal(requests,2);assert.equal(JSON.stringify(inFlight),inFlightJSON);
      if(cancel&&raw.filter(e=>e.type==="tool_execution_start"&&e.toolName==="write_stdin").length>=2){aborted=true;session.agent.abort();break;}

@@ -95,9 +95,12 @@ test("actual Pi defaults and result envelope remain unchanged in a nonexecuting 
 	assert.equal(start.content[0].text, JSON.stringify(sample));
 });
 
-test("Pi Code exec is a JSON function, not the target's raw-JavaScript custom grammar", () => {
+test("native custom Code input deliberately supersedes the retained PR18 JSON baseline", () => {
 	const exec = codeTools.find(tool => tool.name === "exec")!, wait = codeTools.find(tool => tool.name === "wait")!;
-	assert.deepEqual(fields(exec.parameters), [...facts.pi.codeExecFields].sort());
+	// The audited fixture remains a historical source snapshot, not rewritten history.
+	assert.deepEqual([...facts.pi.codeExecFields].sort(), ["code", "max_output_tokens", "yield_time_ms"]);
+	assert.deepEqual(fields(exec.parameters), ["code"]);
+	assert.equal(exec.constrainedSampling && exec.constrainedSampling.type, "grammar");
 	assert.deepEqual(fields(wait.parameters), [...facts.pi.codeWaitFields].sort());
 	assert.ok(Value.Check(exec.parameters, { code: "text('synthetic')" }));
 	assert.equal(Value.Check(exec.parameters, "text('synthetic')"), false);

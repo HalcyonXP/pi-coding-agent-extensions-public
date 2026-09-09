@@ -4,7 +4,7 @@ import { registerCapabilities, type CapabilityOptions } from "../capabilities.ts
 import type { MutationQueue } from "../imagegen/tool.ts";
 
 export const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
-export const model = { id: "gpt-6-astra", provider: "openai-codex", api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api" };
+export const model = { id: "gpt-6-astra", provider: "openai-codex", api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api", compat: { supportsOpenAIGrammarTools: true } };
 export const token = `header.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct-test" } })).toString("base64url")}.signature`;
 
 export function harness(cwd: string, mutationQueue: MutationQueue = async (_path, operation) => operation(), options: CapabilityOptions = {}) {

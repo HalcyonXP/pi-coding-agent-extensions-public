@@ -20,6 +20,12 @@ The compiler preparation command is Windows-only and explicitly downloads hash-p
 
 The ordinary extension suite includes `test/codex-contracts.test.ts` and the source-only `test/fixtures/codex-contracts.json`. They pin the [inspected exposed tool contract](CODEX-TOOL-CONTRACTS.md), refuse unearned runtime/hosted/parity claims and compare actual Pi schemas/defaults with nonexecuting manager seams. No upstream source is downloaded or executed by these tests; no tool, model, service or authentication is invoked. The source-file hashes are reviewed provenance, not an independently run Codex conformance suite. A deliberate Pi contract change must update the gap record and tests rather than treating the baseline differences as permanent waivers.
 
+## Native Code transport boundaries
+
+`openai-compatibility/test/code-mode-input.test.ts` exercises the existing native custom declaration, streamed Codex input and call/output history pairing, plus exact internal fields, bounded pragma controls and fail-closed model capability checks. These native parser tests use synthetic per-request transport, not an upstream runtime or live model. The historical PR #18 fixture keeps its original Pi input baseline; current tests explicitly check the [new native contract](NATIVE-CODE-CONTRACT.md).
+
+Installed `accept.mjs` also invokes `accept-code-transport.mjs` through the **original SDK dispatcher**, not a replacement provider or a low-level API without native auth resolution. It uses both selected native Responses routes, synthetic `checkAuth`/`getAuth` and fetch seams, original request/header hooks, real restricted cells/native reads, raw CRLF input, invalid/legacy/hook refusal cases and finalized hook feedback. Require 24 synthetic model requests across 12 scenarios, unchanged nested wrappers/ordinary tools, and no remaining scopes. Cleanup restores seams/hooks/model and aggregates body/cleanup failures. This extends acceptance requirements, not unit counts or live-service coverage. Development probes use fresh profiles and an explicit credential-free environment; never inspect active credentials to fix a test seam.
+
 ## Genuine patched host
 
     node .github/scripts/prepare-pi-host.mjs --rpc

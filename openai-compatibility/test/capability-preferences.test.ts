@@ -65,6 +65,27 @@ test("unavailable runtime retains saved-on choice but cannot activate it", async
 		assert.equal(row.value, "unavailable"); assert.equal(row.values, undefined); assert.match(row.description, /Saved for this Pi profile: on/); assert.equal(capabilityPreferenceStore(dir).read().code_mode, true); assert.equal(h.authCalls(), 0);
 	} finally { await h.emit("session_shutdown"); }
 });
+test("missing native grammar capability retains saved Code choice but refuses activation and direct bypass", async t => {
+	const dir = directory(t), store = capabilityPreferenceStore(dir); store.write("code_mode", true);
+	const before = readFileSync(file(dir)), h = fixture(dir);
+	(h.ctx as any).model = { ...h.ctx.model, compat: { supportsOpenAIGrammarTools: false } };
+	try {
+		await h.emit("session_start"); assert.ok(!h.active().includes("exec")); assert.ok(!h.active().includes("wait")); assert.ok(h.active().includes("read"));
+		const row = (await h.settings.read(h.ctx)).find(row => row.id === "code_mode")!; assert.equal(row.value, "unavailable"); assert.equal(row.values, undefined); assert.match(row.description, /grammar-tool support/); assert.match(row.description, /Saved for this Pi profile: on/);
+		await h.commands.get("openai-tools").handler("code_mode on", h.ctx); assert.match(h.notices.at(-1)!, /NATIVE_CODE_GRAMMAR_REQUIRED/);
+		await assert.rejects(h.tools.get("exec")!.execute("synthetic-grammar-bypass", { code: "text(1)" }, undefined, undefined, h.ctx), /NATIVE_CODE_GRAMMAR_REQUIRED/);
+		assert.deepEqual(readFileSync(file(dir)), before); assert.equal(h.authCalls(), 0);
+	} finally { await h.emit("session_shutdown"); }
+});
+test("model boundary removes active Code on grammar downgrade without replacing ordinary tools or saved choices", async t => {
+	const dir = directory(t), store = capabilityPreferenceStore(dir); store.write("code_mode", true);
+	t.mock.method(CodeMode.prototype, "status", async () => ({ available: true, native: gateway as any }));
+	const h = fixture(dir); try {
+		await h.emit("session_start"); assert.ok(h.active().includes("exec"));
+		(h.ctx as any).model = { ...h.ctx.model, compat: { supportsOpenAIGrammarTools: false } }; await h.emit("model_select");
+		assert.ok(!h.active().includes("exec")); assert.ok(!h.active().includes("wait")); assert.ok(h.active().includes("read")); assert.ok(h.active().includes("powershell")); assert.equal(store.read().code_mode, true); assert.equal(h.authCalls(), 0);
+	} finally { await h.emit("session_shutdown"); }
+});
 test("unsupported route and missing transport retain saved choices without activation or auth", async t => {
 	const dir = directory(t), store = capabilityPreferenceStore(dir); store.write("web_search", true);
 	const h = harness(dir, undefined, { preferences: store });
