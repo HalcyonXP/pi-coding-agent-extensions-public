@@ -12,7 +12,7 @@ import {once} from "node:events";
 import {fileURLToPath} from "node:url";
 import {verifyBundle,run,sha256} from "./lib.mjs";
 import {verifyCuration} from "./curate-payload.mjs";
-import {validateReadableFrames} from "./code-result-presentation.mjs";
+import {validateAllOutputFrames} from "./unified-output-presentation.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32","Usage: node distribution/accept-profile.mjs <Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -60,5 +60,5 @@ run(process.execPath,[installer,"--rollback",profile],{env});assert.equal(sha256
 await cli(true);assert.equal(sha256(await readFile(preferencePath)),preferencesBefore,"Rollback/excluded on commands never erase or change saved choices");
 assert.equal(sha256(await readFile(join(profile,"auth.json"))),authBefore);assert.equal(sha256(await readFile(join(originals,"original.bin"))),originalBefore);
 const settingsMenu=JSON.parse(run(process.execPath,[fileURLToPath(new URL("./accept-settings.mjs",import.meta.url)),bundle],{env}));
-assert.equal(settingsMenu.status,"passed");assert.equal(settingsMenu.networkAttempts,0);assert.equal(settingsMenu.normalAndExcludedContexts,true);assert.equal(settingsMenu.consolidatedJobs,true);assert.equal(settingsMenu.savedCapabilityPreferences,true);assert.equal(settingsMenu.quietPollingPresentation,true);assert.equal(settingsMenu.compactLocalJobPresentation,true);assert.equal(settingsMenu.readableCodePresentation,true);validateReadableFrames(settingsMenu.frames);
+assert.equal(settingsMenu.status,"passed");assert.equal(settingsMenu.networkAttempts,0);assert.equal(settingsMenu.normalAndExcludedContexts,true);assert.equal(settingsMenu.consolidatedJobs,true);assert.equal(settingsMenu.savedCapabilityPreferences,true);assert.equal(settingsMenu.quietPollingPresentation,true);assert.equal(settingsMenu.compactLocalJobPresentation,true);assert.equal(settingsMenu.readableCodePresentation,true);assert.equal(settingsMenu.nativeUnifiedOutputPresentation,true);validateAllOutputFrames(settingsMenu.frames);
 console.log(JSON.stringify({status:"passed",bundle,profile,nativeCli:"actual bundled RPC",rollback:"native exclusions, Fast retained",credentialsCopied:false,hostedRequests:0,settingsAndOriginalsPreserved:true,savedCapabilityPreferences:true,settingsMenu}));

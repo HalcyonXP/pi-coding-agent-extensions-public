@@ -19,6 +19,8 @@ import {inspectCodeResult} from "./code-result-presentation.mjs";
 import {acceptNativeCodeTransport} from "./accept-code-transport.mjs";
 import {readCodeOutcome,validateCodeOutputAcceptance} from "./code-output-contract.mjs";
 import {acceptNativeCodeWaitOutput} from "./accept-code-output.mjs";
+import {readUnifiedOutcome} from "./unified-output-contract.mjs";
+import {acceptNativeUnifiedOutput} from "./accept-unified-output.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32"&&process.arch==="x64","Usage: node distribution/accept.mjs <private Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -53,7 +55,7 @@ try{
  faux=compat.registerFauxProvider();session.agent.streamFunction=(_m,c,o)=>compat.streamSimple(faux.getModel(),c,o);
  const ui=session.extensionRunner.createContext().ui;await session.bindExtensions({uiContext:{...ui,notify:message=>notices.push(message)}});
  const invoke=async(name,args)=>{const count=session.messages.length;faux.setResponses([ai.fauxAssistantMessage([ai.fauxToolCall(name,args)],{stopReason:"toolUse"}),ai.fauxAssistantMessage("synthetic done")]);await session.prompt("Public synthetic installed-artifact acceptance");const message=session.messages.slice(count).find(m=>m.role==="toolResult"&&m.toolName===name);assert.ok(message,JSON.stringify(session.messages.slice(count)));results.push(message);return message;};
- const outcome=message=>{assert.equal(message.isError,false,JSON.stringify(message));return ["exec","wait"].includes(message.toolName)?readCodeOutcome(message):JSON.parse(message.content.find(c=>c.type==="text").text);};
+ const outcome=message=>{assert.equal(message.isError,false,JSON.stringify(message));return ["exec","wait"].includes(message.toolName)?readCodeOutcome(message):["exec_command","write_stdin"].includes(message.toolName)?readUnifiedOutcome(message):JSON.parse(message.content.find(c=>c.type==="text").text);};
  assert.equal(session.extensionRunner.getAllRegisteredTools().filter(t=>t.definition.name==="imagegen").length,1);assert.ok(!session.getActiveToolNames().includes("exec"));assert.ok(session.getActiveToolNames().includes("read"));
  assert.equal(session.extensionRunner.createContext().toolGatewayInfo.version,1);await session.prompt("/openai-tools status");assert.match(notices.at(-1),/native preflight ready/);assert.equal(auth,0);
  for(const name of ["web_search","unified_exec","code_mode"])await session.prompt(`/openai-tools ${name} on`);
@@ -88,8 +90,9 @@ try{
  r=outcome(await invoke("exec",{code:'if(load("artifact")!==undefined||load("image")!==undefined)throw Error("stale store retained");'}));assert.equal(r.result.status,"ok");
  const nativeCodeTransport=await acceptNativeCodeTransport(session,runtime,resources,nativeStream);
  const nativeCodeOutput={...validateCodeOutputAcceptance(results),...await acceptNativeCodeWaitOutput(session,runtime,nativeStream)};
+ const nativeUnifiedOutput=await acceptNativeUnifiedOutput(session,runtime,nativeStream,await loadPollingPresentation(bundle,sdk));
  session.agent.state.model=faux.getModel();await session.extensionRunner.emit({type:"model_select",model:faux.getModel(),previousModel:official,source:"set"});assert.ok(!session.getActiveToolNames().includes("exec"));assert.equal((await invoke("exec",{code:'text("must not run")'})).isError,true);assert.equal(auth,3);assert.equal(requests,3);
- console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,savedCapabilityPreferences:true,returnedJobs,asyncCompletion,quietLocalPolling,compactLocalJobs,readableCodeResults,nativeCodeTransport,nativeCodeOutput,originalPngSha256:sha256(image)}));
+ console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,savedCapabilityPreferences:true,returnedJobs,asyncCompletion,quietLocalPolling,compactLocalJobs,readableCodeResults,nativeCodeTransport,nativeCodeOutput,nativeUnifiedOutput,originalPngSha256:sha256(image)}));
 }finally{
  codeUI?.close();
  if(session){session.agent.abort();await session.extensionRunner.emit({type:"session_shutdown",reason:"quit"});session.dispose();}

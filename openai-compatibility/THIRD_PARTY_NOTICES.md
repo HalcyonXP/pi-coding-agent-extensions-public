@@ -18,6 +18,8 @@ OpenAI Codex is licensed under the Apache License 2.0. No OpenAI trademarks or e
 
 `code-mode-output.ts` implements direct script-status/wall-time/text interoperability with reference to `codex-rs/core/src/tools/code_mode/mod.rs`, `execute_handler.rs` and `wait_handler.rs` at that same revision. Pi-specific cleanup, fixed diagnostics, loss notices and structured-details migration are not claims of complete upstream runtime or result parity.
 
+`unified-exec-output.ts` implements direct process-status/wall-time/text interoperability with reference to `ExecCommandToolOutput` in `codex-rs/core/src/tools/context.rs` at revision `45305dd229c01e6cb6e122f6559e4f9b805bae6b`. It retains Pi-specific native ownership, string IDs, returned-output/readiness/termination/loss semantics and separate nested/protected-completion paths. This is not an upstream runtime, exact truncation algorithm or complete parity claim.
+
 Upstream NOTICE, reproduced here; its Ratatui statement describes the upstream project, not additional Ratatui code in this implementation:
 
 > OpenAI Codex

@@ -42,8 +42,12 @@ This guide describes the public source's implementation and constraints, not an 
 | Readable Code result | Native exec/wait TUI status plus literal coordinator text; expansion does not change wire/history. Exact historical JSON and current text/details remain readable; no guessed summaries of arbitrary JSON |
 | Direct Code output | Model-facing script status, measured call time and literal coordinator text; structured outcome remains in native details, not a direct JSON envelope or a nested projection |
 | Code call wall time | Monotonic elapsed milliseconds around one awaited exec/wait operation, recorded as `details.code_result`; not cell age, delegated-process runtime, CPU usage or billing |
+| Direct Unified output | Model-facing process status, per-call time and literal returned shell output; native details remain structured, nested JSON and protected completion reports are separate |
+| Unified call wall time | Monotonic elapsed milliseconds around one awaited manager start/write, recorded as `details.unified_result`; not process age, retention, CPU use or billing |
+| Retained exited ID | An exited process's lookup for remaining buffered output, not a running process or authority to adopt another context's job |
 | Cell completion | The cell returned a terminal result; a failed cell is labelled failed. Not a blanket assertion that all delegated jobs succeeded |
-| Output omission | Bytes already omitted by the existing guest-output budget; prominently reported, not recoverable merely by expanding the UI |
+| Code output omission | Bytes already omitted by the existing guest-output budget; prominently reported, not recoverable merely by expanding the UI |
+| Unified output loss | Bytes already dropped from the shell buffer, not unread retained output; further polling or expansion cannot recover the dropped bytes |
 | Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |
 | Idle turn | New assistant/model execution without another user request; completion reporting does not start one |
 | Result retention | Up to eight in-memory process/output records; no completed-result poll TTL; eligible completed least-recently-collected records can be evicted for capacity |
@@ -53,7 +57,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Nested projection | Tool-specific object/string returned to coordinator JavaScript; distinct from provider-facing direct output, native evidence and the current Pi result/isError wrapper |
 | Output schema metadata | Source metadata that may inform nested descriptions; not necessarily serialized into a direct provider request |
 
-The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) describes the deliberate input/direct-output transitions, SDK migration to structured details and unresolved nested/result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
+The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) and separate [direct Unified contract](NATIVE-UNIFIED-CONTRACT.md) describe deliberate direct-output transitions, SDK migration to structured details and unresolved nested/result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
 
 Original first-party documentation in this directory is licensed under [Apache-2.0](LICENSE); see [scope and attribution](NOTICE). Other source components and third-party works retain their own terms.
 
