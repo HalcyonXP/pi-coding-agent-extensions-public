@@ -36,7 +36,7 @@ export interface CapabilitySettings {
 export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQueue, options: CapabilityOptions = {}): CapabilitySettings {
 	const epoch = new CapabilityEpoch();
 	const processes = new UnifiedExecManager();
-	const codeMode = new CodeMode(() => pi.getActiveTools());
+	const codeMode = new CodeMode(() => pi.getActiveTools(), undefined, () => pi.getAllTools());
 	const search = options.webSearch ? new WebSearchAdapter(options.webSearch.transport, options.webSearch.timeoutMs) : undefined;
 	let current: ExtensionContext | undefined;
 	let preferenceEpoch = 0;

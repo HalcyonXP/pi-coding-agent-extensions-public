@@ -4,6 +4,7 @@ import { WindowsCellRuntime } from "./windows-host.mjs";
 import { CellStore, cellTools } from "./cell-protocol.mjs";
 import { execInput, validYield, validTokens, budgetOutput } from "./cell-input.mjs";
 import { copyCellDiagnostics } from "./cell-diagnostics.mjs";
+import { cellStartFrame } from "./tool-metadata.mjs";
 
 // owner and signal come from native session/policy composition, never model IDs.
 // runtimeFactory is a trusted offline test seam; normal composition is Windows-contained only.
@@ -23,11 +24,12 @@ export class CodeCells {
     }
     if (this.#closed || this.#signal.aborted || owner !== this.#owner || invocation?.contextSignal !== this.#contextSignal || invocation?.origin !== "direct" || invocation.signal?.aborted || typeof invocation.openScope !== "function" || typeof invocation.adoptScope !== "function") throw new Error("CELL_UNAVAILABLE");
   }
-  async exec({owner, invocation, code, tools, yield_time_ms, max_output_tokens}) {
+  async exec({owner, invocation, code, tools, toolMetadata, yield_time_ms, max_output_tokens}) {
     this.#assert(owner, invocation);
     const input = execInput(code, {yield_time_ms, max_output_tokens});
     code = input.code;
     if (!cellTools(tools) || this.#cells.size >= 2) throw new Error("INVALID_REQUEST");
+    const start = cellStartFrame(code, tools, toolMetadata);
     const scope = invocation.openScope({
       onResult: event => this.#evidence.capture(scope, event),
       resolveImageReference: ref => this.#evidence.resolveImage(ref),
@@ -60,7 +62,7 @@ export class CodeCells {
     } finally { initialized(); }
     cell.work = (async () => {
       let result;
-      try { result = await runtime.run(code, {gateway: scope, allowedTools: tools, signal: this.#signal}); }
+      try { result = await runtime.run(code, {gateway: scope, allowedTools: start.tools, toolMetadata: start.toolMetadata, signal: this.#signal}); }
       catch { result = {version: 1, status: "error", code: "HOST_FAILED"}; }
       try { await runtime.close(); release(); }
       catch { void this.#terminate(cell); notify(); return; }

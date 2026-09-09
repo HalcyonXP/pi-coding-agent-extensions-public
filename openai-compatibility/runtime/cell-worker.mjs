@@ -3,6 +3,7 @@ import { failure, validCode } from "./protocol.mjs";
 import { exact, validResult, boundedJSON, RPC_LIMITS } from "./rpc-protocol.mjs";
 import { CELL_LIMITS, cellTools, validOperation } from "./cell-protocol.mjs";
 import { SyncChannel } from "./sync-channel.mjs";
+import { cellStartFrame } from "./tool-metadata.mjs";
 
 const channel = new SyncChannel();
 const pending = new Map();
@@ -38,9 +39,11 @@ function pump() {
 let result;
 try {
   const frame = channel.receive();
-  if (!exact(frame, ["type", "code", "tools"]) || frame.type !== "start" || !validCode(frame.code) || !cellTools(frame.tools)) throw new Error("PROTOCOL_ERROR");
-  result = await evaluate(frame.code, {
-    allowedTools: frame.tools,
+  if (!(exact(frame, ["type", "code", "tools"]) || exact(frame, ["type", "code", "tools", "toolMetadata"])) || frame.type !== "start" || !validCode(frame.code) || !cellTools(frame.tools)) throw new Error("PROTOCOL_ERROR");
+  const start = cellStartFrame(frame.code, frame.tools, frame.toolMetadata);
+  result = await evaluate(start.code, {
+    allowedTools: start.tools,
+    toolMetadata: start.toolMetadata,
     invoke: (name, args) => request({type: "call", name, args}, "tool"),
     cell: {
       output: text => channel.send({type: "output", text}),

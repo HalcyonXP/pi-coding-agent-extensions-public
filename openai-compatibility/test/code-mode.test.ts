@@ -161,3 +161,8 @@ test("native internal schemas expose only source for custom exec and JSON for wa
 		false,
 	);
 });
+
+test("native metadata refuses missing definitions before scope admission rather than inventing descriptions",async()=>{const f=fixture(),code=new CodeMode(()=>["read"],async()=>({available:true}));try{await assert.rejects(code.exec(f.view,{code:"text(1)"}),/INVALID_TOOL_METADATA/);assert.equal(f.opens,0);}finally{await code.reset();}});
+test("metadata uses only eligible native names, but valid metadata is never native authority",async()=>{const f=fixture();let reads=0;const code=new CodeMode(()=>["exec","read","wait","read"],async()=>({available:true}),()=>{reads++;return [{name:"read",description:"Native read description"},{name:"exec",get description(){throw Error("Excluded description");}}];});try{await assert.rejects(code.exec(f.view,{code:"text(1)"}),/unit fixture must not issue native authority/);assert.equal(reads,1);assert.equal(f.opens,1);}finally{await code.reset();}});
+test("policy revocation precedes metadata discovery and scope admission",async()=>{const f=fixture();let done=()=>{},reads=0;const gate=new Promise<void>(r=>{done=r;}),code=new CodeMode(()=>["read"],async()=>{await gate;return {available:true};},()=>{reads++;return [{name:"read",description:"Native"}];});const pending=code.exec(f.view,{code:"text(1)"});await code.reset();done();await assert.rejects(pending,/revoked/);assert.equal(reads,0);assert.equal(f.opens,0);});
+test("metadata helper is documented as discovery, never an invocation or permission grant",()=>{const d=createCodeModeTools(new CodeMode(()=>[]))[0].description;assert.match(d,/ALL_TOOLS/);assert.match(d,/not permission/);assert.match(d,/inspection does not invoke/);});

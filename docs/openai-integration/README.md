@@ -56,6 +56,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Exposed tool contract | Selected registration/schema, dispatch/defaults and output projection at a pinned source; not an internal argument type or a hosted-service/training guarantee |
 | Nested projection | Tool-specific object/string returned to coordinator JavaScript; distinct from provider-facing direct output, native evidence and the current Pi result/isError wrapper |
 | Output schema metadata | Source metadata that may inform nested descriptions; not necessarily serialized into a direct provider request |
+| ALL_TOOLS | Frozen per-cell `{name,description}` snapshot of eligible native tools, matching TOOL_NAMES; [discovery data](CODE-TOOL-METADATA.md), not schemas, callbacks, current entitlement or native authority |
 
 The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) and separate [direct Unified contract](NATIVE-UNIFIED-CONTRACT.md) describe deliberate direct-output transitions, SDK migration to structured details and unresolved nested/result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
 

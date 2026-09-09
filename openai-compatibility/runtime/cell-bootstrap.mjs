@@ -1,7 +1,8 @@
 // Trusted bootstrap source evaluated INSIDE QuickJS. No host object enters the VM.
-export const CELL_BOOTSTRAP = `(operation, control, namesJSON) => {
+export const CELL_BOOTSTRAP = `(operation, control, namesJSON, metadataJSON = null) => {
   const stringify = JSON.stringify, parse = JSON.parse, define = Object.defineProperty;
   define(globalThis, "TOOL_NAMES", {value: Object.freeze(parse(namesJSON))});
+  if (metadataJSON !== null) define(globalThis, "ALL_TOOLS", {value: Object.freeze(parse(metadataJSON).map(row => Object.freeze(row)))});
   define(globalThis, "text", {value: value => {
     if (typeof value === "string") return emit(value);
     if (value === undefined) return emit("undefined");
