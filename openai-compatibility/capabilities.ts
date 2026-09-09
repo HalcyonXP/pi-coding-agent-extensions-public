@@ -9,6 +9,7 @@ import { createWebSearchTool, type WebSearchProfile } from "./web-search-tool.ts
 import { subscriptionStatus } from "./subscription.ts";
 import { ToolOwnership } from "./tool-ownership.ts";
 import { CodeMode, createCodeModeTools, toolGatewayInfo } from "./code-mode.ts";
+import { supportsNativeCodeInput } from "./code-mode-input.ts";
 import type { SettingsRow, JobsController } from "./settings-menu.ts";
 import { CAPABILITY_NAMES, DEFAULT_CAPABILITIES, type CapabilityName, type CapabilityPreferences, type CapabilityPreferenceStore } from "./capability-preferences.ts";
 
@@ -58,6 +59,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			throw new Error("OpenAI invocation belongs to a stale model or session.");
 		}
 		ownership.assert(name);
+		if (groups.code_mode.includes(name) && !supportsNativeCodeInput(ctx)) throw new Error("Code mode unavailable: NATIVE_CODE_GRAMMAR_REQUIRED. No JSON-provider fallback.");
 		if (!enabled.has(name) || !pi.getActiveTools().includes(name)) throw new Error(`${name} is disabled for this session.`);
 	}
 	function leaseFor(name: string, ctx: ExtensionContext, signal?: AbortSignal): CapabilityLease {
@@ -91,7 +93,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		let trusted = true;
 		try { assertOfficialContext(ctx); } catch { trusted = false; }
 		const active = pi.getActiveTools().filter((name) => !definitions.has(name));
-		if (trusted) active.push(...[...enabled].filter((name) => definitions.has(name) && ownership.owns(name)));
+		if (trusted) active.push(...[...enabled].filter((name) => definitions.has(name) && ownership.owns(name) && (!groups.code_mode.includes(name) || supportsNativeCodeInput(ctx))));
 		pi.setActiveTools([...new Set(active)]);
 	}
 	function reset(ctx?: ExtensionContext) {
@@ -209,6 +211,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			PRIVATE_HOST_GATEWAY_V1_REQUIRED: "Use the compatible patched Pi host.", NATIVE_PROTECTED_PUBLICATION_REQUIRED: "Native protected results are required.",
 			WINDOWS_X64_REQUIRED: "Requires Windows x64.", NODE_24_OR_25_REQUIRED: "Requires Node 24 or 25.",
 			NATIVE_ARTIFACT_MISSING: "Verified prebuilt helper is missing.", NATIVE_ARTIFACT_INVALID_OR_UNREADABLE: "Prebuilt helper verification failed.",
+			NATIVE_CODE_GRAMMAR_REQUIRED: "Select a native OpenAI Responses model with grammar-tool support.",
 		};
 		const labels: Record<string, string> = { imagegen: "Image generation", web_search: "Web search", unified_exec: "Unified exec", code_mode: "Code mode" };
 		const descriptions: Record<string, string> = {

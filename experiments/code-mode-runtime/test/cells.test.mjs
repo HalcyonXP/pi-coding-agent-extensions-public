@@ -78,6 +78,14 @@ test("exec pragma validates exact fields and rejects ambiguous duplicate control
  assert.throws(()=>execInput('// @exec: {"yield_time_ms":1}\ntext(1)',{yield_time_ms:1}));
  assert.throws(()=>execInput('text(1)',{max_output_tokens:null}));
 });
+test("CRLF pragmas preserve zero and maximum limits instead of silently using defaults",()=>{
+ for(const newline of ["\n","\r\n"])for(const [yieldMs,tokens]of [[0,0],[30000,16384]]){
+  const source=`// @exec: ${JSON.stringify({yield_time_ms:yieldMs,max_output_tokens:tokens})}${newline}text("雪");${newline}`;
+  assert.deepEqual(execInput(source),{code:`text("雪");${newline}`,yieldMs,tokens});
+ }
+ for(const pragma of ['{"unknown":1}','{"yield_time_ms":-1}','{"max_output_tokens":null}','{'])assert.throws(()=>execInput(`// @exec: ${pragma}\r\ntext("must not run");`));
+ assert.throws(()=>execInput('// @exec: {"yield_time_ms":1}\r\ntext(1)',{yield_time_ms:1}));
+});
 test("estimated output budgets preserve Unicode and disclose omitted guest bytes",()=>{
  assert.deepEqual(budgetOutput(['🐈🐈','next'],1),{output:['🐈'],omitted_output_bytes:8});
  assert.deepEqual(budgetOutput(['α\0🐈'],0),{output:[],omitted_output_bytes:7});

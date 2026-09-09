@@ -6,7 +6,9 @@ export function execInput(source, options = {}) {
   if (!validCode(source) || !source.trim()) throw new Error("INVALID_REQUEST");
   if ((options.yield_time_ms !== undefined && !validYield(options.yield_time_ms)) || (options.max_output_tokens !== undefined && !validTokens(options.max_output_tokens))) throw new Error("INVALID_REQUEST");
   const lines = source.split(/\n/, 1);
-  const pragma = /^\s*\/\/\s*@exec:\s*(.*)$/.exec(lines[0]);
+  // The first line still contains CR for CRLF input. Dot does not match CR;
+  // silently missing that pragma would replace requested limits with defaults.
+  const pragma = /^\s*\/\/\s*@exec:([\s\S]*)$/.exec(lines[0]);
   let settings = {};
   if (pragma) {
     try { settings = JSON.parse(pragma[1]); } catch { throw new Error("INVALID_REQUEST"); }

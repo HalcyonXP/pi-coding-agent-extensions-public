@@ -2161,15 +2161,13 @@ describe("normal cohesive Code mode registration and native policy", () => {
 				if (mode === "protected") {
 					const r = outcome(
 						await invoke("exec", {
-							code: 'await tools.web_search({search_query:[{q:"public production fixture"}]});const r=await tools.imagegen({prompt:"Synthetic production PNG",destination_path:"production.png"});if(r.isError||r.result.content[0].data)throw Error("image projection failed");store("img",r.result.content[0].ref);text("must be suppressed");',
-							max_output_tokens: 0,
+							code: '// @exec: {"max_output_tokens":0}\nawait tools.web_search({search_query:[{q:"public production fixture"}]});const r=await tools.imagegen({prompt:"Synthetic production PNG",destination_path:"production.png"});if(r.isError||r.result.content[0].data)throw Error("image projection failed");store("img",r.result.content[0].ref);text("must be suppressed");',
 						}),
 					);
 					expect(r).toMatchObject({ status: "completed", output: [], result: { status: "ok" } });
 					const edit = outcome(
 						await invoke("exec", {
-							code: 'const ref=load("img");image(ref);const r=await tools.imagegen({prompt:"Synthetic production edit",referenced_image_refs:[ref],destination_path:"production-edit.png"});if(r.isError)throw Error("edit failed");',
-							max_output_tokens: 0,
+							code: '// @exec: {"max_output_tokens":0}\nconst ref=load("img");image(ref);const r=await tools.imagegen({prompt:"Synthetic production edit",referenced_image_refs:[ref],destination_path:"production-edit.png"});if(r.isError)throw Error("edit failed");',
 						}),
 					);
 					expect(edit).toMatchObject({ status: "completed", output: [], result: { status: "ok" } });
@@ -2194,8 +2192,7 @@ describe("normal cohesive Code mode registration and native policy", () => {
 						cmd = `& ${q(process.execPath)} ${q(program)} ${q(marker)}; exit $LASTEXITCODE`;
 					const r = outcome(
 						await invoke("exec", {
-							code: `let r=await tools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:1});let out=r.result.details.output;const id=r.result.details.session_id;for(let n=0;n<30&&!out.includes("READY");n++){r=await tools.write_stdin({session_id:id,yield_time_ms:300});out+=r.result.details.output;}if(!out.includes("READY"))throw Error("no native readiness");yield_control();await new Promise(r=>setTimeout(r,200));`,
-							yield_time_ms: 1,
+							code: `// @exec: {"yield_time_ms":1}\nlet r=await tools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:1});let out=r.result.details.output;const id=r.result.details.session_id;for(let n=0;n<30&&!out.includes("READY");n++){r=await tools.write_stdin({session_id:id,yield_time_ms:300});out+=r.result.details.output;}if(!out.includes("READY"))throw Error("no native readiness");yield_control();await new Promise(r=>setTimeout(r,200));`,
 						}),
 					);
 					await eventually(async () => {
@@ -2221,9 +2218,7 @@ describe("normal cohesive Code mode registration and native policy", () => {
 				if (mode === "provider" || mode === "reload" || mode === "yield") {
 					const r = outcome(
 						await invoke("exec", {
-							code: 'store("old",true);text("early");yield_control();await new Promise(r=>setTimeout(r,5000));text("late");',
-							yield_time_ms: 10000,
-							max_output_tokens: 1,
+							code: '// @exec: {"yield_time_ms":10000,"max_output_tokens":1}\nstore("old",true);text("early");yield_control();await new Promise(r=>setTimeout(r,5000));text("late");',
 						}),
 					);
 					expect(r.status).toBe("running");

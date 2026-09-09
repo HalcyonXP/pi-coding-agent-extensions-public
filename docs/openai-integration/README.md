@@ -7,6 +7,8 @@ This guide describes the public source's implementation and constraints, not an 
 | Native/upstream models | Pi 0.85.1's own catalog/auth/transport/cache behavior; no extension provider factory or model backport |
 | Patched/private host | Genuine pinned Pi source plus the explicit twenty-path native patch; not stock Pi, an official upstream binary, or a visibility claim |
 | Code mode | Independently opted-in paired exec/wait with a saved profile choice, bounded QuickJS cells and current native ownership; not ambient Node/V8 |
+| Native Code input | Raw-JavaScript custom provider tool, mapped by Pi to internal `{code}`; options in a first-line pragma, not top-level JSON fields. Wait remains JSON. See [input/result boundaries](NATIVE-CODE-CONTRACT.md). |
+| Native grammar capability | Selected Pi model's explicit grammar-tool support; absence disables Code without a JSON-provider fallback, not an execution-authority grant |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
 | Supervisor readiness | Private shell-supervisor preamble received; not child acknowledgement receipt, user-command success or native authority |
 | Scope/context identity | Native branded authority and lifecycle identity, not guest IDs, metadata or strings |
@@ -49,7 +51,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Nested projection | Tool-specific object/string returned to coordinator JavaScript; distinct from provider-facing direct output, native evidence and the current Pi result/isError wrapper |
 | Output schema metadata | Source metadata that may inform nested descriptions; not necessarily serialized into a direct provider request |
 
-The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and records current gaps. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
+The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) describes the deliberate input transition and unresolved result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
 
 Original first-party documentation in this directory is licensed under [Apache-2.0](LICENSE); see [scope and attribution](NOTICE). Other source components and third-party works retain their own terms.
 
