@@ -12,11 +12,13 @@ Reference revision during implementation: `94311d447587411789533c47601fd8bc9d81e
 
 OpenAI Codex is licensed under the Apache License 2.0. No OpenAI trademarks or endorsement are claimed. The hosted image-generation backend is not included in this extension and remains governed by OpenAI's applicable service terms and policies.
 
-## Code input grammar
+## Code input grammar and result interoperability
 
 `code-mode-input.ts` includes the Lark grammar from `codex-rs/core/src/tools/code_mode/execute_spec.rs` at OpenAI Codex revision `45305dd229c01e6cb6e122f6559e4f9b805bae6b`, under Apache-2.0 (see this directory's `LICENSE`). Pi's native grammar transport and this project's restricted QuickJS implementation are distinct from Codex's runtime. This newer grammar reference does not replace the image-reference revision above.
 
-Upstream NOTICE, reproduced here; its Ratatui statement describes the upstream project, not additional Ratatui code in this grammar:
+`code-mode-output.ts` implements direct script-status/wall-time/text interoperability with reference to `codex-rs/core/src/tools/code_mode/mod.rs`, `execute_handler.rs` and `wait_handler.rs` at that same revision. Pi-specific cleanup, fixed diagnostics, loss notices and structured-details migration are not claims of complete upstream runtime or result parity.
+
+Upstream NOTICE, reproduced here; its Ratatui statement describes the upstream project, not additional Ratatui code in this implementation:
 
 > OpenAI Codex
 > Copyright 2025 OpenAI

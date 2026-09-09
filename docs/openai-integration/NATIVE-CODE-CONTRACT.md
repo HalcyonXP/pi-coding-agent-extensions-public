@@ -17,7 +17,7 @@ Pi 0.85.1 already implements `ToolDefinition.constrainedSampling`, OpenAI custom
 | Pragma controls | Optional first-line `// @exec: {"yield_time_ms":1000,"max_output_tokens":10000}`. LF and CRLF work. Unknown, fractional, null, negative and over-limit values fail before Code runtime admission. |
 | Runtime controls | The internal `CodeMode.exec`/`CodeCells` APIs can still receive structured options. They are not an alternate model-facing JSON tool. |
 | Native grammar capability | The selected native Responses model must explicitly advertise grammar tools. Missing/false support makes Code unavailable without inspecting/starting its runtime; saved preference is retained. Metadata is not invocation authority. |
-| Direct Code result | Still the native `CellOutcome` JSON text plus details. Native custom-call output pairing changes with the input kind, not the result payload. |
+| Direct Code result | Current `exec`/`wait` content is script status, measured per-call wall time and literal coordinator text. Structured `CellOutcome` fields remain in native `details`, with versioned `code_result` timing metadata. This deliberately replaces the direct JSON envelope, not the nested wrapper. |
 | Nested result | Still `{result,isError}`. For Unified exec, inspect `r.isError` and `r.result.details`, not `r.output`. Protected image/source projection is unchanged. |
 | Presentation | Existing readable results, quiet polls, native groups, errors/loss, expandable returned data and history remain separate from provider input serialization. |
 
@@ -34,6 +34,25 @@ An SDK/RPC caller issuing the same native call supplies one `code` string contai
 
 Source defaults remain 10000 ms and 10000 approximate tokens, with unchanged ranges 0–30000 ms and 0–16384 tokens. Pragma handling shares the existing bounded parser; its CRLF recognition is repaired so a Windows newline cannot silently replace requested limits with defaults. These controls do **not** enlarge retention, admission, worker execution, idle, lifetime, readiness or cleanup budgets.
 
+## Direct output and consumer transition
+
+For example, the model receives plain text rather than a JSON-escaped envelope:
+
+```text
+Script completed
+Wall time 1.3 seconds
+Output:
+Task A: DONE · exit 0
+```
+
+A running result identifies its cell for a subsequent genuine `wait`; that identifier is still only a lookup key. Failed, terminated and draining results have distinct titles. Draining explicitly says cleanup is unconfirmed. Fixed failure diagnostics and omitted-byte notices remain visible even when the coordinator-text budget is zero. “Script completed” describes the cell, not success of every delegated action. Native invocation/validation failures remain ordinary native errors, not manufactured successful Code results.
+
+`details.code_result` is exactly `{version: 1, wall_time_ms: number}`. Milliseconds are a nonnegative safe integer measured with a monotonic clock around the actual awaited `CodeMode.exec` or `wait` operation, then displayed rounded to tenths of a second. This is **this call's elapsed time**, including work it awaits—not cell age, child-process runtime, CPU usage, billing, retention or a guessed upstream timer. This formatting does not claim byte-for-byte upstream rounding/truncation equivalence.
+
+**SDK/RPC consumers must read structured `details`, not `JSON.parse(content[0].text)`.** Current-source acceptance checks content/details agreement independently. Guest code still receives delegated `{result,isError}`; Unified exec remains under `r.result.details`. This increment does not normalize nested tool results, change direct Unified exec output, or serialize internal `output_schema` metadata into provider requests.
+
+Historical messages are not rewritten. The native renderer accepts either exact historical JSON/details agreement without the new metadata, or exact current text/details agreement with it. Unknown, partial, nontext, native-error, mismatched or hook-added results use Pi's ordinary visible fallback. The same collapsed output and loss notices are retained; expansion includes complete returned details and the new timing. No guessed summary replaces guest JSON, and no existing cell, job, profile or immutable bundle is migrated.
+
 ## Native path and validation
 
 1. Extension registers native grammar metadata; route/ownership/capability policy determines effective tool availability.
@@ -42,10 +61,10 @@ Source defaults remain 10000 ms and 10000 approximate tokens, with unchanged ran
 4. Genuine native invocation/scope authority admits the existing restricted worker. Delegations still traverse approvals, native hooks/events/accounting and protected finalized evidence.
 5. Native result hooks complete before native history/provider replay. Custom call and custom output remain correlated. Hook errors stay visible; a successful cell does not prove every delegated action succeeded.
 
-The offline test contract includes parser/delta/replay fixtures and actual installed native OpenAI **and** Codex Responses paths using synthetic per-request transports and authentication seams. Installed scenarios cover raw CRLF source with a real owned restricted cell/native read, invalid pragma, rejected legacy options, argument mutation, call blocking and finalized result-hook feedback. The acceptance helper requires both APIs, 24 synthetic model requests, 12 scenarios and confirmed native scope cleanup. These are acceptance requirements, not evidence that an unvalidated head passed them. No live model/service, account entitlement, billing, WebSocket transport or upstream runtime conformance is inferred.
+The offline test contract includes parser/delta/replay fixtures and actual installed native OpenAI **and** Codex Responses paths using synthetic per-request transports and authentication seams. Installed scenarios cover raw CRLF source with a real owned restricted cell/native read, invalid pragma, rejected legacy options, argument mutation, call blocking and finalized result-hook feedback. The input-transport helper retains both APIs, 24 synthetic model requests, 12 scenarios and confirmed native scope cleanup. A separate direct-output helper requires eight additional synthetic requests: a real restricted `exec` yields, and a native function-tool `wait` collects the same owning cell, through each provider's original SDK dispatcher. It checks custom/function output replay, literal before/after text, history preservation, per-call timing bounded by an independently observed interval and zero remaining scopes. Installed SDK checks additionally require zero-output failure/loss and structured details. Thirty-one named TUI frames preserve the original twenty-seven and add current-format, expansion, hook-fallback and loss coverage. These are acceptance requirements, not evidence that an unvalidated head passed them. No live model/service, account entitlement, billing, WebSocket transport or upstream runtime conformance is inferred.
 
 ## Unresolved result and runtime work
 
-Raw transport does not make QuickJS an upstream V8 module, supply missing helpers or make wrapper results tool-specific Codex objects. Direct versus nested output projection, IDs/defaults, full hook/error/truncation equivalence, helper/notify ordering, Web/image references and continuation remain explicit dependencies. Do not serialize internal `output_schema` into direct requests, guess wall/chunk/job facts, fabricate protected evidence or derive authority from an identifier. No compatibility alias or heuristic JSON summary substitutes for a deliberate native result contract.
+Raw transport does not make QuickJS an upstream V8 module, supply missing helpers or make wrapper results tool-specific Codex objects. Tool-specific nested projection, direct Unified exec formatting, IDs/defaults, full hook/error/truncation equivalence, helper/notify ordering, Web/image references and continuation remain explicit dependencies. The new direct Code text/timing format does not complete those contracts or add inline image/audio helpers. Do not serialize internal `output_schema` into direct requests, guess child/chunk/job facts, fabricate protected evidence or derive authority from an identifier. No compatibility alias or heuristic JSON summary substitutes for a deliberate native result contract.
 
 Ordinary tools, native model/provider/auth/cache ownership, Fast/footer, approvals, originals and notices are preserved. Restricted coordinator JavaScript does not sandbox delegated full-OS shell commands. Two active/draining scopes, four live shell processes, eight retained records and existing budgets remain unchanged; no unrestricted fallback or invocation-time compilation/download is introduced.
