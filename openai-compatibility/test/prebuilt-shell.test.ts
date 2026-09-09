@@ -8,6 +8,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { UnifiedExecManager, nativeShell, type Launch } from "../unified-exec.ts";
 import { verifiedExecutable } from "../runtime/native/artifact.mjs";
+import { removeOwnedFixture, withFixtureCleanup } from "./fixture-cleanup.ts";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const node = (code: string): Launch => ({ executable: process.execPath, args: ["-e", code] });
 
@@ -37,13 +38,13 @@ test("Windows launch rejects missing and corrupted prebuilt helpers without crea
 	// development dependencies. Never modify a real artifact or installed bundle.
 	const parent = join(root, ".pi"); await mkdir(parent, { recursive: true });
 	const fixture = await mkdtemp(join(parent, "missing-shell-helper-"));
-	const files = ["unified-exec.ts", "unified-completion.ts", "utf8-output.ts", ...["artifact.mjs", "WindowsRuntime.cs", "build.mjs", "toolchain.mjs", "toolchain.json"].map(name => "runtime/native/" + name)];
-	try {
+	const files = ["unified-exec.ts", "unified-exec-output.ts", "unified-completion.ts", "utf8-output.ts", ...["artifact.mjs", "WindowsRuntime.cs", "build.mjs", "toolchain.mjs", "toolchain.json"].map(name => "runtime/native/" + name)];
+	await withFixtureCleanup(async () => {
 		for (const name of files) { const target = join(fixture, name); await mkdir(dirname(target), { recursive: true }); await copyFile(join(root, name), target); }
 		const api = await import(pathToFileURL(join(fixture, "unified-exec.ts")).href);
 		const artifact = await import(pathToFileURL(join(fixture, "runtime/native/artifact.mjs")).href);
 		const paths = await artifact.artifactPaths(), jobs = new api.UnifiedExecManager();
-		try {
+		await withFixtureCleanup(async () => {
 			assert.equal((await api.nativeShellStatus()).available, false);
 			await assert.rejects(jobs.start("fixture", "Write-Output 'must not run'", fixture, 1, 1024), /verified prebuilt helper/);
 			assert.deepEqual(jobs.inspect("fixture"), []);
@@ -53,8 +54,8 @@ test("Windows launch rejects missing and corrupted prebuilt helpers without crea
 			assert.equal((await api.nativeShellStatus()).available, false);
 			await assert.rejects(api.nativeShell("Write-Output 'must not run'"), /verified prebuilt helper/);
 			assert.deepEqual(jobs.inspect("fixture"), []);
-		} finally { await jobs.close(); }
-	} finally { await rm(fixture, { recursive: true, force: true }); }
+		}, async () => { await jobs.close(); });
+	}, async bodyPassed => { if (bodyPassed) await removeOwnedFixture(fixture); });
 });
 
 for (const boundary of ["reset", "abort", "native scope"] as const) test(`asynchronous launch verification cannot cross ${boundary}`, async () => {
