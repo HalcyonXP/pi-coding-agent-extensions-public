@@ -6,11 +6,19 @@ import { RPC_LIMITS, boundedJSON, exact, record, validToolName } from "./rpc-pro
 
 import { CELL_BOOTSTRAP } from "./cell-bootstrap.mjs";
 import { CELL_LIMITS, validOperation } from "./cell-protocol.mjs";
+import { toolMetadataJSON } from "./tool-metadata.mjs";
 
 // cell is a native worker composition seam, never a guest-selected runtime flag.
-export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
+export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, cell } = {}) {
   let phase = "initialize";
   const fail = code => cell ? {...failure(code), phase} : failure(code);
+  let metadata;
+  try {
+    if (toolMetadata !== undefined) {
+      if (!cell) return fail("INVALID_REQUEST");
+      metadata = toolMetadataJSON(allowedTools, toolMetadata);
+    }
+  } catch { return fail("INVALID_REQUEST"); }
   let engine;
   try {
     engine = await createEngine();
@@ -190,11 +198,12 @@ export async function evaluate(code, { invoke, allowedTools = [], cell } = {}) {
       });
       const bootstrap = context.evalCode(CELL_BOOTSTRAP, "cell-bootstrap.js", {type: "global"});
       const names = context.newString(JSON.stringify(allowedTools));
+      const metadataValue = metadata === undefined ? context.null : context.newString(metadata);
       try {
         if (bootstrap.error) return fail("HOST_FAILED");
-        const installed = context.callFunction(bootstrap.value, context.undefined, operation, control, names);
+        const installed = context.callFunction(bootstrap.value, context.undefined, operation, control, names, metadataValue);
         try { if (installed.error) return fail("HOST_FAILED"); } finally { installed.dispose(); }
-      } finally { bootstrap.dispose(); names.dispose(); operation.dispose(); control.dispose(); }
+      } finally { bootstrap.dispose(); names.dispose(); if (metadata !== undefined) metadataValue.dispose(); operation.dispose(); control.dispose(); }
     }
     phase = "compile";
     // Compile a body as an argument inside QuickJS, never splice it into a wrapper.

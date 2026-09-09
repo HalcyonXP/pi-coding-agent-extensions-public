@@ -9,6 +9,7 @@ import {
 
 import { CELL_LIMITS, CellStore, cellTools, validOperation, operationJSON } from "./cell-protocol.mjs";
 import { cellDiagnostics, validCellDone } from "./cell-diagnostics.mjs";
+import { cellStartFrame } from "./tool-metadata.mjs";
 
 function launchWorker(entry = "./rpc-worker.mjs") {
   return spawn(process.execPath, ["--max-old-space-size=96", fileURLToPath(new URL(entry, import.meta.url))], {
@@ -31,7 +32,7 @@ export class AsyncRuntimeProbe {
   }
   get activeCount() { return this.#running.size; }
 
-  async run(code, { gateway, allowedTools, signal } = {}) {
+  async run(code, { gateway, allowedTools, toolMetadata, signal } = {}) {
     if (this.#closed) return failure("CLOSED");
     const cell = this.#cell;
     if (!validCode(code) || !(cell ? cellTools(allowedTools) : validTools(allowedTools))) return failure("INVALID_REQUEST");
@@ -40,8 +41,13 @@ export class AsyncRuntimeProbe {
     }
     if (signal?.aborted || gateway.signal.aborted) return failure("CANCELLED");
     if (this.#running.size >= LIMITS.concurrent) return failure("BUSY");
-    // Copy host policy now; never expose caller-owned mutable lists to the child.
-    const allow = new Set(allowedTools);
+    // Copy and bound the complete start before launching; metadata never expands authority.
+    let start;
+    try {
+      if (!cell && toolMetadata !== undefined) return failure("INVALID_REQUEST");
+      start = cell ? cellStartFrame(code, allowedTools, toolMetadata) : { type: "start", code, tools: [...allowedTools] };
+    } catch { return failure("INVALID_REQUEST"); }
+    const allow = new Set(start.tools);
     const controller = new AbortController();
     let child;
     try { child = this.#launch(); } catch { return failure("HOST_FAILED"); }
@@ -195,7 +201,7 @@ export class AsyncRuntimeProbe {
     });
     if ([...signals].some((source) => source.aborted)) abort();
     if (!stopped) {
-      try { send({ type: "start", code, tools: [...allow] }); } catch { stop("PROTOCOL_ERROR"); }
+      try { send(start); } catch { stop("PROTOCOL_ERROR"); }
     } else child.stdin.destroy();
     return promise;
   }

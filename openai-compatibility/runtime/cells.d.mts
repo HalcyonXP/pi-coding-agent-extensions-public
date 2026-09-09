@@ -19,6 +19,7 @@ export class CodeCells {
 		invocation: object;
 		code: string;
 		tools: string[];
+		toolMetadata?: { name: string; description: string }[];
 		yield_time_ms?: number;
 		max_output_tokens?: number;
 	}): Promise<CellOutcome>;

@@ -4,6 +4,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { CodeCells, type CellOutcome } from "./runtime/cells.mjs";
+import { snapshotToolMetadata } from "./runtime/tool-metadata.mjs";
 import {
 	cellRuntimeStatus,
 	type CellRuntimeStatus,
@@ -80,12 +81,15 @@ export class CodeMode {
 	// factory, launcher or less-contained implementation. Production uses defaults.
 	private readonly names: () => string[];
 	private readonly runtimeStatus: () => Promise<CellRuntimeStatus>;
+	private readonly definitions: () => unknown;
 	constructor(
 		names: () => string[],
 		runtimeStatus: () => Promise<CellRuntimeStatus> = cellRuntimeStatus,
+		definitions: () => unknown = () => [],
 	) {
 		this.names = names;
 		this.runtimeStatus = runtimeStatus;
+		this.definitions = definitions;
 	}
 	async status(ctx: ExtensionContext): Promise<CodeModeStatus> {
 		const native = toolGatewayInfo(ctx);
@@ -159,6 +163,7 @@ export class CodeMode {
 			throw Error(
 				"Code mode supports at most 32 eligible active tools; ordinary tools were not changed.",
 			);
+		const toolMetadata = snapshotToolMetadata(names, this.definitions());
 		const entry = this.context(ctx, call);
 		signal?.throwIfAborted();
 		return entry.cells.exec({
@@ -166,6 +171,7 @@ export class CodeMode {
 			owner: entry.owner,
 			invocation: call,
 			tools: names,
+			toolMetadata,
 		});
 	}
 	async wait(
@@ -223,7 +229,7 @@ export function createCodeModeTools(code: CodeMode): ToolDefinition[] {
 			name: "exec",
 			label: "Code mode",
 			description:
-				"Run one bounded restricted JavaScript cell. Send raw JavaScript, not JSON or a Markdown code fence. Optional first-line // @exec: {\"yield_time_ms\":1000,\"max_output_tokens\":10000}; omit the line to use 10000ms/10000 tokens. Only these pragma fields are accepted; safe integers, yield 0..30000ms, output 0..16384 approximate tokens. These are return/output limits, not process lifetime or retention. Fresh QuickJS isolate; no Node/import/filesystem/auth globals. TOOL_NAMES lists eligible active tools; await tools.NAME(args) delegates through genuine native controls and returns {result,isError}. text() emits primitive text. Prefer concise human-readable final summaries (label, actual output, exit/error and requested aggregate counts), not nested JSON dumps, initial snapshots or repeated IDs. Accumulate output locally; never omit failures, warnings or output-loss facts just to shorten a summary. Use JSON.stringify only for requested/needed machine-readable output. image(ref)/evidence(ref) use native references, store/load retain bounded same-context JSON, yield_control() yields. Delegated shell keeps full OS permissions. Direct results contain script status, this call's wall time and literal coordinator text, not a JSON envelope; wall time is not child-process runtime. A running cell_id is distinct from a shell session_id; use wait on that cell, never relaunch to poll. Mandatory finalized image/source evidence cannot be suppressed by guest output limits. For Unified exec, inspect r.isError and r.result.details (output, exit_code, running, session_id), not r.output; poll tools.write_stdin within the same owning cell. Cell completion closes its returned jobs/normal descendants, including background GUI processes. This is not a built-in desktop-control API. Failure diagnostics report bounded guest phase and delegation observations, never exception text or proof that OS effects did/did not occur. Do not blindly replay a failed action.",
+				"Run one bounded restricted JavaScript cell. Send raw JavaScript, not JSON or a Markdown code fence. Optional first-line // @exec: {\"yield_time_ms\":1000,\"max_output_tokens\":10000}; omit the line to use 10000ms/10000 tokens. Only these pragma fields are accepted; safe integers, yield 0..30000ms, output 0..16384 approximate tokens. These are return/output limits, not process lifetime or retention. Fresh QuickJS isolate; no Node/import/filesystem/auth globals. ALL_TOOLS provides frozen {name,description} metadata for eligible active tools, matching TOOL_NAMES and tools.NAME. This is discovery data, not permission; metadata inspection does not invoke tools. await tools.NAME(args) delegates through genuine native controls and returns {result,isError}. text() emits primitive text. Prefer concise human-readable final summaries (label, actual output, exit/error and requested aggregate counts), not nested JSON dumps, initial snapshots or repeated IDs. Accumulate output locally; never omit failures, warnings or output-loss facts just to shorten a summary. Use JSON.stringify only for requested/needed machine-readable output. image(ref)/evidence(ref) use native references, store/load retain bounded same-context JSON, yield_control() yields. Delegated shell keeps full OS permissions. Direct results contain script status, this call's wall time and literal coordinator text, not a JSON envelope; wall time is not child-process runtime. A running cell_id is distinct from a shell session_id; use wait on that cell, never relaunch to poll. Mandatory finalized image/source evidence cannot be suppressed by guest output limits. For Unified exec, inspect r.isError and r.result.details (output, exit_code, running, session_id), not r.output; poll tools.write_stdin within the same owning cell. Cell completion closes its returned jobs/normal descendants, including background GUI processes. This is not a built-in desktop-control API. Failure diagnostics report bounded guest phase and delegation observations, never exception text or proof that OS effects did/did not occur. Do not blindly replay a failed action.",
 			parameters: Exec,
 			constrainedSampling: structuredClone(CODE_CONSTRAINED_SAMPLING),
 			prepareArguments: prepareCodeArguments,

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { validCode, failure } from "./protocol.mjs";
 import { validTools } from "./rpc-protocol.mjs";
 import { verifiedExecutable } from "./native/artifact.mjs";
+import { cellStartFrame } from "./tool-metadata.mjs";
 
 export const WINDOWS_LIMITS = Object.freeze({
 	processBytes: 256 * 1024 * 1024,
@@ -193,6 +194,13 @@ export class WindowsAsyncRuntimeProbe {
 			return Promise.resolve(failure("GATEWAY_UNAVAILABLE"));
 		if (this.#tasks.size >= WINDOWS_LIMITS.concurrent)
 			return Promise.resolve(failure("BUSY"));
+		try {
+			if (!this.#cell && options.toolMetadata !== undefined) return Promise.resolve(failure("INVALID_REQUEST"));
+			if (this.#cell) {
+				const start = cellStartFrame(code, options.allowedTools, options.toolMetadata);
+				options = {...options, allowedTools: start.tools, toolMetadata: start.toolMetadata};
+			}
+		} catch { return Promise.resolve(failure("INVALID_REQUEST")); }
 		const controller = new AbortController();
 		const signals = [
 			controller.signal,

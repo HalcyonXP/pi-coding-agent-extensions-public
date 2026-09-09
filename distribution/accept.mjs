@@ -19,6 +19,7 @@ import {inspectCodeResult} from "./code-result-presentation.mjs";
 import {acceptNativeCodeTransport} from "./accept-code-transport.mjs";
 import {readCodeOutcome,validateCodeOutputAcceptance} from "./code-output-contract.mjs";
 import {acceptNativeCodeWaitOutput} from "./accept-code-output.mjs";
+import {acceptNativeToolMetadata} from "./accept-tool-metadata.mjs";
 import {readUnifiedOutcome} from "./unified-output-contract.mjs";
 import {acceptNativeUnifiedOutput} from "./accept-unified-output.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32"&&process.arch==="x64","Usage: node distribution/accept.mjs <private Windows bundle>");
@@ -91,8 +92,9 @@ try{
  const nativeCodeTransport=await acceptNativeCodeTransport(session,runtime,resources,nativeStream);
  const nativeCodeOutput={...validateCodeOutputAcceptance(results),...await acceptNativeCodeWaitOutput(session,runtime,nativeStream)};
  const nativeUnifiedOutput=await acceptNativeUnifiedOutput(session,runtime,nativeStream,await loadPollingPresentation(bundle,sdk));
+ const nativeToolMetadata=await acceptNativeToolMetadata(session,runtime,nativeStream);
  session.agent.state.model=faux.getModel();await session.extensionRunner.emit({type:"model_select",model:faux.getModel(),previousModel:official,source:"set"});assert.ok(!session.getActiveToolNames().includes("exec"));assert.equal((await invoke("exec",{code:'text("must not run")'})).isError,true);assert.equal(auth,3);assert.equal(requests,3);
- console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,savedCapabilityPreferences:true,returnedJobs,asyncCompletion,quietLocalPolling,compactLocalJobs,readableCodeResults,nativeCodeTransport,nativeCodeOutput,nativeUnifiedOutput,originalPngSha256:sha256(image)}));
+ console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,savedCapabilityPreferences:true,returnedJobs,asyncCompletion,quietLocalPolling,compactLocalJobs,readableCodeResults,nativeCodeTransport,nativeCodeOutput,nativeUnifiedOutput,nativeToolMetadata,originalPngSha256:sha256(image)}));
 }finally{
  codeUI?.close();
  if(session){session.agent.abort();await session.extensionRunner.emit({type:"session_shutdown",reason:"quit"});session.dispose();}

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, cp, rm } from "node:fs/promises";
+import { mkdtemp, cp, writeFile } from "node:fs/promises";
+import { withFixtureCleanup, removeOwnedFixture } from "../../../openai-compatibility/test/fixture-cleanup.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -133,14 +134,26 @@ test("parent environment secrets and Node preload/debug options are not forwarde
 
 test("missing engine in a path with spaces is reported, not replaced by Node eval", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pi runtime missing engine "));
-  try {
-    for (const file of ["worker.mjs", "protocol.mjs", "engine.mjs", "evaluator.mjs", "rpc-protocol.mjs", "cell-bootstrap.mjs", "cell-protocol.mjs"]) await cp(new URL(`../../../openai-compatibility/runtime/${file}`, import.meta.url), join(directory, file));
-    const probe = new RuntimeProbe({ launch: () => spawn(process.execPath, [join(directory, "worker.mjs")], {
-      cwd: directory, env: workerEnvironment(), stdio: "pipe", windowsHide: true,
-    }) });
+  const stdout = [], stderr = []; let probe;
+  await withFixtureCleanup(async () => {
+    for (const file of ["worker.mjs", "protocol.mjs", "engine.mjs", "evaluator.mjs", "rpc-protocol.mjs", "cell-bootstrap.mjs", "cell-protocol.mjs", "tool-metadata.mjs"]) await cp(new URL(`../../../openai-compatibility/runtime/${file}`, import.meta.url), join(directory, file));
+    probe = new RuntimeProbe({ launch: () => {
+      const child = spawn(process.execPath, [join(directory, "worker.mjs")], {
+        cwd: directory, env: workerEnvironment(), stdio: "pipe", windowsHide: true,
+      });
+      child.stdout.on("data", chunk => stdout.push(Buffer.from(chunk)));
+      child.stderr.on("data", chunk => stderr.push(Buffer.from(chunk)));
+      return child;
+    } });
     assert.deepEqual(await probe.run('emit("must not run")'), error("ENGINE_UNAVAILABLE"));
-    await probe.close();
-  } finally {
-    await rm(directory, {recursive: true, force: true});
-  }
+  }, async passed => {
+    const failures = [];
+    try { await probe?.close(); } catch (error) { failures.push(error); }
+    // Keep raw owned-worker output outside the disposable copied fixture, even on success.
+    for (const [name, chunks] of [["stdout", stdout], ["stderr", stderr]]) {
+      try { await writeFile(`${directory}.${name}.log`, Buffer.concat(chunks), {flag: "wx"}); } catch (error) { failures.push(error); }
+    }
+    if (passed && !failures.length) try { await removeOwnedFixture(directory); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, "Missing-engine fixture teardown/evidence failed; preserve all failures.");
+  });
 });
