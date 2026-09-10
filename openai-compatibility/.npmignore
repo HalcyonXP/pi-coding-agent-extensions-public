@@ -1,5 +1,7 @@
 # Native source builds require separate reviewed packaging/adoption; never package a local binary implicitly.
 runtime/native/bin/
 node_modules/
+# Retained local fixtures/evidence are never source-package payload.
+.pi/
 *.tgz
 *.log

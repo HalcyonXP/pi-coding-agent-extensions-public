@@ -1,0 +1,45 @@
+// Copyright 2026 Project Maintainers
+// SPDX-License-Identifier: Apache-2.0
+// Real native shell/dispatcher/contained cells. Only model/auth transport is synthetic.
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {responseEvents,codeHookOwner} from './accept-code-transport.mjs';
+import {findNativeMetadataResult} from './accept-tool-metadata.mjs';
+import {readCodeOutcome} from './code-output-contract.mjs';
+export const nestedOutputScenarios=Object.freeze([
+ {name:'ascii',unit:'x',count:40000,tokens:10000},
+ {name:'escaped',unit:'\\"\t',count:5500,tokens:4096},
+ {name:'unicode',unit:'🌊雪\\"',count:4000,tokens:16384},
+ {name:'hook',unit:'hook',count:1,tokens:16,hook:true},
+]);
+export function validateNestedOutput(rows){
+ assert.deepEqual(rows.map(r=>r.api),['openai-responses','openai-codex-responses']);
+ for(const r of rows){assert.equal(r.requests,8);assert.equal(r.scenarios,4);assert.equal(r.retainedCollections,3);assert.equal(r.hookRefusals,1);for(const k of ['completeOutput','boundedWrappers','originalIDs','historyUnchanged','customReplay'])assert.equal(r[k],true);assert.equal(r.activeScopes,0);assert.equal(r.drainingScopes,0);}
+ return{serializedNestedOutputBounded:true,unreadOutputRetained:true,originalIDsCollected:true,nativeWrappersPreserved:true,historyUnchanged:true,customInputReplay:true,oversizedHookRefused:true,syntheticModelRequests:16,scenarios:8,liveServiceCalls:0};
+}
+export async function acceptNestedOutput(session,runtime,nativeStream,cwd,resources,additionalFixtureTools=[]){
+ const handlers=codeHookOwner(resources.getExtensions().extensions,additionalFixtureTools).handlers.get('tool_result');assert.ok(Array.isArray(handlers));const originalHandlers=[...handlers];
+ const folder=await mkdtemp(join(cwd,'nested output ')),modelBefore=session.model,streamBefore=session.agent.streamFunction,authBefore=runtime.getAuth,authDescriptor=Object.getOwnPropertyDescriptor(runtime,'checkAuth'),getAuthDescriptor=Object.getOwnPropertyDescriptor(runtime,'getAuth'),streamDescriptor=Object.getOwnPropertyDescriptor(session.agent,'streamFunction'),activeBefore=[...session.getActiveToolNames()].sort(),rows=[],failures=[];let events=[],oversizedHook=false;
+ const afterResult=e=>{if(oversizedHook&&e.toolName==='exec_command')return{content:[{type:'text',text:'h'.repeat(70000)}],details:{fixtureHook:true},isError:false};};
+ const off=session.agent.subscribe(e=>{if(e.type==='tool_execution_end'&&e.scopeId&&['exec_command','write_stdin'].includes(e.toolName))events.push(structuredClone(e));});
+ try{
+  handlers.push(afterResult);
+  runtime.checkAuth=async id=>['openai','openai-codex'].includes(id);
+  for(const provider of ['openai','openai-codex']){
+   const model=runtime.getModel(provider,'gpt-6-astra');assert.ok(model);runtime.getAuth=async selected=>{assert.equal(typeof selected==='string'?selected:selected.provider,provider);return{auth:{apiKey:provider==='openai'?'synthetic-nested-output':`synthetic.${Buffer.from(JSON.stringify({'https://api.openai.com/auth':{chatgpt_account_id:'synthetic-nested-output'}})).toString('base64url')}.synthetic`}};};await session.setModel(model);assert.deepEqual([...session.getActiveToolNames()].sort(),activeBefore);let total=0;
+   for(const scenario of nestedOutputScenarios){
+    events=[];oversizedHook=scenario.hook===true;const expected=scenario.unit.repeat(scenario.count),file=join(folder,`${provider}-${scenario.name}.cjs`);await writeFile(file,`process.stdout.write(Buffer.from(${JSON.stringify(Buffer.from(expected+'\n').toString('base64'))},'base64'));`,{flag:'wx'});
+    const q=s=>`'${s.replaceAll("'","''")}'`,command=process.platform==='win32'?`& ${q(process.execPath)} ${q(file)}; exit $LASTEXITCODE`:`${q(process.execPath)} ${q(file)}`;
+    const source='// @exec: {"yield_time_ms":10000,"max_output_tokens":200}\n'+`let r=await tools.exec_command({cmd:${JSON.stringify(command)},yield_time_ms:1000,max_output_tokens:${scenario.tokens}});let out="",calls=0,original;while(true){if(++calls>12||r.isError||r.result.isError||!r.result.details)throw Error("nested result failed");const v=r.result.details;if(r.result.content[0].text!==JSON.stringify(v)||v.truncated_bytes!==0)throw Error("wrapper or loss");out+=v.output;if(!v.session_id){if(v.running||v.exit_code!==0)throw Error("not complete");break;}if(original&&original!==v.session_id)throw Error("ID changed");original=v.session_id;r=await tools.write_stdin({session_id:original,chars:"",yield_time_ms:1000,max_output_tokens:${scenario.tokens}});}if(out.replace(/\\r\\n/g,"\\n")!==${JSON.stringify(expected+'\n')})throw Error("output changed");text("NESTED_OUTPUT_OK");text(calls);`;
+    let requests=0;const payloads=[],first=session.messages.length,id=`call_nested_${provider}_${scenario.name}`;
+    session.agent.streamFunction=(selected,context,options)=>nativeStream(selected,context,{...options,transport:'sse',maxRetries:0,cacheRetention:'none',async onPayload(body,m){const next=await options?.onPayload?.(body,m);payloads.push(structuredClone(next??body));return next;},fetch:async(url,init)=>{assert.equal(String(url),provider==='openai'?'https://api.openai.com/v1/responses':'https://chatgpt.com/backend-api/codex/responses');assert.equal(init?.method,'POST');assert.ok(++requests<=2,'No native output retry');total++;return responseEvents(requests===1?{type:'custom_tool_call',id:`ctc_nested_${provider}_${scenario.name}`,call_id:id,name:'exec',input:source,status:'completed'}:{type:'message',id:`msg_nested_${provider}_${scenario.name}`,role:'assistant',content:[{type:'output_text',text:'Synthetic nested output complete',annotations:[]}],status:'completed'});}});
+    await session.prompt('Synthetic native nested output acceptance');assert.equal(requests,2);const result=findNativeMetadataResult(session.messages.slice(first),source),saved=JSON.stringify(result),value=readCodeOutcome(result);assert.equal(value.status,'completed');if(scenario.hook){assert.equal(value.result.status,'error');assert.equal(value.result.code,'TOOL_RESULT_LIMIT');assert.deepEqual(value.output,[]);assert.equal(value.result.diagnostics.delegated_calls,1);assert.equal(value.result.diagnostics.returned_results,0);assert.equal(value.result.diagnostics.effects,'not_determined');assert.equal(events.length,1);assert.equal(events[0].result.content[0].text.length,70000);assert.equal(events[0].result.details.fixtureHook,true);}else{assert.equal(value.result.status,'ok',JSON.stringify(value));assert.equal(value.output[0],'NESTED_OUTPUT_OK');assert.equal(events.length,Number(value.output[1]));assert.ok(events.length>=2&&events.length<=12);
+    let collected='',original;for(const [i,e]of events.entries()){assert.equal(e.isError,false);assert.equal(e.toolName,i?'write_stdin':'exec_command');assert.ok(Buffer.byteLength(JSON.stringify({result:e.result,isError:e.isError}))<=65536);const v=e.result.details;assert.equal(e.result.content[0].text,JSON.stringify(v));assert.equal(v.truncated_bytes,0);collected+=v.output;if(v.session_id){original??=v.session_id;assert.equal(v.session_id,original);}else assert.equal(i,events.length-1);}assert.equal(collected.replace(/\r\n/g,'\n'),expected+'\n');assert.ok(original);}assert.equal(JSON.stringify(result),saved);
+    assert.equal(payloads[0].tools.find(t=>t.name==='exec').type,'custom');assert.equal(payloads[1].input.find(t=>t.type==='custom_tool_call'&&t.call_id===id).input,source);assert.equal(payloads[1].input.find(t=>t.type==='custom_tool_call_output'&&t.call_id===id).output,result.content[0].text);const info=session.agent.getToolGatewayInfo();assert.equal(info.activeScopes,0);assert.equal(info.drainingScopes,0);
+   }
+   rows.push({api:model.api,requests:total,scenarios:4,retainedCollections:3,hookRefusals:1,completeOutput:true,boundedWrappers:true,originalIDs:true,historyUnchanged:true,customReplay:true,activeScopes:0,drainingScopes:0});
+  }
+ }catch(e){failures.push(e);}finally{const cleanup=async f=>{try{await f();}catch(e){failures.push(e);}};await cleanup(()=>off());await cleanup(()=>{const i=handlers.indexOf(afterResult);assert.ok(i>=0);handlers.splice(i,1);assert.deepEqual(handlers,originalHandlers);});await cleanup(()=>{session.agent.streamFunction=streamBefore;if(streamDescriptor)Object.defineProperty(session.agent,'streamFunction',streamDescriptor);else delete session.agent.streamFunction;});await cleanup(()=>{runtime.getAuth=authBefore;if(getAuthDescriptor)Object.defineProperty(runtime,'getAuth',getAuthDescriptor);else delete runtime.getAuth;});await cleanup(()=>session.setModel(modelBefore));await cleanup(()=>{if(authDescriptor)Object.defineProperty(runtime,'checkAuth',authDescriptor);else delete runtime.checkAuth;});await cleanup(()=>assert.deepEqual([...session.getActiveToolNames()].sort(),activeBefore));}
+ if(failures.length)throw new AggregateError(failures,'Native nested output acceptance and/or restoration failed; preserve evidence.');return validateNestedOutput(rows);
+}

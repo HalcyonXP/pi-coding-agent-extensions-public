@@ -11,6 +11,7 @@ import { Utf8OutputBuffer } from "./utf8-output.ts";
 import { verifiedExecutable } from "./runtime/native/artifact.mjs";
 import { completionEvidence } from "./unified-completion.ts";
 import { directUnifiedResult } from "./unified-exec-output.ts";
+import { resultJSON } from "./runtime/rpc-protocol.mjs";
 
 const MAX_PROCESSES = 4;
 const MAX_RETAINED = 8;
@@ -254,12 +255,17 @@ export class UnifiedExecManager {
 			await Promise.race([record.done, new Promise<void>((resolve) => { timer = setTimeout(resolve, Math.max(0, Math.min(yieldMs, 30_000))); })]);
 			if (signal?.aborted) { await this.stop(record, "Tool call cancelled."); signal.throwIfAborted(); }
 			if (!initial && record.closed) { await record.settled; this.assertSettled(record); }
-			const chunk = record.output.read(maxBytes);
-			const output = cleanOutput(chunk.output);
-			const dropped = chunk.truncatedBytes;
-			const retained = !record.closed || record.output.byteLength > 0;
-			if (!retained && !initial) this.processes.delete(record.id);
-			return { session_id: retained ? record.id : undefined, output, exit_code: record.exitCode, running: !record.closed, ...(record.supervised ? { supervisor_ready: record.ready } : {}), truncated_bytes: dropped, termination: record.termination };
+			const value = (output: string, dropped: number, remaining: number): ExecResult => ({ session_id: !record.closed || remaining > 0 ? record.id : undefined, output: cleanOutput(output), exit_code: record.exitCode, running: !record.closed, ...(record.supervised ? { supervisor_ready: record.ready } : {}), truncated_bytes: dropped, termination: record.termination });
+			// Decide on a non-consuming snapshot before touching output or loss counters.
+			// Only genuine cell-owned records use the nested serialization ceiling.
+			const take = record.access?.scope ? nestedReadLimit(maxBytes, limit => {
+				const chunk = record.output.peek(limit);
+				return value(chunk.output, chunk.truncatedBytes, chunk.remainingBytes);
+			}) : maxBytes;
+			const chunk = record.output.read(take);
+			const result = value(chunk.output, chunk.truncatedBytes, record.output.byteLength);
+			if (!result.session_id && !initial) this.processes.delete(record.id);
+			return result;
 		} finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
 	}
 	private stop(record: ProcessRecord, reason: string): Promise<void> {
@@ -310,7 +316,7 @@ export class UnifiedExecManager {
 	async close(): Promise<void> { clearInterval(this.sweep); this.sweep = undefined; await this.reset(); }
 }
 
-const outputLimit = Type.Optional(Type.Integer({ minimum: 1, maximum: 16_384, description: "Approximate token budget (four UTF-8 bytes per token), at most 64 KiB per response." }));
+const outputLimit = Type.Optional(Type.Integer({ minimum: 1, maximum: 16_384, description: "Approximate token budget (four UTF-8 bytes per token), at most 64 KiB per response. Nested calls may return smaller UTF-8 slices to fit the complete serialized result; collect unread output using the same session_id." }));
 const yieldTime = Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000, description: "Wait up to this many milliseconds, then return a session_id if work/output remains." }));
 const ExecParams = Type.Object({
 	cmd: Type.String({ minLength: 1, maxLength: 128_000, description: "Native PowerShell command on Windows; /bin/sh on POSIX. Runs with your existing OS permissions, not in a sandbox." }),
@@ -364,6 +370,32 @@ async function nativeBinding(ctx: ExtensionContext, getLease: (signal: AbortSign
 }
 function nestedResult(value: ExecResult) {
 	return { content: [{ type: "text" as const, text: JSON.stringify(value) }], details: value, isError: false };
+}
+/** Bound the complete unchanged nested wrapper, not merely its raw output string.
+ * No await occurs between preview and consumption. Remainders retain the original ID.
+ * Sanitization/terminal-ID omission need not be monotone: return a verified fitting
+ * candidate, not a claim of maximal utilization. Hooks and aggregate RPC limits
+ * remain authoritative afterwards; arbitrary finalized results are never rewritten.
+ */
+function nestedReadLimit(maxBytes: number, preview: (limit: number) => ExecResult): number {
+	const fits = (limit: number) => {
+		const value = preview(limit);
+		try { resultJSON({ result: nestedResult(value), isError: false }); return true; }
+		catch (error) {
+			// This error is from our trusted serializer, never a guest exception.
+			if (!(error instanceof Error) || error.message !== "TOOL_RESULT_LIMIT") throw error;
+			return false;
+		}
+	};
+	if (fits(maxBytes)) return maxBytes; // peek validates the input and UTF-8 boundary
+	if (!fits(4)) throw new Error("TOOL_RESULT_LIMIT"); // refuse before consumption
+	let best = 4, low = 5, high = Math.min(64 * 1024, Math.floor(maxBytes)) - 1;
+	while (low <= high) {
+		const mid = Math.floor((low + high) / 2);
+		if (fits(mid)) { best = mid; low = mid + 1; }
+		else high = mid - 1;
+	}
+	return best;
 }
 export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (name: "exec_command" | "write_stdin", ctx: ExtensionContext, signal?: AbortSignal) => CapabilityLease) {
 	return [{
