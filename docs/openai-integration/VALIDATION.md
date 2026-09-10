@@ -48,6 +48,8 @@ Installed `accept-tool-metadata.mjs` independently reconstructs the expected sna
 
 Five additional source-only fixed-event native frames cover running, exited retained output, expansion, loss and hook feedback. The combined profile validator requires **36** frames, retaining the original 31 exactly and in order. Development probes that load current source on an accepted SDK remain development-only; they do not certify a new source-bearing archive. No new active-profile inspection, user-command replay or live-service test is implied.
 
+`test/unified-nested-output.test.ts` exercises real owned child output through the factory/manager: large ASCII, escaped text, Unicode, original-ID collection, unchanged direct ceiling, loss accounting and no consumption on preview refusal. Installed `accept-nested-output.mjs` adds16 separately counted synthetic model requests/eight scenarios across both native Responses routes. Genuine contained cells collect large output intact through bounded original wrappers; a native result hook deliberately exceeding the cap still refuses. Authentication/stream descriptors, model and hooks are restored with aggregated failures. This development/installed contract is not a live-service test. Source-package inspection also creates an owned `.pi` sentinel and requires its exclusion without deleting earlier failed fixtures.
+
 ## Genuine patched host
 
     node .github/scripts/prepare-pi-host.mjs --rpc

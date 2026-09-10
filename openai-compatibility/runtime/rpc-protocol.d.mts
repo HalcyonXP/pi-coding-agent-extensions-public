@@ -13,3 +13,4 @@ export const RPC_LIMITS: Readonly<{
 	nodes: number;
 }>;
 export function validToolName(name: unknown): name is string;
+export function resultJSON(value: unknown): string;

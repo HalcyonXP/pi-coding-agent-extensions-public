@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -26,7 +27,12 @@ test("the cohesive lock alone owns exact engine dependencies and no automatic na
   for (const script of ["preinstall", "install", "postinstall", "prepare", "prepack"]) assert.equal(pkg.scripts[script], undefined);
   assert.equal(pkg.scripts["build:runtime"], "node runtime/native/build.mjs");
 });
-test("source-package inspection includes runtime/notices but never local binaries or manifests", () => {
+test("source-package inspection includes runtime/notices but never local binaries or manifests", async () => {
+  const parent = fileURLToPath(new URL(".pi/", packageRoot)); await mkdir(parent, { recursive: true });
+  const fixture = await mkdtemp(join(parent, "source-pack-exclusion-"));
+  await writeFile(join(fixture, "local-evidence.json"), '{"syntheticLocalEvidence":true}', {flag:"wx"});
+  let passed = false;
+  try {
   // A fixed command with no interpolated data. No installation, network or publication.
   const output = execSync("npm pack --dry-run --json --offline --ignore-scripts", {
     cwd: fileURLToPath(packageRoot), encoding: "utf8", timeout: 30_000, maxBuffer: 2 * 1024 * 1024,
@@ -35,4 +41,6 @@ test("source-package inspection includes runtime/notices but never local binarie
   const paths = new Set(pack.files.map(file => file.path));
   for (const file of ["index.ts", "imagegen/core.ts", "runtime/engine.mjs", "runtime/native/WindowsRuntime.cs", "runtime/native/build.mjs", "runtime/LICENSE.quickjs"]) assert.ok(paths.has(file), `Missing ${file}`);
   for (const file of paths) assert.ok(!/^(?:runtime\/native\/bin|node_modules|\.pi)\/|\.(?:exe|pdb|tgz|log)$/i.test(file), `Unexpected artifact ${file}`);
+  passed = true;
+  } finally { if (passed) await rm(fixture, {recursive:true}); } // retain failed fixtures, not package them
 });

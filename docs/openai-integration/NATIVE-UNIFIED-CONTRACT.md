@@ -19,6 +19,12 @@ The reference is [`ExecCommandToolOutput` in openai/codex@45305dd229c01e6cb6e122
 
 Native invocation/scope checks select the direct versus nested path. Guest arguments, result metadata and IDs do not select a projection or grant authority. Direct calls retain Pi's normal result rendering; there is no new heuristic JSON renderer or formatter applied after result hooks. Unknown/hook-modified content remains ordinary visible output. Historical results, nested quiet/grouped polling and the eight-line Code previews are not rewritten.
 
+## Bounded nested collection
+
+A **nested output slice** fits the complete unchanged serialized `{result,isError}` within the existing64KiB RPC result cap, not merely the raw output string. The manager checks non-consuming UTF-8 snapshots before collection, accounting for duplicate JSON/details and escaping. Unread bytes retain the original session ID, including after process exit; they are not reported as dropped output. Existing sanitization and once-only buffer-loss accounting remain. A preview that cannot fit refuses before consuming output or loss counters.
+
+Direct output and default waits/token limits are unchanged. No aggregate/call/lifetime/readiness/drain/evidence budget increases. Result hooks still run afterwards: oversized hook-modified results and aggregate overflow remain failures, not silently truncated or rewritten finalized evidence. Collection requires the original scope/context and never relaunches work. This is bounded transport correctness, not tool-specific Codex projection parity.
+
 ## Text and structured details
 
 A stopped process with unread output can return:

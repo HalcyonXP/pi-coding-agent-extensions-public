@@ -47,6 +47,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Retained exited ID | An exited process's lookup for remaining buffered output, not a running process or authority to adopt another context's job |
 | Cell completion | The cell returned a terminal result; a failed cell is labelled failed. Not a blanket assertion that all delegated jobs succeeded |
 | Code output omission | Bytes already omitted by the existing guest-output budget; prominently reported, not recoverable merely by expanding the UI |
+| Nested output slice | UTF-8 collection bounded by the complete serialized native wrapper; unread bytes retain their original ID, distinct from lost output and later hook/aggregate-limit failures |
 | Unified output loss | Bytes already dropped from the shell buffer, not unread retained output; further polling or expansion cannot recover the dropped bytes |
 | Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |
 | Idle turn | New assistant/model execution without another user request; completion reporting does not start one |
