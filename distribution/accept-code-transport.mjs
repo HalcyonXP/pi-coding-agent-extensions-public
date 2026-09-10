@@ -31,12 +31,19 @@ export function responseEvents(item) {
  const bytes=new TextEncoder().encode(events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join(""));let offset=0;
  return new Response(new ReadableStream({pull(controller){if(offset===bytes.length){controller.close();return;}const next=Math.min(offset+29,bytes.length);controller.enqueue(bytes.slice(offset,next));offset=next;}}),{headers:{"content-type":"text/event-stream"}});
 }
-export async function acceptNativeCodeTransport(session,runtime,resources,nativeStream) {
+export function codeHookOwner(extensions,additionalFixtureTools=[]) {
+ assert.equal(extensions.length,1+additionalFixtureTools.length);
+ const owners=extensions.filter(e=>e.tools.has('exec')&&e.tools.has('wait'));assert.equal(owners.length,1);
+ const fixtures=extensions.filter(e=>e!==owners[0]);assert.deepEqual(fixtures.map(e=>[...e.tools.keys()]),additionalFixtureTools.map(name=>[name]));
+ for(const fixture of fixtures)for(const key of ['handlers','commands','flags','shortcuts'])assert.equal(fixture[key].size,0,'Acceptance fixture must not add hooks or controls');
+ return owners[0];
+}
+export async function acceptNativeCodeTransport(session,runtime,resources,nativeStream,additionalFixtureTools=[]) {
  assert.equal(typeof nativeStream,"function","Pass the original installed SDK dispatcher, not a replacement provider");
  const originalModel=session.model,originalStream=session.agent.streamFunction,originalAuth=runtime.getAuth;
  const checkAuthDescriptor=Object.getOwnPropertyDescriptor(runtime,"checkAuth"),failures=[];
- const owned=resources.getExtensions().extensions;assert.equal(owned.length,1);
- const handlers=owned[0].handlers,callHandlers=handlers.get("tool_call"),resultHandlers=handlers.get("tool_result");
+ const owned=codeHookOwner(resources.getExtensions().extensions,additionalFixtureTools);
+ const handlers=owned.handlers,callHandlers=handlers.get("tool_call"),resultHandlers=handlers.get("tool_result");
  assert.ok(Array.isArray(callHandlers)&&Array.isArray(resultHandlers));
  const originalCalls=[...callHandlers],originalResults=[...resultHandlers];
  const activeBefore=[...session.getActiveToolNames()].sort(),rows=[];

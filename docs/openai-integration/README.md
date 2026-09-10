@@ -59,6 +59,8 @@ This guide describes the public source's implementation and constraints, not an 
 | ALL_TOOLS | Frozen per-cell `{name,description}` snapshot of eligible native tools, matching TOOL_NAMES; [discovery data](CODE-TOOL-METADATA.md), not schemas, callbacks, current entitlement or native authority |
 | Nested JSON-string argument | [Serialized object parsed inside QuickJS](CODE-COORDINATOR-COMPATIBILITY.md) before ordinary native validation, not arbitrary freeform input or tool authority |
 | Image-reference forwarding | Passing a native projected image block to image(); it must resolve to existing journaled same-context evidence, not guest image bytes or URLs |
+| Helper failure | Fixed allowlisted classification of an unhandled helper-created error; not inspection of arbitrary guest exception text. See [helper feedback](CODE-COORDINATOR-COMPATIBILITY.md). |
+| Callable alias | Unambiguous hyphen-to-underscore tools entry dispatching the original native name; exact native entries win, metadata and authority stay unchanged. |
 | Coordinator disposal | Ends admission of queued coordinator callbacks and ignores late results; native scopes still close already-delegated work |
 
 The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) and separate [direct Unified contract](NATIVE-UNIFIED-CONTRACT.md) describe deliberate direct-output transitions, SDK migration to structured details and unresolved nested/result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.

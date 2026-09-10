@@ -1,3 +1,4 @@
+import { CELL_HELPER_ERRORS } from "./cell-helper-errors.mjs";
 // Fixed spike limits, not guest-controlled options. All byte budgets are UTF-8.
 export const LIMITS = Object.freeze({
   codeBytes: 64 * 1024,
@@ -18,6 +19,7 @@ export const ERROR_CODES = Object.freeze([
   "INVALID_REQUEST", "ENGINE_UNAVAILABLE", "EXECUTION_FAILED", "EXECUTION_LIMIT",
   "IMPORT_DENIED", "OUTPUT_LIMIT", "INVALID_OUTPUT", "PENDING_PROMISE",
   "HOST_FAILED", "PROTOCOL_ERROR", "WALL_LIMIT", "CANCELLED", "BUSY", "CLOSED",
+  ...CELL_HELPER_ERRORS,
 ]);
 
 export function failure(code) {
