@@ -14,6 +14,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Scope/context identity | Native branded authority and lifecycle identity, not guest IDs, metadata or strings |
 | Protected evidence | Finalized native descendants or direct completion evidence persisted/published through native ownership outside guest text projection; not another live model turn or fsync/crash recovery |
 | Draining | Native resources/publication whose closure is not yet confirmed; still consumes admission |
+| Collector cancellation | Wakes the current Code exec/wait collection without waiting out its return timer; not confirmation of native closure or release of draining admission |
 | Profile | New isolated configuration/workspace bound to an immutable bundle; not an imported active installation |
 | Source acceptance | Exact-head local/hosted validation and labelled review; distinct from reproducible artifact and installed-profile acceptance |
 | AI-assisted self-review | A COMMENTED review pinned to head/base, not independent approval |

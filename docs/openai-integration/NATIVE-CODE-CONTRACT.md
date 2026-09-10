@@ -53,6 +53,12 @@ A running result identifies its cell for a subsequent genuine `wait`; that ident
 
 Historical messages are not rewritten. The native renderer accepts either exact historical JSON/details agreement without the new metadata, or exact current text/details agreement with it. Unknown, partial, nontext, native-error, mismatched or hook-added results use Pi's ordinary visible fallback. The same collapsed output and loss notices are retained; expansion includes complete returned details and the new timing. No guessed summary replaces guest JSON, and no existing cell, job, profile or immutable bundle is migrated.
 
+## Cancellation while draining
+
+A Code collector is the current manager `exec`/`wait` operation, not the worker or native scope. Cancellation wakes a sleeping collector even when native closure is already pending or has failed. The manager suppresses cancelled guest output and returns `draining` until native closure is confirmed; the final invocation's cancellation/error presentation remains host-owned. Waking the collector neither repeats a closer nor frees admission, prunes an unconfirmed cell, or claims successful termination. A noncancelled collector still waits normally for closure or its return deadline. No wait, execution, readiness or cleanup budget changes.
+
+Deterministic state tests cover caller abort, context revocation and manager close with pending/rejected native closure. A separate installed fixture uses genuine SDK handlers and contained QuickJS with an intentionally held **owned test resource**, not an unkillable shell or a production cleanup bypass. Both native Responses routes check context revocation and manager close, prompt collector return, retained native draining ownership, once-only closure, and zero scopes after explicitly releasing the fixture. Its 14 synthetic requests/four scenarios are separate from the existing input/output cohorts. Native resource views expose identity and ownership operations; draining/closed accounting is observed through the native gateway, not inferred from an aborted signal or an invented resource-view state property.
+
 ## Native path and validation
 
 1. Extension registers native grammar metadata; route/ownership/capability policy determines effective tool availability.
