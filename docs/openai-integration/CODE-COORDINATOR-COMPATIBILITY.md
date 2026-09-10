@@ -1,0 +1,21 @@
+# Coordinator arguments, images and completion
+
+This batch extends the existing restricted Code coordinator; it does not change native names, scopes, `{result,isError}`, direct output or runtime budgets.
+
+- **JSON-string argument:** `await tools.read('{"path":"input.txt"}')` is equivalent to passing that object. Parsing occurs inside QuickJS using captured intrinsics. Only an object is accepted, never arrays, null, numbers or arbitrary freeform text. A preparse cap of 65,536 UTF-16 code units bounds string handling; the unchanged 64KiB serialized native-call byte cap and aggregate/call limits still apply. Ordinary native tool validation/hooks/approvals run on the resulting object. Portable `tools.call` probes remain object-only.
+- **Image-reference block:** `image(result.result.content[0])` accepts the native projected `{type:"image_reference",ref,mimeType:"image/png",bytes:...}` block, or the existing reference string. The block does not supply image bytes or authority: the original journaled image must still resolve in the live owning context. Foreign/expired/revoked references, raw image bytes, data URLs and network URLs do not gain access. Original images and protected evidence remain in their existing native paths. This is not upstream inline-image/audio/generatedImage parity.
+- **Coordinator disposal:** completion, failure or `exit()` invalidates queued host work and discards late promise results. Timers alone do not keep a completed script alive. Native scopes still close work already delegated; disposal does not undo OS effects or sandbox full-OS shell commands. Detached tool promises remain visible `DETACHED_TOOL` failures rather than silently claiming success.
+
+`exit`, `setTimeout` and `clearTimeout` already existed before this batch. The lifecycle changes prevent not-yet-started callbacks from invoking native work after evaluator disposal and allow timer-only semantic cells to decode replies without a tool bridge. They are correctness fixes, not newly invented helpers.
+
+Focused tests cover exact Unicode/NUL objects, captured intrinsics, invalid and oversized inputs, reference ownership, late results, exit and timer-only cells, plus the real contained Windows bridge. Installed acceptance reuses its existing read/image fixtures and both Responses raw-input scenarios to exercise these additions without extra synthetic model/service requests. Unit or development success is not exact-head, master or copied-artifact acceptance.
+
+## Image input and artifact recovery
+
+The same cohort snapshots hook-finalized capability arguments before asynchronous work; existing schema revalidation was already present and remains enforced. Later host-side mutation cannot redirect an admitted command or image destination. Conversation/native reference images require canonical bounded base64, rather than silently accepting ignored bytes.
+
+If generation and the canonical save succeed but an optional workspace copy fails, imagegen returns the original image and its path with a visible recovery warning. `details.status:"completed"` refers to generation; `copyStatus:"failed"` and `requestedDestinationPath` report the failed optional operation, and `destinationPath` is absent. Native `isError:false` does not mean the copy succeeded. No automatic regeneration, overwrite or deletion is attempted; a partial/competing destination may remain. Canonical-save failure and authorization/context cancellation still refuse normally. Nested protected image publication and reference forwarding retain the original even in the copy-failure case.
+
+Installed recovery acceptance adds one separately counted synthetic image-service request. It creates a destination collision after the request starts and checks the original bytes, competing file, visible failure and native forwarding. This is not a live paid generation or a promise of disk/crash recovery.
+
+Pinned basis: [exposed tool contracts](CODEX-TOOL-CONTRACTS.md). Tool-specific nested projections, numeric IDs/defaults, normalized naming, notify ordering, inline media and broader Web/image/context/lifecycle parity remain open. No additional native authority, provider fallback, PTY or hosted-service guarantee is introduced.

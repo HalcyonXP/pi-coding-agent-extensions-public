@@ -71,7 +71,10 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		definitions.set(tool.name, {
 			...tool, parameters,
 			async execute(id, params, signal, update, ctx) {
-				// Pi permits tool_call hooks to mutate arguments without revalidation. Revalidate at the actual boundary.
+				// Capture hook-finalized JSON before any async work. Later host-side
+				// mutation must not change an already admitted command/destination.
+				try { params = structuredClone(params); }
+				catch { throw new Error(`Invalid ${tool.name} arguments.`); }
 				if (!Value.Check(parameters, params)) throw new Error(`Invalid ${tool.name} arguments.`);
 				const lease = leaseFor(tool.name, ctx, signal);
 				if (pending.size >= 128 || pending.has(id)) { lease.release(); throw new Error("Duplicate or too many unfinalized OpenAI calls."); }

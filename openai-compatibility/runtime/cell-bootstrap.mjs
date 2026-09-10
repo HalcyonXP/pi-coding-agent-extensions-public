@@ -11,7 +11,13 @@ export const CELL_BOOTSTRAP = `(operation, control, namesJSON, metadataJSON = nu
   }});
   define(globalThis, "store", {value: (key, value) => { parse(operation(stringify({kind:"store",key,value}))); }});
   define(globalThis, "load", {value: key => { const v=parse(operation(stringify({kind:"load",key}))); return v.found ? v.value : undefined; }});
-  define(globalThis, "image", {value: ref => parse(operation(stringify({kind:"image",ref})))});
+  define(globalThis, "image", {value: value => {
+    // Native projected image blocks carry references, not guest-provided bytes.
+    const ref = typeof value === "string" ? value
+      : value !== null && typeof value === "object" && value.type === "image_reference" && value.mimeType === "image/png" ? value.ref : undefined;
+    if (typeof ref !== "string") throw Error("image requires a native image reference or image_reference block");
+    return parse(operation(stringify({kind:"image",ref})));
+  }});
   define(globalThis, "evidence", {value: (ref, offset=0, length=8192) => parse(operation(stringify({kind:"evidence",ref,offset,length})))});
   define(globalThis, "yield_control", {value: () => control("yield")});
   define(globalThis, "exit", {value: () => { control("exit"); throw Error("Cell exit"); }});

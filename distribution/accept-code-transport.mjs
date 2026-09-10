@@ -69,7 +69,10 @@ export async function acceptNativeCodeTransport(session,runtime,resources,native
    };
    for(scenario of cases){
     observed=[];payloads=[];request=0;
-    rawSource=(scenario==="bad-pragma"?'// @exec: {"unsupported":true}\r\n':'// @exec: {"yield_time_ms":10000,"max_output_tokens":10000}\r\n')+'const r=await tools.read({path:"input.txt"});if(r.isError||!r.result.content)throw Error("native wrapper changed");text("NATIVE_RAW 雪 🌊");text(r.result.content[0].text);';
+    // Exercise the string-object adapter on both actual Responses routes without
+    // adding service requests; other installed cases retain native object calls.
+    const readArgs=scenario==="raw"?'JSON.stringify({path:"input.txt"})':'{path:"input.txt"}';
+    rawSource=(scenario==="bad-pragma"?'// @exec: {"unsupported":true}\r\n':'// @exec: {"yield_time_ms":10000,"max_output_tokens":10000}\r\n')+`const r=await tools.read(${readArgs});if(r.isError||!r.result.content)throw Error("native wrapper changed");text("NATIVE_RAW 雪 🌊");text(r.result.content[0].text);`;
     const first=session.messages.length;
     await session.prompt("Synthetic native Code transport acceptance");
     const errors=session.messages.slice(first).filter(message=>message.role==="assistant"&&message.stopReason==="error").map(message=>({stopReason:message.stopReason,errorMessage:message.errorMessage}));
