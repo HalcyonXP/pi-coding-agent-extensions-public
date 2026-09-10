@@ -45,9 +45,9 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
     const entry = { deferred, settled: false, kind, timer };
     pendingTools.set(toolCalls, entry);
     Promise.resolve().then(() => { if (disposed || fatal || exited || entry.cancelled) throw new Error("CANCELLED"); return run(); }).then(
-      value => { entry.json = JSON.stringify(value); entry.settled = true; wake?.(); },
-      () => { entry.error = true; entry.settled = true; wake?.(); },
-    ).catch(() => { entry.error = true; entry.settled = true; wake?.(); });
+      value => { if (disposed || entry.cancelled) return; entry.json = JSON.stringify(value); entry.settled = true; wake?.(); },
+      () => { if (disposed || entry.cancelled) return; entry.error = true; entry.settled = true; wake?.(); },
+    ).catch(() => { if (disposed || entry.cancelled) return; entry.error = true; entry.settled = true; wake?.(); });
     return deferred.handle;
   }
   // Cumulative engine elapsed time excludes idle tool waits; parent wall watchdog does not.
@@ -143,6 +143,12 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
         const parse = JSON.parse;
         const api = Object.create(null);
         const call = (name, args) => {
+          // Named cell tools accept serialized JSON objects; parsing stays inside
+          // the bounded guest. Portable tools.call and native gateway input stay objects.
+          if (namesJSON !== null && typeof args === "string") {
+            if (args.length > ${RPC_LIMITS.argumentBytes}) return bridge();
+            try { args = parse(args); } catch { return bridge(); }
+          }
           if (typeof name !== "string" || args === null || typeof args !== "object" || Array.isArray(args)) return bridge();
           return bridge(stringify({name, args}));
         };
@@ -165,6 +171,12 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
       } finally { bootstrap.dispose(); toolBridge.dispose(); }
     }
     if (cell) {
+      // Timer replies also need a captured decoder in cells without a tool bridge.
+      if (!decode) {
+        const decoder = context.evalCode("(() => { const parse = JSON.parse; return json => parse(json); })()", "cell-decoder.js", {type: "global"});
+        try { if (decoder.error) return fail("HOST_FAILED"); decode = decoder.value.dup(); }
+        finally { decoder.dispose(); }
+      }
       const operation = context.newFunction("cellOperation", encoded => {
         if (interrupted()) return context.undefined;
         try {
@@ -290,6 +302,9 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
     // Never serialize guest exceptions, dependency paths, stderr, source, or host stacks.
     return fail(fatal ?? "EXECUTION_FAILED");
   } finally {
+    // Queued host microtasks must not admit work or touch late results after the
+    // isolate ends. Native scopes still own teardown of work already delegated.
+    disposed = true;
     wake = undefined;
     for (const entry of pendingTools.values()) entry.deferred.dispose();
     pendingTools.clear();

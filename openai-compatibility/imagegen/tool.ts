@@ -33,6 +33,9 @@ interface ImagegenDetails {
 	operation?: "generate" | "edit";
 	canonicalPath?: string;
 	destinationPath?: string;
+	/** Generation succeeded; optional copy failure must not discard the original. */
+	copyStatus?: "failed";
+	requestedDestinationPath?: string;
 	background?: string;
 	quality?: string;
 	size?: string;
@@ -79,7 +82,11 @@ function imageContent(value: unknown): value is ImageContent {
 }
 
 function normalizeConversationImage(image: ImageContent): ImageReference {
+	if (image.data.length > Math.ceil(MAX_INPUT_IMAGE_BYTES / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data)) {
+		throw new Error("conversation image must contain bounded canonical base64");
+	}
 	const bytes = Buffer.from(image.data, "base64");
+	if (bytes.toString("base64") !== image.data) throw new Error("conversation image must contain canonical base64");
 	if (!bytes.length || bytes.length > MAX_INPUT_IMAGE_BYTES) {
 		throw new Error(`conversation image is empty or exceeds ${MAX_INPUT_IMAGE_BYTES} bytes`);
 	}
@@ -233,12 +240,21 @@ export function createImagegenTool(
 				lease.assertCurrent();
 				await writeNewWorkspaceFile(ctx.cwd, canonicalPath, result.imageBytes, mutationQueue, lease.assertCurrent);
 
-				let destinationPath: string | undefined;
+				let destinationPath: string | undefined, requestedDestinationPath: string | undefined;
 				if (params.destination_path) {
 					lease.assertCurrent();
-					destinationPath = resolveDestinationLexically(ctx.cwd, params.destination_path);
-					if (path.resolve(destinationPath) !== path.resolve(canonicalPath)) {
-						await writeNewWorkspaceFile(ctx.cwd, destinationPath, result.imageBytes, mutationQueue, lease.assertCurrent);
+					const target = resolveDestinationLexically(ctx.cwd, params.destination_path);
+					try {
+						if (path.resolve(target) !== path.resolve(canonicalPath)) {
+							await writeNewWorkspaceFile(ctx.cwd, target, result.imageBytes, mutationQueue, lease.assertCurrent);
+						}
+						destinationPath = target;
+					} catch {
+						// Revocation remains a refusal, not successful delivery. Otherwise
+						// preserve the generated image in native output/evidence and make
+						// the optional-copy failure explicit without echoing OS diagnostics.
+						lease.assertCurrent();
+						requestedDestinationPath = target;
 					}
 				}
 
@@ -248,6 +264,7 @@ export function createImagegenTool(
 				const summary = [
 					`${request.operation === "generate" ? "Generated" : "Edited"} image saved to ${canonicalDisplay}.`,
 					destinationDisplay && destinationDisplay !== canonicalDisplay ? `Workspace copy: ${destinationDisplay}.` : undefined,
+					requestedDestinationPath ? "Workspace copy failed; no successful copy is claimed. The canonical original is retained. Do not regenerate; recover the original instead." : undefined,
 					result.size ? `Size: ${result.size}.` : undefined,
 					result.quality ? `Quality: ${result.quality}.` : undefined,
 					result.background ? `Background: ${result.background}.` : undefined,
@@ -263,6 +280,7 @@ export function createImagegenTool(
 						operation: request.operation,
 						canonicalPath,
 						destinationPath,
+						...(requestedDestinationPath ? { copyStatus: "failed" as const, requestedDestinationPath } : {}),
 						background: result.background,
 						quality: result.quality,
 						size: result.size,
