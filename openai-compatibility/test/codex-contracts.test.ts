@@ -81,7 +81,7 @@ test("initial wait, empty poll wait and process lifetime are separate target fac
 	assert.equal(facts.unified.oneShot.timeoutDefaultMs, 10000);
 });
 
-test("actual Pi defaults stay unchanged while direct Unified text deliberately supersedes its historical JSON envelope", async () => {
+test("omitted Unified defaults deliberately supersede the historical Pi defaults without changing the fixture", async () => {
 	const calls: unknown[][] = [];
 	const sample = { output: "SYNTHETIC_CONTRACT", exit_code: 0, running: false, truncated_bytes: 0 };
 	const manager = { async start(...args: unknown[]) { calls.push(args); return sample; }, async write(...args: unknown[]) { calls.push(args); return sample; } } as unknown as UnifiedExecManager;
@@ -90,7 +90,10 @@ test("actual Pi defaults stay unchanged while direct Unified text deliberately s
 	const start = await pair[0].execute("synthetic-start", { cmd: "not-executed" }, undefined, undefined, ctx);
 	await pair[1].execute("synthetic-poll", { session_id: "synthetic-owned-lookup" }, undefined, undefined, ctx);
 	assert.equal(calls.length, 2);
-	for (const call of calls) { assert.equal(call[3], facts.pi.yieldDefaultMs); assert.equal(call[4], facts.pi.outputDefaultTokens * 4); }
+	assert.equal(facts.pi.yieldDefaultMs, 1000); assert.equal(facts.pi.outputDefaultTokens, 4096);
+	assert.equal(calls[0][3], facts.unified.initialYield.defaultMs);
+	assert.equal(calls[1][3], facts.unified.stdinYield.emptyMinimumMs);
+	for (const call of calls) assert.equal(call[4], 10000 * 4);
 	const { unified_result, ...details } = start.details as typeof sample & { unified_result: { version: number; wall_time_ms: number } };
 	assert.deepEqual(details, sample);
 	assert.equal(unified_result.version, 1); assert.ok(Number.isSafeInteger(unified_result.wall_time_ms) && unified_result.wall_time_ms >= 0);

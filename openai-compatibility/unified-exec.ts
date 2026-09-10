@@ -18,6 +18,11 @@ const MAX_RETAINED = 8;
 const MAX_INPUT = 64 * 1024;
 const MAX_LIFETIME = 10 * 60_000;
 const IDLE_TIMEOUT = 5 * 60_000;
+// Omitted-argument defaults only; explicit waits and all manager limits stay unchanged.
+const DEFAULT_OUTPUT_TOKENS = 10_000;
+const DEFAULT_EXEC_WAIT_MS = 10_000;
+const DEFAULT_EMPTY_POLL_MS = 5_000;
+const DEFAULT_STDIN_WAIT_MS = 250;
 export interface Launch { executable: string; args: string[]; supervised?: boolean }
 
 async function shellHelper(): Promise<string> {
@@ -316,19 +321,19 @@ export class UnifiedExecManager {
 	async close(): Promise<void> { clearInterval(this.sweep); this.sweep = undefined; await this.reset(); }
 }
 
-const outputLimit = Type.Optional(Type.Integer({ minimum: 1, maximum: 16_384, description: "Approximate token budget (four UTF-8 bytes per token), at most 64 KiB per response. Nested calls may return smaller UTF-8 slices to fit the complete serialized result; collect unread output using the same session_id." }));
-const yieldTime = Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000, description: "Wait up to this many milliseconds, then return a session_id if work/output remains." }));
+const outputLimit = Type.Optional(Type.Integer({ minimum: 1, maximum: 16_384, description: "Defaults to 10000 approximate tokens (four UTF-8 bytes per token), at most 64 KiB per response. Nested calls may return smaller UTF-8 slices to fit the complete serialized result; collect unread output using the same session_id." }));
+const yieldTime = (defaults: string) => Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000, description: `Wait up to this many milliseconds, then return a session_id if work/output remains. ${defaults} Explicit zero is valid; this is a return wait, not process lifetime.` }));
 const ExecParams = Type.Object({
 	cmd: Type.String({ minLength: 1, maxLength: 128_000, description: "Native PowerShell command on Windows; /bin/sh on POSIX. Runs with your existing OS permissions, not in a sandbox." }),
 	workdir: Type.Optional(Type.String({ minLength: 1, description: "Working directory, relative to the current workspace or absolute. Defaults to workspace." })),
-	yield_time_ms: yieldTime,
+	yield_time_ms: yieldTime("Defaults to 10000 ms."),
 	max_output_tokens: outputLimit,
 	tty: Type.Optional(Type.Literal(false, { description: "Only pipe-backed execution is available; PTY/ConPTY is not implemented." })),
 }, { additionalProperties: false });
 const WriteParams = Type.Object({
 	session_id: Type.String({ minLength: 1 }),
 	chars: Type.Optional(Type.String({ maxLength: MAX_INPUT, description: "Input text; empty polls. Exactly Ctrl-C (U+0003) kills the process tree; exactly Ctrl-D (U+0004) closes stdin. Not terminal emulation." })),
-	yield_time_ms: yieldTime,
+	yield_time_ms: yieldTime("Defaults to 5000 ms for empty/omitted chars, or 250 ms for nonempty input (including control characters)."),
 	max_output_tokens: outputLimit,
 }, { additionalProperties: false });
 
@@ -407,7 +412,7 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 			try {
 				binding = await nativeBinding(ctx, contextSignal => getLease("exec_command", ctx, contextSignal));
 				const started = binding?.scope ? undefined : performance.now();
-				const value = await manager.start(unifiedOwner(ctx), params.cmd, path.resolve(ctx.cwd, params.workdir ?? "."), params.yield_time_ms ?? 1000, (params.max_output_tokens ?? 4096) * 4, lease.signal, binding);
+				const value = await manager.start(unifiedOwner(ctx), params.cmd, path.resolve(ctx.cwd, params.workdir ?? "."), params.yield_time_ms ?? DEFAULT_EXEC_WAIT_MS, (params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS) * 4, lease.signal, binding);
 				const wallTimeMs = started === undefined ? undefined : Math.round(performance.now() - started);
 				lease.assertCurrent(); return wallTimeMs === undefined ? nestedResult(value) : directUnifiedResult(value, wallTimeMs);
 			} catch (error) { await binding?.finish?.(); throw error; }
@@ -423,7 +428,9 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 			try {
 				const access = nativeAccess(ctx);
 				const started = access.scope ? undefined : performance.now();
-				const value = await manager.write(unifiedOwner(ctx), params.session_id, params.chars ?? "", params.yield_time_ms ?? 1000, (params.max_output_tokens ?? 4096) * 4, lease.signal, access);
+				const chars = params.chars ?? "";
+				const waitMs = params.yield_time_ms ?? (chars.length === 0 ? DEFAULT_EMPTY_POLL_MS : DEFAULT_STDIN_WAIT_MS);
+				const value = await manager.write(unifiedOwner(ctx), params.session_id, chars, waitMs, (params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS) * 4, lease.signal, access);
 				const wallTimeMs = started === undefined ? undefined : Math.round(performance.now() - started);
 				lease.assertCurrent(); return wallTimeMs === undefined ? nestedResult(value) : directUnifiedResult(value, wallTimeMs);
 			} finally { lease.release(); }
