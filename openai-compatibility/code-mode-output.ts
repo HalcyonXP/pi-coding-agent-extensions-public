@@ -3,6 +3,7 @@
 // Direct output is not nested projection or execution authority. Historical JSON stays readable.
 import type { CellOutcome } from "./runtime/cells.mjs";
 import { copyCellDiagnostics } from "./runtime/cell-diagnostics.mjs";
+import { helperFailureHint } from "./runtime/cell-helper-errors.mjs";
 
 export interface CodeResultMetadata { version: 1; wall_time_ms: number; }
 export type CodeResultDetails = CellOutcome & { code_result?: CodeResultMetadata };
@@ -44,8 +45,9 @@ function outcome(d: unknown): asserts d is CodeResultDetails {
 }
 /** For already validated outcomes: fixed native observations, not guest exceptions or inferred effects. */
 export function codeDiagnosticLines(d: CellOutcome): string[] {
- const v=d.result?.diagnostics;if(!v)return [];const last=v.last_delegation;
- const lines=[`Phase: ${v.guest_phase} · delegated ${v.delegated_calls} · returned ${v.returned_results} · tool errors ${v.tool_errors}`,"External effects: not determined",last?`Last delegation: ${last.operation} · ${last.result}`:"Last delegation: none"];
+ const hint=helperFailureHint(d.result?.code),lines=hint?[`Helper: ${hint}`]:[];
+ const v=d.result?.diagnostics;if(!v)return lines;const last=v.last_delegation;
+ lines.push(`Phase: ${v.guest_phase} · delegated ${v.delegated_calls} · returned ${v.returned_results} · tool errors ${v.tool_errors}`,"External effects: not determined",last?`Last delegation: ${last.operation} · ${last.result}`:"Last delegation: none");
  if(last?.shell){const s=last.shell,word=(x:boolean|null)=>x===null?"unknown":x?"yes":"no";lines.push(`Shell: ready ${word(s.supervisor_ready)} · running ${word(s.running)} · exit ${s.exit_code??"unknown"} · output ${word(s.output_observed)} · termination ${s.termination}`);}
  return lines;
 }

@@ -7,6 +7,7 @@ import { RPC_LIMITS, boundedJSON, exact, record, validToolName } from "./rpc-pro
 import { CELL_BOOTSTRAP } from "./cell-bootstrap.mjs";
 import { CELL_LIMITS, validOperation } from "./cell-protocol.mjs";
 import { toolMetadataJSON } from "./tool-metadata.mjs";
+import { CELL_HELPER_ERRORS } from "./cell-helper-errors.mjs";
 
 // cell is a native worker composition seam, never a guest-selected runtime flag.
 export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, cell } = {}) {
@@ -37,6 +38,22 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
   let argumentBytes = 0;
   let wake;
   let decode;
+  let classifyHelper;
+  function guestFailure(error) {
+    if (fatal) return fail(fatal);
+    if (!classifyHelper) return fail("EXECUTION_FAILED");
+    // Call a closed, captured WeakMap lookup inside QuickJS. No guest property
+    // inspection, object dumping, coercion, exception text or stack crosses out.
+    const classified = context.callFunction(classifyHelper, context.undefined, error);
+    try {
+      if (fatal) return fail(fatal);
+      if (!classified.error && context.typeof(classified.value) === "string") {
+        const code = context.getString(classified.value);
+        if (CELL_HELPER_ERRORS.includes(code)) return fail(code);
+      }
+      return fail("EXECUTION_FAILED");
+    } finally { classified.dispose(); }
+  }
   let exited = false;
   let disposed = false;
   function defer(run, kind = "tool", timer) {
@@ -153,7 +170,20 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
           return bridge(stringify({name, args}));
         };
         if (namesJSON === null) Object.defineProperty(api, "call", {value: call});
-        else for (const name of parse(namesJSON)) Object.defineProperty(api, name, {value: args => call(name, args)});
+        else {
+          const names = parse(namesJSON), aliases = Object.create(null);
+          for (const name of names) {
+            Object.defineProperty(api, name, {value: args => call(name, args)});
+            // Under the admitted native identifier grammar only hyphens need
+            // normalization. Canonical names and metadata remain unchanged.
+            const alias = name.replace(/-/g, "_");
+            aliases[alias] = (aliases[alias] ?? 0) + 1;
+          }
+          for (const name of names) {
+            const alias = name.replace(/-/g, "_");
+            if (aliases[alias] === 1 && !Object.hasOwn(api, alias)) Object.defineProperty(api, alias, {value: args => call(name, args)});
+          }
+        }
         Object.freeze(api);
         Object.defineProperty(globalThis, "tools", { value: api });
         return (json) => parse(json);
@@ -198,13 +228,16 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
           return context.newString(JSON.stringify(answer));
         } catch { fatal = "TOOL_LIMIT"; return context.undefined; }
       });
-      const control = context.newFunction("cellControl", action => {
+      const control = context.newFunction("cellControl", (action, detail) => {
         if (interrupted()) return context.undefined;
         try {
           const name = action && context.typeof(action) === "string" ? context.getString(action) : "";
           if (name === "exit") exited = true;
           else if (name === "yield") cell.yield();
-          else fatal = "INVALID_TOOL_CALL";
+          else if (name === "timerError") {
+            const code = detail && context.typeof(detail) === "string" ? context.getString(detail) : "";
+            fatal = CELL_HELPER_ERRORS.includes(code) ? code : "EXECUTION_FAILED";
+          } else fatal = "INVALID_TOOL_CALL";
         } catch { fatal = "TOOL_LIMIT"; }
         return context.undefined;
       });
@@ -214,7 +247,10 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
       try {
         if (bootstrap.error) return fail("HOST_FAILED");
         const installed = context.callFunction(bootstrap.value, context.undefined, operation, control, names, metadataValue);
-        try { if (installed.error) return fail("HOST_FAILED"); } finally { installed.dispose(); }
+        try {
+          if (installed.error || context.typeof(installed.value) !== "function") return fail("HOST_FAILED");
+          classifyHelper = installed.value.dup();
+        } finally { installed.dispose(); }
       } finally { bootstrap.dispose(); names.dispose(); if (metadata !== undefined) metadataValue.dispose(); operation.dispose(); control.dispose(); }
     }
     phase = "compile";
@@ -236,7 +272,7 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
       source.dispose();
       constructor.dispose();
     }
-    if (evaluation.error) return exited && !fatal ? { version: 1, status: "ok", output } : fail(fatal ?? "EXECUTION_FAILED");
+    if (evaluation.error) return exited && !fatal ? { version: 1, status: "ok", output } : guestFailure(evaluation.error);
     phase = "await";
     let jobs = 0;
     while (!interrupted()) {
@@ -291,8 +327,8 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
     const state = context.getPromiseState(evaluation.value);
     if (state.type === "pending") return fail("PENDING_PROMISE");
     if (state.type === "rejected") {
-      state.error.dispose();
-      return fail("EXECUTION_FAILED");
+      try { return guestFailure(state.error); }
+      finally { state.error.dispose(); }
     }
     // For non-Promises the API returns the original handle, not a fresh owned value.
     if (state.notAPromise) return fail("EXECUTION_FAILED");
@@ -309,6 +345,7 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
     for (const entry of pendingTools.values()) entry.deferred.dispose();
     pendingTools.clear();
     decode?.dispose();
+    classifyHelper?.dispose();
     evaluation?.dispose();
     context?.dispose();
     runtime.dispose();
