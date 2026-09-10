@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Original native dispatcher/shell/cells with omitted controls; synthetic model/auth only.
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {mkdtemp,writeFile,mkdir,readFile} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
+import {verifyBundle} from './lib.mjs';
 import {responseEvents} from './accept-code-transport.mjs';
 import {readUnifiedOutcome} from './unified-output-contract.mjs';
 import {findNativeMetadataResult} from './accept-tool-metadata.mjs';
@@ -50,4 +54,36 @@ export async function acceptUnifiedDefaults(session,runtime,nativeStream,cwd){
   await cleanup(()=>off());await cleanup(()=>{session.agent.streamFunction=streamBefore;restore(session.agent,'streamFunction',descriptors.stream);});await cleanup(()=>{runtime.getAuth=authBefore;restore(runtime,'getAuth',descriptors.auth);});await cleanup(()=>session.setModel(modelBefore));await cleanup(()=>restore(runtime,'checkAuth',descriptors.check));await cleanup(()=>assert.deepEqual([...session.getActiveToolNames()].sort(),activeBefore));
  }
  if(failures.length)throw new AggregateError(failures,'Native omitted defaults acceptance/restoration failed; preserve evidence.');return validateUnifiedDefaults(rows);
+}
+
+/** Keep large fixture history out of the scripted parent conversation. No compaction override. */
+export async function acceptUnifiedDefaultsProfile(bundle){
+ const profile=await mkdtemp(join(tmpdir(),'unified-default-profile-'));
+ for(const n of ['tmp','roaming','local','workspace'])await mkdir(join(profile,n));
+ for(const n of ['gitconfig','npm-user','npm-global'])await writeFile(join(profile,n),'',{flag:'wx'});
+ const env={HOME:profile,USERPROFILE:profile,APPDATA:join(profile,'roaming'),LOCALAPPDATA:join(profile,'local'),TEMP:join(profile,'tmp'),TMP:join(profile,'tmp'),PI_CODING_AGENT_DIR:profile,PI_OFFLINE:'1',PI_TELEMETRY:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:join(profile,'gitconfig'),npm_config_userconfig:join(profile,'npm-user'),npm_config_globalconfig:join(profile,'npm-global')};
+ for(const key of ['PATH','Path','SystemRoot','SYSTEMROOT','WINDIR','COMSPEC','ComSpec','PATHEXT'])if(process.env[key]!==undefined)env[key]=process.env[key];
+ await writeFile(join(profile,'started.json'),JSON.stringify({at:new Date().toISOString(),bundle:resolve(bundle),environmentKeys:Object.keys(env).sort(),credentialsInherited:false,compactionOverride:false})+'\n',{flag:'wx'});
+ const p=spawnSync(process.execPath,[fileURLToPath(import.meta.url),'--installed-profile',resolve(bundle)],{env,encoding:null,timeout:120000,maxBuffer:8*1024*1024});
+ for(const[name,bytes]of [['stdout',p.stdout],['stderr',p.stderr]])await writeFile(join(profile,name+'.log'),bytes??Buffer.alloc(0),{flag:'wx'});
+ await writeFile(join(profile,'completed.json'),JSON.stringify({at:new Date().toISOString(),status:p.status,signal:p.signal,error:p.error?.message})+'\n',{flag:'wx'});
+ assert.equal(p.error,undefined,'Preserve isolated native-default fixture; no command replay');assert.equal(p.status,0,'Isolated native-default fixture failed; inspect retained raw logs');
+ const r=JSON.parse(p.stdout);assert.equal(r.state,'passed');assert.equal(r.networkAttempts,0);assert.equal(r.compactionEnabled,true);return r.nativeUnifiedDefaults;
+}
+
+async function installedProfile(bundle){
+ assert.equal(process.env.PI_OFFLINE,'1');const profile=process.env.PI_CODING_AGENT_DIR;assert.equal(profile,process.env.HOME);assert.equal(profile,process.env.USERPROFILE);assert.ok(profile);
+ await verifyBundle(bundle);const cwd=join(profile,'workspace');let networkAttempts=0;globalThis.fetch=async()=>{networkAttempts++;throw Error('External transport forbidden');};
+ const root=join(bundle,'node_modules/@earendil-works/pi-coding-agent'),pkg=JSON.parse(await readFile(join(root,'package.json')));assert.equal(pkg.name,'@earendil-works/pi-coding-agent');assert.equal(pkg.version,'0.85.1');assert.ok(pkg.exports['.'].import.startsWith('./dist/'));
+ const sdk=await import(pathToFileURL(join(root,pkg.exports['.'].import)).href),failures=[];let session,nativeUnifiedDefaults;
+ try{
+  const settings=sdk.SettingsManager.inMemory(),resources=new sdk.DefaultResourceLoader({cwd,agentDir:profile,settingsManager:settings,additionalExtensionPaths:[join(bundle,'extensions/openai-compatibility/index.ts')],noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true});await resources.reload();assert.deepEqual(resources.getExtensions().errors,[]);
+  const runtime=await sdk.ModelRuntime.create({authPath:join(profile,'auth.json'),modelsPath:null,allowModelNetwork:false,refreshOnCreate:false});runtime.hasConfiguredAuth=()=>true;runtime.isUsingOAuth=id=>id==='openai-codex';runtime.getAuth=async()=>({auth:{apiKey:'synthetic-default-profile'}});runtime.checkAuth=async()=>true;
+  ({session}=await sdk.createAgentSession({cwd,agentDir:profile,modelRuntime:runtime,model:runtime.getModel('openai','gpt-6-astra'),settingsManager:settings,sessionManager:sdk.SessionManager.create(cwd,join(profile,'sessions')),resourceLoader:resources}));await session.bindExtensions({uiContext:{...session.extensionRunner.createContext().ui,notify(){}}});
+  assert.equal(session.autoCompactionEnabled,true);await session.prompt('/openai-tools unified_exec on');await session.prompt('/openai-tools code_mode on');nativeUnifiedDefaults=await acceptUnifiedDefaults(session,runtime,session.agent.streamFunction,cwd);assert.equal(networkAttempts,0);assert.equal(session.autoCompactionEnabled,true);
+ }catch(e){failures.push(e);}finally{const cleanup=async f=>{try{await f();}catch(e){failures.push(e);}};if(session){await cleanup(()=>session.agent.abort());await cleanup(()=>session.extensionRunner.emit({type:'session_shutdown',reason:'quit'}));await cleanup(()=>session.dispose());}}
+ if(failures.length)throw new AggregateError(failures,'Isolated native-default fixture failed; retain profile and logs');console.log(JSON.stringify({state:'passed',nativeUnifiedDefaults,networkAttempts,compactionEnabled:true}));
+}
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+ assert.equal(process.argv.length,4);assert.equal(process.argv[2],'--installed-profile');assert.equal(process.platform,'win32');await installedProfile(resolve(process.argv[3]));
 }
