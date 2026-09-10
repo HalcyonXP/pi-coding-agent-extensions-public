@@ -98,7 +98,10 @@ export class CodeCells {
   #terminate(cell) {
     cell.terminated = true; cell.output = []; cell.cursor = 0;
     if (cell.closing) {
-      if (cell.scope.state === "closed") { cell.state = "terminated"; cell.notify(); }
+      if (cell.scope.state === "closed") cell.state = "terminated";
+      // Cancellation must wake a sleeping collector even while native closure is
+      // pending or rejected. Notification does not confirm closure or free admission.
+      cell.notify();
       return cell.closing;
     }
     cell.state = "draining"; cell.output = []; cell.cursor = 0; cell.notify();
