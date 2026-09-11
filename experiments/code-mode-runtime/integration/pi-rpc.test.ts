@@ -656,11 +656,15 @@ describe.each(["success", "deny", "mutate", "revoke"])("actual Unified exec thro
 										}
 										return JSON.parse(outcome.output?.at(-1) ?? "null");
 									};
-									const initial = await call("exec_command", {
-										cmd: command,
-										yield_time_ms: 1,
-										max_output_tokens: 128,
-									});
+									const initialArgs = { cmd: command, yield_time_ms: 1, max_output_tokens: 128 };
+									// The fixed five-second RPC spike cannot await the Windows ten-second
+									// initial floor. Start through this SAME native scope, then exercise
+									// stdin/cancellation through the unchanged RPC probe. Returned production
+									// cells below cover initial exec through their real coordinator path.
+									const initial =
+										mode === "deny" || mode === "mutate"
+											? await call("exec_command", initialArgs)
+											: await scope.invoke("exec_command", initialArgs);
 									if (mode === "deny" || mode === "mutate") {
 										expect(initial?.isError).toBe(true);
 										return text("native fixture complete");
@@ -1945,7 +1949,8 @@ describe("returned Unified exec jobs are native-owned after real cell handlers r
 				await eventually(async () => {
 					try {
 						info = JSON.parse(await readFile(marker, "utf8"));
-						return true;
+						// A child can start before the clamped initial call returns its ID.
+						return typeof jobId === "string";
 					} catch {
 						return false;
 					}

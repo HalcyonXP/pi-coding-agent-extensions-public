@@ -81,7 +81,7 @@ test("factory measures each awaited direct manager call; native failures, argume
  const a = await tools[0].execute('synthetic-start', { cmd: 'not executed', yield_time_ms: 1, max_output_tokens: 12 }, undefined, undefined, context());
  const b = await tools[1].execute('synthetic-write', { session_id: 'synthetic-job', chars: 'input', yield_time_ms: 2, max_output_tokens: 13 }, undefined, undefined, context());
  assert.deepEqual(Reflect.get(a.details, 'unified_result'), { version: 1, wall_time_ms: 150 }); assert.deepEqual(Reflect.get(b.details, 'unified_result'), { version: 1, wall_time_ms: 0 });
- assert.deepEqual(calls.map(c => c.slice(1, 5)), [['not executed', process.cwd(), 1, 48], ['synthetic-job', 'input', 2, 52]]); assert.equal(releases, 2); assert.equal(clock.mock.callCount(), 4);
+ assert.deepEqual(calls.map(c => c.slice(1, 5)), [['not executed', process.cwd(), process.platform === 'win32' ? 10000 : 250, 48], ['synthetic-job', 'input', 250, 52]]); assert.equal(releases, 2); assert.equal(clock.mock.callCount(), 4);
  const error = Error('SYNTHETIC_NATIVE_FAILURE'); t.mock.method(manager, 'write', async () => { throw error; });
  await assert.rejects(tools[1].execute('bad', { session_id: 'foreign' }, undefined, undefined, context()), e => e === error); assert.equal(clock.mock.callCount(), 5); assert.equal(releases, 3);
 });

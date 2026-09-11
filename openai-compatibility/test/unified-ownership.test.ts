@@ -25,15 +25,18 @@ test("native admission failure precedes process creation",async()=>{
  try{await assert.rejects(jobs.start("owner",command,process.cwd(),1,64,undefined,a.binding),/admission/);assert.deepEqual(jobs.inspect("owner"),[]);}
  finally{await jobs.close();}
 });
-test("unconfirmed cleanup rejects and retains admission until a real independent process close",async()=>{
- const jobs=manager(),a=owner();
+for(const nested of [false,true])test(`unconfirmed ${nested?'cell':'direct'} resource cleanup wakes collection and retains admission until physical close`,async()=>{
+ const jobs=manager(),a=owner();if(!nested)delete a.binding.scope;
  // Failure injection at the trusted OS cleanup seam, not a claim that the test
  // manufactured an unkillable process. The process itself is real.
  const internal=jobs as unknown as {stop:(...args:unknown[])=>Promise<void>};const stop=internal.stop;
  try{
   const result=await jobs.start("owner",command,process.cwd(),1,64,undefined,a.binding);assert.ok(result.running);
   internal.stop=async()=>{};
+  let awakened=false;
+  const collection=assert.rejects(jobs.write("owner",result.session_id!,"",300000,64,undefined,a.binding),{name:"AbortError"}).then(()=>{awakened=true;});
   await assert.rejects(a.close(),/could not be confirmed/);assert.equal(a.released,0);
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(awakened,true,"Revocation must not wait for the collection timer");await collection;
   await assert.rejects(jobs.start("owner",command,process.cwd(),1,64),/cleanup/);
  }finally{internal.stop=stop;await jobs.close();}
  assert.equal(a.released,1);

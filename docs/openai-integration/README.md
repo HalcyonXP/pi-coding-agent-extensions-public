@@ -48,7 +48,8 @@ This guide describes the public source's implementation and constraints, not an 
 | Retained exited ID | An exited process's lookup for remaining buffered output, not a running process or authority to adopt another context's job |
 | Cell completion | The cell returned a terminal result; a failed cell is labelled failed. Not a blanket assertion that all delegated jobs succeeded |
 | Code output omission | Bytes already omitted by the existing guest-output budget; prominently reported, not recoverable merely by expanding the UI |
-| Omitted Unified controls | Initial wait10,000 ms; empty stdin5,000 ms/nonempty250 ms; output10,000 approximate tokens. Not explicit wait floors, Code defaults or larger execution budgets |
+| Omitted Unified controls | Initial wait10,000 ms; empty stdin5,000 ms/nonempty250 ms; output10,000 approximate tokens. Separate from Code defaults and execution budgets |
+| Requested Unified wait | Non-negative safe-integer request clamped before native work: Windows initial10,000–30,000 ms (other platforms250–30,000); empty stdin5,000–300,000; nonempty250–30,000. Zero selects the floor; closure/cancellation can end collection sooner, without enlarging process lifetime or certifying cleanup |
 | Nested output slice | UTF-8 collection bounded by the complete serialized native wrapper; unread bytes retain their original ID, distinct from lost output and later hook/aggregate-limit failures |
 | Unified output loss | Bytes already dropped from the shell buffer, not unread retained output; further polling or expansion cannot recover the dropped bytes |
 | Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |

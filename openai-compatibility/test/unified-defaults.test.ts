@@ -25,11 +25,13 @@ for (const nested of [false, true]) {
   await f.tools[1].execute("poll", { session_id: "owned-id", ...(chars === undefined ? {} : { chars }) }, undefined, undefined, f.ctx);
   assert.equal(f.calls[0][2], chars ?? ""); assert.equal(f.calls[0][3], !chars ? 5000 : 250); assert.equal(f.calls[0][4], 40000); assert.equal(f.released(), 1);
  });
- for (const [wait, tokens] of [[0, 1], [1, 4096], [30000, 16384]]) test(`explicit controls override defaults without new floors (${nested}, ${wait})`, async () => {
+ for (const [wait, tokens] of [[0, 1], [1, 4096], [30000, 16384], [300000, 10000], [Number.MAX_SAFE_INTEGER, 10000]]) test(`explicit waits clamp independently of output defaults (${nested}, ${wait})`, async () => {
   const f = fixture(nested);
   await f.tools[0].execute("start", { cmd: "not executed", yield_time_ms: wait, max_output_tokens: tokens }, undefined, undefined, f.ctx);
   await f.tools[1].execute("poll", { session_id: "owned-id", yield_time_ms: wait, max_output_tokens: tokens }, undefined, undefined, f.ctx);
-  for (const call of f.calls) { assert.equal(call[3], wait); assert.equal(call[4], tokens * 4); }
+  assert.equal(f.calls[0][3], Math.min(30000, Math.max(process.platform === "win32" ? 10000 : 250, wait)));
+  assert.equal(f.calls[1][3], Math.min(300000, Math.max(5000, wait)));
+  for (const call of f.calls) assert.equal(call[4], tokens * 4);
   assert.equal(f.released(), 2);
  });
 }

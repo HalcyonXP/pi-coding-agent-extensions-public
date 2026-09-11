@@ -12,17 +12,14 @@ import { verifiedExecutable } from "./runtime/native/artifact.mjs";
 import { completionEvidence } from "./unified-completion.ts";
 import { directUnifiedResult } from "./unified-exec-output.ts";
 import { resultJSON } from "./runtime/rpc-protocol.mjs";
+import { initialWaitMs, stdinWaitMs, MAX_EXEC_WAIT_MS, MAX_BACKGROUND_WAIT_MS } from "./unified-wait.ts";
 
 const MAX_PROCESSES = 4;
 const MAX_RETAINED = 8;
 const MAX_INPUT = 64 * 1024;
 const MAX_LIFETIME = 10 * 60_000;
 const IDLE_TIMEOUT = 5 * 60_000;
-// Omitted-argument defaults only; explicit waits and all manager limits stay unchanged.
 const DEFAULT_OUTPUT_TOKENS = 10_000;
-const DEFAULT_EXEC_WAIT_MS = 10_000;
-const DEFAULT_EMPTY_POLL_MS = 5_000;
-const DEFAULT_STDIN_WAIT_MS = 250;
 export interface Launch { executable: string; args: string[]; supervised?: boolean }
 
 async function shellHelper(): Promise<string> {
@@ -73,6 +70,7 @@ interface ProcessRecord {
 	ready: boolean;
 	supervised: boolean;
 	revoked?: boolean;
+	revocation: AbortController;
 	created: number;
 	touched: number;
 	done: Promise<void>;
@@ -151,7 +149,9 @@ export class UnifiedExecManager {
 		const release = binding?.resource.ownResource(async () => {
 			if (!ownedRecord) return;
 			ownedRecord.revoked = true;
-			await this.stop(ownedRecord, "Native owning scope ended.");
+			const stopping = this.stop(ownedRecord, "Native owning scope ended.");
+			ownedRecord.revocation.abort();
+			await stopping;
 			if (!ownedRecord.closed) throw new Error("Native shell cleanup could not be confirmed.");
 		});
 		let child: ChildProcessWithoutNullStreams;
@@ -161,7 +161,7 @@ export class UnifiedExecManager {
 		} catch (error) { release?.(); throw error; }
 		let done!: () => void, initialDone!: () => void;
 		const initial = new Promise<void>(resolve => { initialDone = resolve; });
-		const record: ProcessRecord = { id: randomUUID(), owner, child, access: binding ? {scope:binding.scope,context:binding.context} : undefined, output: new Utf8OutputBuffer(), exitCode: null, closed: false, ready: !launch.supervised, supervised: launch.supervised === true, created: Date.now(), touched: Date.now(), done: new Promise((resolve) => { done = resolve; }) };
+		const record: ProcessRecord = { id: randomUUID(), owner, child, revocation: new AbortController(), access: binding ? {scope:binding.scope,context:binding.context} : undefined, output: new Utf8OutputBuffer(), exitCode: null, closed: false, ready: !launch.supervised, supervised: launch.supervised === true, created: Date.now(), touched: Date.now(), done: new Promise((resolve) => { done = resolve; }) };
 		ownedRecord = record;
 		this.processes.set(record.id, record);
 		let prelude = Buffer.alloc(0), admissionTimer: NodeJS.Timeout | undefined;
@@ -245,19 +245,25 @@ export class UnifiedExecManager {
 			if (record.child.stdin.writableLength + Buffer.byteLength(chars) > MAX_INPUT) throw new Error("Unified exec stdin backpressure limit reached; poll before writing more.");
 			record.child.stdin.write(chars);
 		}
-		return this.collect(record, yieldMs, maxBytes, signal);
+		return this.collect(record, yieldMs, maxBytes, signal, false, chars.length === 0 ? MAX_BACKGROUND_WAIT_MS : MAX_EXEC_WAIT_MS);
 	}
 	private assertSettled(record: ProcessRecord) {
 		if (record.completionFailed) throw new Error("Unified exec completion reporting or native cleanup is unconfirmed; preserve Jobs state.");
 	}
-	private async collect(record: ProcessRecord, yieldMs: number, maxBytes: number, signal?: AbortSignal, initial = false): Promise<ExecResult> {
+	private async collect(record: ProcessRecord, yieldMs: number, maxBytes: number, signal?: AbortSignal, initial = false, maxWaitMs = MAX_EXEC_WAIT_MS): Promise<ExecResult> {
 		record.touched = Date.now();
-		const abort = () => { void this.stop(record, "Tool call cancelled.").catch(() => {}); };
+		const signals = [signal, record.revocation.signal, record.access?.context, record.access?.scope?.signal].filter((value): value is AbortSignal => value !== undefined);
+		signal = signals.length ? AbortSignal.any(signals) : undefined;
+		let wake!: () => void;
+		const cancelled = new Promise<void>(resolve => { wake = resolve; });
+		// Wake the return wait immediately, then await the existing bounded stop attempt.
+		// An unconfirmed kill never resolves record.done or frees native admission.
+		const abort = () => { void this.stop(record, "Tool call cancelled.").catch(() => {}); wake(); };
 		signal?.addEventListener("abort", abort, { once: true });
 		if (signal?.aborted) abort();
 		let timer: NodeJS.Timeout | undefined;
 		try {
-			await Promise.race([record.done, new Promise<void>((resolve) => { timer = setTimeout(resolve, Math.max(0, Math.min(yieldMs, 30_000))); })]);
+			await Promise.race([record.done, cancelled, new Promise<void>((resolve) => { timer = setTimeout(resolve, Math.max(0, Math.min(yieldMs, maxWaitMs))); })]);
 			if (signal?.aborted) { await this.stop(record, "Tool call cancelled."); signal.throwIfAborted(); }
 			if (!initial && record.closed) { await record.settled; this.assertSettled(record); }
 			const value = (output: string, dropped: number, remaining: number): ExecResult => ({ session_id: !record.closed || remaining > 0 ? record.id : undefined, output: cleanOutput(output), exit_code: record.exitCode, running: !record.closed, ...(record.supervised ? { supervisor_ready: record.ready } : {}), truncated_bytes: dropped, termination: record.termination });
@@ -298,7 +304,11 @@ export class UnifiedExecManager {
 		this.generation++;
 		const records = [...this.processes.values()];
 		for (const record of records) record.revoked = true;
-		await Promise.all(records.map((record) => this.stop(record, "OpenAI session/provider changed or capability disabled.")));
+		await Promise.all(records.map((record) => {
+			const stopping = this.stop(record, "OpenAI session/provider changed or capability disabled.");
+			record.revocation.abort();
+			return stopping;
+		}));
 		await Promise.all(records.map(record => record.settled));
 		for (const record of records) if (record.closed && !record.completionFailed) this.processes.delete(record.id);
 		if (records.some((record) => !record.closed || record.completionFailed)) throw new Error("Unified exec could not confirm native process/reporting cleanup; further launches are blocked.");
@@ -322,18 +332,18 @@ export class UnifiedExecManager {
 }
 
 const outputLimit = Type.Optional(Type.Integer({ minimum: 1, maximum: 16_384, description: "Defaults to 10000 approximate tokens (four UTF-8 bytes per token), at most 64 KiB per response. Nested calls may return smaller UTF-8 slices to fit the complete serialized result; collect unread output using the same session_id." }));
-const yieldTime = (defaults: string) => Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000, description: `Wait up to this many milliseconds, then return a session_id if work/output remains. ${defaults} Explicit zero is valid; this is a return wait, not process lifetime.` }));
+const yieldTime = (bounds: string) => Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: `Requested return wait in milliseconds; clamped before execution. ${bounds} Earlier completion can return sooner. Zero requests the floor, not an immediate poll. This does not extend process lifetime, idle, readiness or cleanup limits.` }));
 const ExecParams = Type.Object({
 	cmd: Type.String({ minLength: 1, maxLength: 128_000, description: "Native PowerShell command on Windows; /bin/sh on POSIX. Runs with your existing OS permissions, not in a sandbox." }),
 	workdir: Type.Optional(Type.String({ minLength: 1, description: "Working directory, relative to the current workspace or absolute. Defaults to workspace." })),
-	yield_time_ms: yieldTime("Defaults to 10000 ms."),
+	yield_time_ms: yieldTime("Defaults to 10000 ms; Windows floor 10000 ms, other platforms 250 ms; maximum 30000 ms."),
 	max_output_tokens: outputLimit,
 	tty: Type.Optional(Type.Literal(false, { description: "Only pipe-backed execution is available; PTY/ConPTY is not implemented." })),
 }, { additionalProperties: false });
 const WriteParams = Type.Object({
 	session_id: Type.String({ minLength: 1 }),
 	chars: Type.Optional(Type.String({ maxLength: MAX_INPUT, description: "Input text; empty polls. Exactly Ctrl-C (U+0003) kills the process tree; exactly Ctrl-D (U+0004) closes stdin. Not terminal emulation." })),
-	yield_time_ms: yieldTime("Defaults to 5000 ms for empty/omitted chars, or 250 ms for nonempty input (including control characters)."),
+	yield_time_ms: yieldTime("Empty/omitted chars: default/floor 5000 ms, maximum 300000 ms. Nonempty input, including control characters: default/floor 250 ms, maximum 30000 ms."),
 	max_output_tokens: outputLimit,
 }, { additionalProperties: false });
 
@@ -410,16 +420,17 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 			const lease = getLease("exec_command", ctx, signal);
 			let binding: NativeJobBinding | undefined;
 			try {
+				const waitMs = initialWaitMs(params.yield_time_ms);
 				binding = await nativeBinding(ctx, contextSignal => getLease("exec_command", ctx, contextSignal));
 				const started = binding?.scope ? undefined : performance.now();
-				const value = await manager.start(unifiedOwner(ctx), params.cmd, path.resolve(ctx.cwd, params.workdir ?? "."), params.yield_time_ms ?? DEFAULT_EXEC_WAIT_MS, (params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS) * 4, lease.signal, binding);
+				const value = await manager.start(unifiedOwner(ctx), params.cmd, path.resolve(ctx.cwd, params.workdir ?? "."), waitMs, (params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS) * 4, lease.signal, binding);
 				const wallTimeMs = started === undefined ? undefined : Math.round(performance.now() - started);
 				lease.assertCurrent(); return wallTimeMs === undefined ? nestedResult(value) : directUnifiedResult(value, wallTimeMs);
 			} catch (error) { await binding?.finish?.(); throw error; }
 			finally { lease.release(); }
 		},
 	} satisfies ToolDefinition<typeof ExecParams>, {
-		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. A nested call cannot adopt another cell's ID or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. On the matching updated native host, unchanged empty-running cell polls are local work hidden from the TUI and ordinary audit context; direct calls, input, output/loss, errors and terminal results remain visible. Print meaningful changes rather than each unchanged poll. No extra model request is made per local poll; explicitly printed output still becomes model input. Direct calls return status, per-call wall time and literal returned output, with structured fields in native details; nested calls retain their JSON/details wrapper. A zero-duration collection is valid and does not measure process age. IDs expire on provider/session changes or reload.",
+		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. A nested call cannot adopt another cell's ID or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. On the matching updated native host, unchanged empty-running cell polls are local work hidden from the TUI and ordinary audit context; direct calls, input, output/loss, errors and terminal results remain visible. Print meaningful changes rather than each unchanged poll. No extra model request is made per local poll; explicitly printed output still becomes model input. Direct calls return status, per-call wall time and literal returned output, with structured fields in native details; nested calls retain their JSON/details wrapper. Requested waits are clamped: empty polls 5000–300000 ms, nonempty input 250–30000 ms. Completion can return sooner. Zero requests the applicable floor; return wait is not process age or lifetime. IDs expire on provider/session changes or reload.",
 		// Native-only declaration; never exposed as a model/guest permission parameter.
 		localPolling: "empty-stdin",
 		parameters: WriteParams,
@@ -429,7 +440,7 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 				const access = nativeAccess(ctx);
 				const started = access.scope ? undefined : performance.now();
 				const chars = params.chars ?? "";
-				const waitMs = params.yield_time_ms ?? (chars.length === 0 ? DEFAULT_EMPTY_POLL_MS : DEFAULT_STDIN_WAIT_MS);
+				const waitMs = stdinWaitMs(params.yield_time_ms, chars);
 				const value = await manager.write(unifiedOwner(ctx), params.session_id, chars, waitMs, (params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS) * 4, lease.signal, access);
 				const wallTimeMs = started === undefined ? undefined : Math.round(performance.now() - started);
 				lease.assertCurrent(); return wallTimeMs === undefined ? nestedResult(value) : directUnifiedResult(value, wallTimeMs);
