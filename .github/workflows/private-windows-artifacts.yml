@@ -54,6 +54,18 @@ jobs:
         run: node distribution/accept.mjs '.pi/extracted artifact'
       - name: Actual bundled CLI, isolated installation, ownership and rollback
         run: node distribution/accept-profile.mjs '.pi/extracted artifact'
+      - name: Actual installed Web projection and URL sequence
+        timeout-minutes: 5
+        run: node distribution/accept-web-media.mjs '.pi/extracted artifact' web
+      - name: Actual installed bounded media and generated-image helpers
+        timeout-minutes: 5
+        run: node distribution/accept-web-media.mjs '.pi/extracted artifact' media
+      - name: Actual installed imagegen projection and copy recovery
+        timeout-minutes: 5
+        run: node distribution/accept-web-media.mjs '.pi/extracted artifact' imagegen
+      - name: Actual installed Web profile reload and experimental workflows
+        timeout-minutes: 5
+        run: node distribution/accept-web-media.mjs '.pi/extracted artifact' web-profile
       # No deployment, publishing, credentials or executable artifact upload.
       - name: Retain only sanitized reproduction receipts
         uses: actions/upload-artifact@v4

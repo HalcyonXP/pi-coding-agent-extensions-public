@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { parseSessionId } from "./unified-session-id.ts";
 import { backgroundWaitMs, parseBackgroundWaitMs, MAX_BACKGROUND_WAIT_MS } from "./unified-wait.ts";
 import type { UnifiedPreferenceStore } from "./unified-preferences.ts";
+import { webProfile, type WebPreferenceStore } from "./web-preferences.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { assertOfficialContext, CapabilityEpoch, type CapabilityLease } from "./capability-policy.ts";
@@ -28,6 +29,8 @@ export interface CapabilityOptions {
 	preferences?: CapabilityPreferenceStore;
 	/** Separate bounded return-wait preference; supplies no execution authority. */
 	unifiedPreferences?: UnifiedPreferenceStore;
+	/** Saved Web admission contract, effective only on extension load. Never authority. */
+	webPreferences?: WebPreferenceStore;
 }
 class CapabilityPreferenceError extends Error {}
 export interface CapabilitySettings {
@@ -53,6 +56,16 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 	let preferenceError: string | undefined;
 	let maxBackgroundWaitMs = MAX_BACKGROUND_WAIT_MS;
 	let unifiedPreferenceError: string | undefined;
+	let savedWebProfile: WebSearchProfile | undefined;
+	let webPreferenceError: string | undefined;
+	try { savedWebProfile = webProfile(options.webPreferences ? options.webPreferences.read() : options.webSearch?.profile ?? "experimental"); }
+	catch { webPreferenceError = "Saved Web admission preferences are invalid. This extension's Web search is unavailable; preserve and repair the file, then reload. Other capabilities remain separate."; }
+	// Do not hot-replace a registered native schema, revoke work, or silently widen
+	// an admitted request when a saved preference changes. Reload is explicit.
+	const effectiveWebProfile = savedWebProfile;
+	function webProfileStatus(): string {
+		return webPreferenceError ?? `${options.webPreferences ? "Saved" : "Trusted composition"} Web admission profile: ${savedWebProfile}; effective: ${effectiveWebProfile}. ${savedWebProfile !== effectiveWebProfile ? "Reload extensions or restart Pi to apply; current requests and schemas are unchanged. " : ""}Experimental is source-contract-only, not live-verified or additional authority/entitlement.`;
+	}
 	function currentBackgroundWaitMs(): number {
 		if (unifiedPreferenceError) throw new CapabilityPreferenceError(unifiedPreferenceError);
 		return backgroundWaitMs(maxBackgroundWaitMs);
@@ -103,7 +116,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 	}
 	add(createImagegenTool((ctx, signal) => leaseFor("imagegen", ctx, signal), () => turnId, mutationQueue));
 	for (const tool of createUnifiedExecTools(processes, leaseFor, currentBackgroundWaitMs)) add(tool);
-	if (search) add(createWebSearchTool(search, (ctx, signal) => leaseFor("web_search", ctx, signal), options.webSearch?.profile));
+	if (search && effectiveWebProfile) add(createWebSearchTool(search, (ctx, signal) => leaseFor("web_search", ctx, signal), effectiveWebProfile));
 
 	function sync(ctx: ExtensionContext) {
 		current = ctx;
@@ -144,6 +157,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			preferenceError = "Saved capability preferences could not be read. All capability choices are off; preserve the profile file.";
 			ctx.ui.notify(preferenceError, "warning");
 		}
+		if (webPreferenceError) ctx.ui.notify(webPreferenceError, "warning");
 		unifiedPreferenceError = undefined;
 		try { maxBackgroundWaitMs = backgroundWaitMs(options.unifiedPreferences ? options.unifiedPreferences.read() : MAX_BACKGROUND_WAIT_MS); }
 		catch {
@@ -159,7 +173,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		]);
 		if (revision !== preferenceEpoch) return;
 		for (const name of CAPABILITY_NAMES) {
-			if (!preferences[name] || (name === "web_search" && !search) || (name === "unified_exec" && (!shell?.available || unifiedPreferenceError)) || (name === "code_mode" && !code?.available)) continue;
+			if (!preferences[name] || (name === "web_search" && (!search || webPreferenceError)) || (name === "unified_exec" && (!shell?.available || unifiedPreferenceError)) || (name === "code_mode" && !code?.available)) continue;
 			for (const tool of groups[name]) enabled.add(tool);
 		}
 		sync(ctx);
@@ -201,6 +215,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		if (!Object.hasOwn(groups, input) || !["on", "off"].includes(action)) throw new CapabilityPreferenceError("Unknown capability setting.");
 		const name = input as CapabilityName;
 		signal?.throwIfAborted();
+		if (name === "web_search" && webPreferenceError) throw new CapabilityPreferenceError(webPreferenceError);
 		if (name === "web_search" && !search) throw new CapabilityPreferenceError("Web search unavailable: this composition has no configured search transport/profile.");
 		if (name === "unified_exec" && action === "on") {
 			currentBackgroundWaitMs();
@@ -235,6 +250,13 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		maxBackgroundWaitMs = requested;
 		unifiedPreferenceError = undefined;
 	}
+	function changeWebProfile(value: string, signal?: AbortSignal): void {
+		signal?.throwIfAborted();
+		if (!options.webPreferences || webPreferenceError) throw new CapabilityPreferenceError(webPreferenceError ?? "This trusted composition has no writable Web admission preference store.");
+		const requested = webProfile(value);
+		options.webPreferences.write(requested);
+		savedWebProfile = requested; // Never change the current definition, epoch or jobs.
+	}
 	async function readSettings(ctx: ExtensionContext): Promise<SettingsRow[]> {
 		const revision = preferenceEpoch;
 		const [code, shell] = await Promise.all([codeMode.status(ctx), nativeShellStatus()]);
@@ -249,14 +271,14 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		const labels: Record<string, string> = { imagegen: "Image generation", web_search: "Web search", unified_exec: "Unified exec", code_mode: "Code mode" };
 		const descriptions: Record<string, string> = {
 			imagegen: "Generate/edit images; preserve canonical originals. Codex OAuth and service access checked at execution.",
-			web_search: "Bounded search or public-URL open. Codex OAuth and service access checked at execution.",
+			web_search: `${effectiveWebProfile === "verified-v1" ? "Bounded search or public-URL open." : "Experimental source-derived variants; not live-verified."} Codex OAuth and service access checked at execution.`,
 			unified_exec: "Full-OS pipes, not a shell sandbox or PTY. Patched-host direct completions enter native history and the next safe model request, not a new idle turn. Poll for input/remaining output. Two shared native scopes; jobs are not saved.",
 			code_mode: "Bounded JavaScript coordinating native tools. Delegated shell commands retain full OS permissions. Cells/jobs are not restored.",
 		};
 		const active = pi.getActiveTools();
 		const rows: SettingsRow[] = CAPABILITY_NAMES.map(id => {
 			const names = groups[id];
-			const reason = !trusted ? "Select an official native OpenAI route." : id === "web_search" && !search ? "No search transport configured."
+			const reason = !trusted ? "Select an official native OpenAI route." : id === "web_search" && webPreferenceError ? webPreferenceError : id === "web_search" && !search ? "No search transport configured."
 				: !names.every(name => ownership.owns(name)) ? "Tool names are excluded, conflicting or replaced."
 				: id === "unified_exec" && unifiedPreferenceError ? unifiedPreferenceError
 				: id === "unified_exec" && !shell.available ? shell.reason
@@ -275,12 +297,13 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		);
 		rows.push({ id: "background_wait", label: "Background wait ceiling", value: unifiedPreferenceError ? "unavailable" : String(maxBackgroundWaitMs),
 			description: backgroundWaitStatus(), values: unifiedPreferenceError ? undefined : [...new Set([String(maxBackgroundWaitMs), "5000", "10000", "30000", "60000", "120000", "300000"])].sort((a, b) => Number(a) - Number(b)) });
+		if (options.webPreferences) rows.push({ id: "web_profile", label: "Web admission profile", value: webPreferenceError ? "unavailable" : savedWebProfile!, description: webProfileStatus(), values: webPreferenceError ? undefined : ["verified-v1", "experimental"] });
 		return rows;
 	}
 	pi.registerCommand("openai-tools", {
 		description: "OpenAI settings, Fast, capability switches and owned jobs",
 		getArgumentCompletions(prefix) {
-			const values = ["status", "fast", "fast on", "fast off", "fast toggle", "fast status", "jobs", "jobs status", "jobs cancel ", "background-wait status", "background-wait 5000", "background-wait 300000", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
+			const values = ["status", "fast", "fast on", "fast off", "fast toggle", "fast status", "jobs", "jobs status", "jobs cancel ", "web-profile status", "web-profile verified-v1", "web-profile experimental", "background-wait status", "background-wait 5000", "background-wait 300000", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
 			const matches = values.filter(value => value.startsWith(prefix.trim().toLowerCase())).map(value => ({ value, label: value }));
 			return matches.length ? matches : null;
 		},
@@ -288,6 +311,14 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			if (!args.trim() && ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.custom === "function" && options.openSettings) { await options.openSettings(ctx); return; }
 			const [name, action, extra, trailing] = args.trim().split(/\s+/);
 			if (name === "fast" && options.fastCommand) { await options.fastCommand(args.trim().slice(4).trim(), ctx); return; }
+			if (name === "web-profile") {
+				if (extra) { ctx.ui.notify("Usage: /openai-tools web-profile [status | verified-v1 | experimental]", "warning"); return; }
+				try {
+					if (action && action !== "status") changeWebProfile(action);
+					ctx.ui.notify(webProfileStatus(), webPreferenceError ? "warning" : "info");
+				} catch { ctx.ui.notify("Could not change Web admission profile. Use verified-v1 or experimental; preserve any invalid profile file. Saved selection and effective schema were not changed.", "warning"); }
+				return;
+			}
 			if (name === "background-wait") {
 				if (extra) { ctx.ui.notify("Usage: /openai-tools background-wait [status | <5000–300000 milliseconds>]", "warning"); return; }
 				try {
@@ -308,7 +339,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			}
 			if (name && name !== "status") {
 				if (!["imagegen", "unified_exec", "web_search", "code_mode"].includes(name) || !["on", "off"].includes(action) || extra) {
-					ctx.ui.notify("Usage: /openai-tools [status | fast on|off|toggle|status | jobs status|cancel <session_id> | background-wait status|<milliseconds> | imagegen|unified_exec|web_search|code_mode on|off]", "warning"); return;
+					ctx.ui.notify("Usage: /openai-tools [status | fast on|off|toggle|status | jobs status|cancel <session_id> | background-wait status|<milliseconds> | web-profile status|verified-v1|experimental | imagegen|unified_exec|web_search|code_mode on|off]", "warning"); return;
 				}
 				try { await changePreference(name, action, ctx); }
 				catch (error) { if (!(error instanceof CapabilityPreferenceError)) throw error; ctx.ui.notify(error.message, "warning"); return; }
@@ -317,15 +348,15 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			try { assertOfficialContext(ctx); } catch { trusted = false; }
 			const reason = trusted ? "official OpenAI route" : "unsupported/untrusted provider or endpoint";
 			const auth = trusted ? subscriptionStatus(ctx) : "not inspected for an unsupported provider";
-			const searchStatus = !search ? "unavailable; no configured search transport/profile"
+			const searchStatus = webPreferenceError ? webPreferenceError : !search ? "unavailable; no configured search transport/profile"
 				: pi.getActiveTools().includes("web_search")
-					? options.webSearch?.profile === "verified-v1" ? "enabled; verified search/public-URL-open subset, direct or native protected scope; current entitlement checked at execution" : "enabled for isolated validation; source-contract-only, no opaque replay"
+					? effectiveWebProfile === "verified-v1" ? "enabled; verified search/public-URL-open subset, direct or native protected scope; current entitlement checked at execution" : "enabled; experimental source-contract-only, no opaque replay or live-verification claim"
 					: "off; /openai-tools web_search on";
 			const [codeStatus, shellStatus] = await Promise.all([codeMode.status(ctx), nativeShellStatus()]);
 			const codeDescription = !codeStatus.available ? `unavailable; ${codeStatus.reason}`
 				: `${pi.getActiveTools().includes("exec") ? "enabled" : "off; /openai-tools code_mode on"}; Windows x64 native preflight ready (launch rechecked); native scopes ${codeStatus.native!.activeScopes} active, ${codeStatus.native!.drainingScopes} draining / 2${codeStatus.native!.drainingScopes ? "; new native admission blocked until confirmed cleanup" : ""}`;
 			const conflicts = [...definitions.keys()].filter(name => !ownership.owns(name));
-			ctx.ui.notify(`OpenAI capabilities (${reason})\nTool ownership: ${conflicts.length ? `unavailable/conflicting/excluded: ${conflicts.join(", ")}` : "verified (Pi 0.85 schema identity)"}\nSubscription: ${auth}\nImage generation: ${pi.getActiveTools().includes("imagegen") ? "enabled; Codex OAuth required at execution" : "unavailable/disabled"}\nWeb search: ${searchStatus}\nCode mode: ${codeDescription}\nUnified exec: ${!shellStatus.available ? `unavailable; ${shellStatus.reason}` : pi.getActiveTools().includes("exec_command") ? "enabled (full OS permissions, pipes only)" : "off; /openai-tools unified_exec on"}\n${preferenceError ?? `${options.preferences ? "Saved profile preferences" : "Session preferences"}: ${CAPABILITY_NAMES.map(name => `${name}=${preferences[name] ? "on" : "off"}`).join(", ")}.`}\n${backgroundWaitStatus()}\nDirect jobs share two native scopes with Code mode; draining blocks admission. Patched-host direct completions enter native history and the next safe model request; no automatic idle turn or incremental output stream. Poll for remaining output; completed results have capacity-based retention. Jobs/cells are not restored.\nNo API fallback. Historical conversation images are not removed by this policy.`, "info");
+			ctx.ui.notify(`OpenAI capabilities (${reason})\nTool ownership: ${conflicts.length ? `unavailable/conflicting/excluded: ${conflicts.join(", ")}` : "verified (Pi 0.85 schema identity)"}\nSubscription: ${auth}\nImage generation: ${pi.getActiveTools().includes("imagegen") ? "enabled; Codex OAuth required at execution" : "unavailable/disabled"}\nWeb search: ${searchStatus}\nCode mode: ${codeDescription}\nUnified exec: ${!shellStatus.available ? `unavailable; ${shellStatus.reason}` : pi.getActiveTools().includes("exec_command") ? "enabled (full OS permissions, pipes only)" : "off; /openai-tools unified_exec on"}\n${preferenceError ?? `${options.preferences ? "Saved profile preferences" : "Session preferences"}: ${CAPABILITY_NAMES.map(name => `${name}=${preferences[name] ? "on" : "off"}`).join(", ")}.`}\n${backgroundWaitStatus()}\n${webProfileStatus()}\nDirect jobs share two native scopes with Code mode; draining blocks admission. Patched-host direct completions enter native history and the next safe model request; no automatic idle turn or incremental output stream. Poll for remaining output; completed results have capacity-based retention. Jobs/cells are not restored.\nNo API fallback. Historical conversation images are not removed by this policy.`, "info");
 		},
 	});
 	return {
@@ -336,6 +367,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			if (revision !== menuEpoch) throw new Error("Settings context changed. Reopen the menu.");
 			if (!rows.find(row => row.id === id)?.values?.includes(value)) throw new Error("This capability is unavailable or read-only.");
 			if (id === "background_wait") changeBackgroundWait(value, signal);
+			else if (id === "web_profile") changeWebProfile(value, signal);
 			else await changePreference(id, value, ctx, signal);
 		},
 		contextVersion: () => menuEpoch,

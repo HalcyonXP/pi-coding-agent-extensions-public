@@ -13,6 +13,7 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | Code projection | Default `tools` guest view for recognized normal Unified results, with full native-wrapper fallback; `nativeTools` preserves raw access and `projectedTools` is an identical alias. Legacy scripts need migration; native evidence/authority is unchanged. See [projection contract](CODE-RESULT-PROJECTION.md). |
 | Web text projection | Working-source canonical `web_search` guest string after complete native publication and RPC admission; includes all literal text and opaque source associations. Not a Web reference, native citation renderer or new installed acceptance. |
 | Web consistency stamp | `details.web_result` content/label checksum checked after hooks; not a signature or authority. A native post-publication hint permits the guest text view, never extra admission. |
+| Web admission profile | Working-source saved `verified-v1`/`experimental` schema choice; applies only after extension reload/restart, not a Pi installation profile or execution authority. [Saved/effective contract](WEB-PROFILES.md). |
 | Web service reference | Opaque remote `ref_id`, distinct from a native `ev_...` evidence reference. Opaque IDs/citation syntax are not currently admitted as continuation authority; public-URL open remains separate. |
 | Native grammar capability | Selected Pi model's explicit grammar-tool support; absence disables Code without a JSON-provider fallback, not an execution-authority grant |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
@@ -36,7 +37,7 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | OpenAI controls | One `/openai-tools` entry point with saved Fast/capability preferences and the nested owned-jobs view; explicit subcommands retain non-TUI control |
 | Cell diagnostics | Fixed guest phase plus host-observed delegation/result counters and shell categories; not exception text, application success or proof of external effects |
 | Jobs snapshot | Passive same-session process records; cancellation is explicit user control over owned handles, not arbitrary-PID lookup or automatic retry |
-| Saved preference | Profile-local Fast or capability choice restored across new sessions/reload/restart; not credentials, jobs, entitlement or native authority |
+| Saved preference | Profile-local Fast/capability/wait choice; Web admission changes specifically require extension reload/restart. Never restore live work; not credentials, jobs, entitlement or native authority |
 | Effective switch | Saved choice currently applicable under route/ownership/exclusions/preflight; an inactive choice is retained, not permission to bypass a gate |
 | Direct job | Returned shell owned by the original native conversation context; cell jobs additionally require their original scope |
 | Completion collection | Consuming write_stdin read of output/status; a terminal result without session_id finishes collection |
@@ -71,6 +72,7 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | Nested JSON-string argument | [Serialized object parsed inside QuickJS](CODE-COORDINATOR-COMPATIBILITY.md) before ordinary native validation, not arbitrary freeform input or tool authority |
 | Image-reference forwarding | Passing an img_ reference or projected PNG/JPEG/GIF/WebP block to image(); it must resolve to existing journaled same-context evidence, never caller-replaced bytes or network URLs |
 | Inline image publication | Working-source image() admission of canonical inline PNG/JPEG/GIF/WebP up to32KiB decoded. Native protected messages label guest provenance and issue references only after publication; not a native tool result or generation/save receipt. See [media inputs](MEDIA-INPUTS.md). |
+| Generated-image publication | `generatedImage({image_url,output_hint?})` forwards owned/inline pixels with an unverified hint; no generation/save/fetch. Normal imagegen projection uses reference-valued image_url as explicit Pi adaptation. [Media contract](MEDIA-INPUTS.md). |
 | Helper failure | Fixed allowlisted classification of an unhandled helper-created error; not inspection of arbitrary guest exception text. See [helper feedback](CODE-COORDINATOR-COMPATIBILITY.md). |
 | Callable alias | Unambiguous hyphen-to-underscore tools entry dispatching the original native name; exact native entries win, metadata and authority stay unchanged. |
 | Coordinator disposal | Ends admission of queued coordinator callbacks and ignores late results; native scopes still close already-delegated work |

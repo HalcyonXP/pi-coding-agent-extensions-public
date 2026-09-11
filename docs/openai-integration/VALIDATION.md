@@ -138,3 +138,20 @@ The Windows parent-death fixture also requires its held parent's real `close` ev
 CI selects Node 24 on Windows/Ubuntu, reproduces the Windows helper/bundle twice and runs extracted installed acceptance. Compare its exact-source archive/manifest with local supported-Node reproduction. Required contexts are CI's two test jobs, runtime's two jobs, native host's two jobs, the Windows artifact job, and Publication privacy. All current-head rollup checks must pass before integration; a missing context is not success.
 
 No automated live service check, OAuth refresh probe, account entitlement claim, executable upload or deployment is part of these commands. Local success does not substitute for required hosted checks. Read [acceptance boundaries](FINAL-ACCEPTANCE.md) and [consumer verification/delivery gates](RELEASE-CONTRACT.md). The development privacy policy is repository-only: read root `PUBLICATION.md` from the matching trusted source commit; it is deliberately not a bundle-relative link or an installation prerequisite.
+
+### Working-source Web profile checks
+
+`native-web-profile` uses the actual accepted SDK with current-source extension and synthetic transport: actual reload/default restoration, saved-versus-effective schema separation, invalid-file preservation/repair and nine-family grouped workflows on both Responses routes (eight model/six synthetic service requests). Native Web errors also require full protected publication. This is not live parity or installed-artifact acceptance.
+
+The updated `native-settings` cohort independently captures seven Web admission frames. Its43 accepted PR32 primary/wait frames are compared with `validateWebProfileFrameMigration`:30 exact; nine primary and four wait changes limited to row count10→11 and explicit reload guidance. Older9→10 migration remains a separate historical contract. Current CLI source requires saved Web admission preference across genuine restart/rollback; it has not yet run against a new Batch B bundle. See [Web profile contract](WEB-PROFILES.md).
+
+Prepared actual-bundle Web/media gates (run each against the exact source, resulting-master and copied artifact as separate acceptance steps):
+
+```powershell
+node distribution/accept-web-media.mjs '<exact verified bundle>' web
+node distribution/accept-web-media.mjs '<exact verified bundle>' media
+node distribution/accept-web-media.mjs '<exact verified bundle>' imagegen
+node distribution/accept-web-media.mjs '<exact verified bundle>' web-profile
+```
+
+Each CLI owns a fresh HOME/profile and OS-variable allowlist before SDK import, uses only the bundle's extension and synthetic transport, and retains failure observations/originals. Shared environment creation is `distribution/isolated-environment.mjs`; focused development reuses the same policy without gaining artifact acceptance. Hosted artifact steps now require all four with five-minute step ceilings and unchanged job/product limits. They are prepared/wired, **not yet run against a new B artifact**; development source-on-SDK checks do not substitute for them.
