@@ -43,6 +43,12 @@ The direct Web result adds `details.web_result: {version:1,sha256}`: a **consist
 
 Focused worker tests cover normal/raw/alias views, post-publication admission, hook/digest/metadata/error fallback, captured intrinsics and original RPC limits. `distribution/web-projection-scenarios.mjs` exercises both real native Responses routes with synthetic transport and real contained cells. Development cohorts have covered text/raw/hook/oversized replies, then a separate search→public-URL-open sequence with zero guest output budget and intact native source publication. Those source-on-accepted-SDK probes are not new-artifact acceptance; full Batch B milestone gates remain pending.
 
+## Imagegen projection — Batch B working source
+
+Normal canonical `imagegen` results now project to `{image_url,output_hint}` after finalized consistency validation, complete native image/text publication and the original guest RPC admission. `image_url` contains an owned **Pi image reference**, not upstream inline bytes or a URL to fetch; `generatedImage` accepts that reference. `output_hint` selects an actual successful destination or canonical path, but helper-provided hints remain unverified display data and never grant filesystem authority. This is explicit Pi adaptation, not byte-for-byte Codex parity.
+
+`details.imagegen_result` and native `imagegen-v1` admission hints are consistency/presentation metadata, not signatures. Raw access remains `nativeTools.imagegen` on the original call. Hook/copy-failure/error/unknown/unstamped/oversized results retain complete native wrappers and canonical evidence. Do not generate again to obtain a different view or recover a failed copy. See [media contracts and synthetic native cohorts](MEDIA-INPUTS.md).
+
 ## Scope and verification
 
 The field names follow the pinned [Unified source-inspection contracts](CODEX-TOOL-CONTRACTS.md). Upstream execution, full default-API compatibility, identical timing/error/truncation behavior and projections for remaining tools remain unestablished. PR #32 made the bounded Unified projection the default; the separate Web working-source change does not certify a new installation. The explicit legacy namespace avoids losing raw access; callers still need the documented source change.

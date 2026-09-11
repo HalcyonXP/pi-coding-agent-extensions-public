@@ -37,7 +37,7 @@ test("native image-reference content blocks can be forwarded without image bytes
   const r=await cell(`image({type:"image_reference",ref:${JSON.stringify(ref)},mimeType:"image/png",bytes:8});`);
   assert.equal(r.result.status,"ok");assert.deepEqual(r.operations,[{kind:"image",ref}]);
 });
-for(const value of ['{type:"image",data:"forged",mimeType:"image/png"}','{image_url:"https://example.com/image.png"}','"data:image/png;base64,AAAA"'])test("image forwarding does not accept new bytes or URLs: "+value,async()=>{
+for(const value of ['{type:"image",data:"forged",mimeType:"image/png"}','{image_url:"https://example.com/image.png"}','"data:image/png;base64,AAAA"'])test("image forwarding refuses malformed inline data and network URLs: "+value,async()=>{
   const r=await cell(`image(${value});`);assert.equal(r.result.status,"error");assert.equal(r.operations.length,0);
 });
 test("detached rejection cannot start queued native work after disposal", async () => {

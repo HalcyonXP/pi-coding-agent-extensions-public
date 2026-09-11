@@ -24,10 +24,19 @@ export const TOOL_RESULT_PROJECTION = `(() => {
     project(name, value) {
       // Unknown, hook-modified, error, loss, unready and terminated results keep
       // their complete wrapper. Projection is data presentation, never evidence.
-      if (name !== "exec_command" && name !== "write_stdin" && name !== "web_search") return value;
+      if (name !== "exec_command" && name !== "write_stdin" && name !== "web_search" && name !== "imagegen") return value;
       const elapsed = object(value) ? time(value) : undefined;
       if (!integer(elapsed) || !shape(value, ["result", "isError"]) || value.isError !== false) return value;
       const r = value.result;
+      if (name === "imagegen") {
+        if (!shape(r,["content","details","protected_evidence"],["isError"]) || own(r,"isError") && r.isError!==false) return value;
+        const p=r.protected_evidence,d=r.details;
+        if (!shape(p,["ref","journaled","format","projection"]) || typeof p.ref!=="string" || p.journaled!==true || p.format!=="finalized-result-json" || p.projection!=="imagegen-v1") return value;
+        if (!shape(d,["status","operation","canonicalPath","imagegen_result"],["destinationPath","background","quality","size"]) || d.status!=="completed" || d.operation!=="generate" && d.operation!=="edit" || typeof d.canonicalPath!=="string" || own(d,"destinationPath") && typeof d.destinationPath!=="string") return value;
+        if (!shape(d.imagegen_result,["version","sha256"]) || d.imagegen_result.version!==1 || typeof d.imagegen_result.sha256!=="string") return value;
+        if (!array(r.content) || r.content.length!==2 || !shape(r.content[0],["type","ref","mimeType","bytes"]) || r.content[0].type!=="image_reference" || r.content[0].mimeType!=="image/png" || typeof r.content[0].ref!=="string" || !integer(r.content[0].bytes) || r.content[0].bytes<=0 || !shape(r.content[1],["type","text"]) || r.content[1].type!=="text" || typeof r.content[1].text!=="string") return value;
+        return {image_url:r.content[0].ref,output_hint:own(d,"destinationPath")?d.destinationPath:d.canonicalPath};
+      }
       if (name === "web_search") {
         // Only native CellEvidence can add this presentation hint, after checking
         // the finalized content stamp and publishing the complete source evidence.

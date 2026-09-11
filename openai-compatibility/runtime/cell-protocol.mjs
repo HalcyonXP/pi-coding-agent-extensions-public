@@ -1,7 +1,15 @@
 import { boundedJSON, exact, RPC_LIMITS, validTools } from "./rpc-protocol.mjs";
+import { imageInput } from "./image-input.mjs";
 export const CELL_LIMITS = Object.freeze({ wallMs: 360_000, outputCount: 64, operations: 64, keys: 32, keyBytes: 128, valueBytes: 16 * 1024, storageBytes: 256 * 1024, timers: 16, timerMs: 60_000, completed: 8 });
 export const cellTools = value => Array.isArray(value) && (!value.length || validTools(value));
 export function validOperation(value) {
+  if (value?.kind === "generated-image" || value?.kind === "generated-image-inline") {
+    const fields=value.kind === "generated-image" ? ["kind","ref"] : ["kind","data","mimeType"];
+    if (!exact(value,fields) && !exact(value,[...fields,"output_hint"])) return false;
+    if (Object.hasOwn(value,"output_hint") && (typeof value.output_hint !== "string" || Buffer.byteLength(value.output_hint)>4096)) return false;
+    return value.kind === "generated-image" ? typeof value.ref === "string" && /^img_[a-f0-9-]{36}$/.test(value.ref) : imageInput({type:"image",data:value.data,mimeType:value.mimeType}) !== undefined;
+  }
+  if (exact(value, ["kind", "data", "mimeType"]) && value.kind === "image-inline") return imageInput({type:"image",data:value.data,mimeType:value.mimeType}) !== undefined;
   if (exact(value, ["kind", "ref"]) && value.kind === "image") return typeof value.ref === "string" && /^img_[a-f0-9-]{36}$/.test(value.ref);
   if (exact(value, ["kind", "ref", "offset", "length"]) && value.kind === "evidence") return typeof value.ref === "string" && /^ev_[a-f0-9-]{36}$/.test(value.ref) && Number.isSafeInteger(value.offset) && value.offset >= 0 && value.offset <= 16 * 1024 * 1024 && Number.isSafeInteger(value.length) && value.length >= 1 && value.length <= 8192;
   if (exact(value, ["kind", "key"]) && value.kind === "load") return validKey(value.key);

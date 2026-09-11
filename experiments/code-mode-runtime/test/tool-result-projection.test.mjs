@@ -79,3 +79,34 @@ for(const [name,Runtime]of [['semantic worker',CellRuntime],['Windows contained 
  const gateway={id:'native',signal:controller.signal,async publishEvidence(e){published.push(structuredClone(e));},async invoke(name){await broker.capture(gateway,{scopeId:'native',toolCallId:'native-call',toolName:name,...native});return native;}};
  try{const r=await runtime.run('text(await tools.web_search({}));',{gateway,allowedTools:['web_search'],signal:AbortSignal.timeout(5000)});assert.equal(r.status,'ok');assert.deepEqual(output,[native.result.content.map(b=>b.text).join('\n\n')]);assert.deepEqual(published[0].content,native.result.content);}catch(e){failures.push(e);}finally{try{await runtime.close();}catch(e){failures.push(e);}broker.close();store.close();}if(failures.length)throw new AggregateError(failures,'Web projection/cleanup failed');
 });
+
+import {sealImagegenResult,normalImagegenProjection} from '../../../openai-compatibility/runtime/imagegen-result.mjs';
+const imagegenOutcome=()=>({isError:false,result:sealImagegenResult({content:[{type:'image',mimeType:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='},{type:'text',text:'Generated image saved to canonical.png.'}],details:{status:'completed',operation:'generate',canonicalPath:'canonical.png',destinationPath:undefined}})});
+test('default imagegen returns an owned image_url and hint only after native publication',async()=>{
+ const native=imagegenOutcome();assert.equal(Object.hasOwn(native.result.details,'destinationPath'),true);assert.equal(normalImagegenProjection(JSON.parse(JSON.stringify(native.result))),true);
+ const f=await publishedWeb(native,'imagegen');try{const r=await run('text(JSON.stringify(await tools.imagegen({})));text(JSON.stringify(await projectedTools.imagegen({})));text(JSON.stringify(await nativeTools.imagegen({})));',f.wire,['imagegen']);assert.equal(r.result.status,'ok');const expected={image_url:f.wire.result.content[0].ref,output_hint:'canonical.png'};assert.deepEqual(JSON.parse(r.output[0]),expected);assert.deepEqual(JSON.parse(r.output[1]),expected);assert.deepEqual(JSON.parse(r.output[2]),f.wire);assert.deepEqual(f.published[0].content,native.result.content);assert.equal(f.wire.result.protected_evidence.projection,'imagegen-v1');}finally{f.broker.close();}
+});
+for(const [name,mutate]of Object.entries({
+ hook:r=>r.result.content.push({type:'text',text:'native warning'}),
+ digest:r=>r.result.details.imagegen_result.sha256='0'.repeat(64),
+ hint:r=>r.result.details.canonicalPath='changed.png',
+ missing:r=>delete r.result.details.imagegen_result,
+ copyFailed:r=>{r.result.details.copyStatus='failed';r.result.details.requestedDestinationPath='copy.png';},
+ nativeError:r=>r.isError=true,
+ handlerError:r=>r.result.isError=true,
+ unknown:r=>r.result.details.unreviewed=true,
+}))test('imagegen '+name+' preserves full native wrapper and original image',async()=>{
+ const native=imagegenOutcome();mutate(native);const f=await publishedWeb(native,'imagegen');try{assert.equal(f.wire.result.protected_evidence.projection,undefined);const r=await run('text(JSON.stringify(await tools.imagegen({})));',f.wire,['imagegen']);assert.equal(r.result.status,'ok');assert.deepEqual(JSON.parse(r.output[0]),f.wire);assert.equal(f.published[0].content[0].data,native.result.content[0].data);}finally{f.broker.close();}
+});
+test('imagegen aliases, unjournaled data and oversized protected views do not gain projection',async()=>{
+ const native=imagegenOutcome(),f=await publishedWeb(native,'other-imagegen');try{assert.equal(f.wire.result.protected_evidence.projection,undefined);const r=await run('text(JSON.stringify(await tools.other_imagegen({})));',f.wire,['other-imagegen']);assert.deepEqual(JSON.parse(r.output[0]),f.wire);}finally{f.broker.close();}
+ const missing=await run('text(JSON.stringify(await tools.imagegen({})));',native,['imagegen']);assert.deepEqual(JSON.parse(missing.output[0]),JSON.parse(JSON.stringify(native)));
+ const large=imagegenOutcome();large.result.content[1].text='x'.repeat(80000);const big=await publishedWeb(large,'imagegen');try{assert.equal(big.wire.result.protected_evidence.projected,true);assert.equal(big.wire.result.protected_evidence.projection,undefined);const r=await run('text(JSON.stringify(await tools.imagegen({})));',big.wire,['imagegen']);assert.deepEqual(JSON.parse(r.output[0]),big.wire);}finally{big.broker.close();}
+});
+test('imagegen projection uses captured intrinsics, never guest supplied presentation code',async()=>{
+ const f=await publishedWeb(imagegenOutcome(),'imagegen');try{const r=await run('const pending=tools.imagegen({});Object.keys=()=>[];Object.hasOwn=()=>false;Number.isSafeInteger=()=>false;JSON.parse=()=>null;const r=await pending;text(r.image_url);text(r.output_hint);',f.wire,['imagegen']);assert.equal(r.result.status,'ok');assert.deepEqual(r.output,[f.wire.result.content[0].ref,'canonical.png']);}finally{f.broker.close();}
+});
+for(const [name,Runtime]of [['semantic',CellRuntime],['Windows contained',WindowsCellRuntime]])test(name+' imagegen projection forwards the original through generatedImage with a protected hint',{skip:name==='Windows contained'&&process.platform!=='win32'},async()=>{
+ const signal=new AbortController().signal,broker=new CellEvidence(signal),published=[],store=new CellStore(),native=imagegenOutcome(),scope={id:'native',signal,async publishEvidence(e){published.push(e);},async invoke(name){await broker.capture(scope,{scopeId:scope.id,toolName:name,toolCallId:'child',...native});return broker.project(native);}},runtime=new Runtime({store,evidence:broker,output(){throw Error('No guest text');},yield(){}}),failures=[];
+ try{const r=await runtime.run('generatedImage(await tools.imagegen({}));',{gateway:scope,allowedTools:['imagegen'],signal:AbortSignal.timeout(5000)});assert.equal(r.status,'ok',JSON.stringify(r));assert.equal(published.length,2);assert.equal(published[1].content[0].data,native.result.content[0].data);assert.equal(published[1].details.output_hint,'canonical.png');assert.match(published[1].content[1].text,/unverified; not a save receipt/);}catch(e){failures.push(e);}finally{try{await runtime.close();}catch(e){failures.push(e);}store.close();broker.close();}if(failures.length)throw new AggregateError(failures,'Imagegen projection or cleanup failed');
+});

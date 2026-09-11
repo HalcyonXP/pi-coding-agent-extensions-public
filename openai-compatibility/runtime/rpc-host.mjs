@@ -131,7 +131,7 @@ export class AsyncRuntimeProbe {
             // Flush the completed sleep reply before acknowledging cancellation.
             await Promise.resolve();
             value = {cancelled: true};
-          } else if (["image", "evidence"].includes(frame.operation.kind)) {
+          } else if (["image", "image-inline", "generated-image", "generated-image-inline", "evidence"].includes(frame.operation.kind)) {
             if (!cell.evidence) throw new Error("TOOL_LIMIT");
             value = await cell.evidence.apply(frame.operation, gateway);
           } else value = cell.store.apply(frame.operation);

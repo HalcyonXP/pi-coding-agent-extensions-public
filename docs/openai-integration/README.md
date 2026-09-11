@@ -69,7 +69,8 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | Output schema metadata | Source metadata that may inform nested descriptions; not necessarily serialized into a direct provider request |
 | ALL_TOOLS | Frozen per-cell `{name,description}` snapshot of eligible native tools, matching TOOL_NAMES; [discovery data](CODE-TOOL-METADATA.md), not schemas, callbacks, current entitlement or native authority |
 | Nested JSON-string argument | [Serialized object parsed inside QuickJS](CODE-COORDINATOR-COMPATIBILITY.md) before ordinary native validation, not arbitrary freeform input or tool authority |
-| Image-reference forwarding | Passing a native projected image block to image(); it must resolve to existing journaled same-context evidence, not guest image bytes or URLs |
+| Image-reference forwarding | Passing an img_ reference or projected PNG/JPEG/GIF/WebP block to image(); it must resolve to existing journaled same-context evidence, never caller-replaced bytes or network URLs |
+| Inline image publication | Working-source image() admission of canonical inline PNG/JPEG/GIF/WebP up to32KiB decoded. Native protected messages label guest provenance and issue references only after publication; not a native tool result or generation/save receipt. See [media inputs](MEDIA-INPUTS.md). |
 | Helper failure | Fixed allowlisted classification of an unhandled helper-created error; not inspection of arbitrary guest exception text. See [helper feedback](CODE-COORDINATOR-COMPATIBILITY.md). |
 | Callable alias | Unambiguous hyphen-to-underscore tools entry dispatching the original native name; exact native entries win, metadata and authority stay unchanged. |
 | Coordinator disposal | Ends admission of queued coordinator callbacks and ignores late results; native scopes still close already-delegated work |

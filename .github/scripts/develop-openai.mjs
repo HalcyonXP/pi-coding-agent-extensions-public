@@ -12,7 +12,7 @@ const extension = "openai-compatibility/test/";
 const runtime = "experiments/code-mode-runtime/test/";
 const tests = (...files) => ["--test", "--test-concurrency=1", ...files];
 const suites = Object.freeze({
-  coordinator: tests(...["coordinator-compatibility", "helper-feedback", "tool-metadata", "tool-result-projection"].map(n => `${runtime}${n}.test.mjs`)),
+  coordinator: tests(...["coordinator-compatibility", "helper-feedback", "tool-metadata", "tool-result-projection", "image-input"].map(n => `${runtime}${n}.test.mjs`)),
   unified: tests(`${extension}unified-*.test.ts`),
   settings: tests("openai-compatibility/index.test.mjs", ...["settings-menu", "jobs-menu", "capability-preferences", "unified-preferences", "capabilities"].map(n => `${extension}${n}.test.ts`)),
   "web-media": tests(...["web-search*", "verified-search", "imagegen-*"].map(n => `${extension}${n}.test.ts`)),
@@ -28,6 +28,10 @@ const suites = Object.freeze({
   "native-settings": [".github/scripts/develop-native.mjs", "settings"],
   "native-web": [".github/scripts/develop-native.mjs", "web-projection"],
   "native-web-sequence": [".github/scripts/develop-native.mjs", "web-sequence"],
+  "native-media": [".github/scripts/develop-native.mjs", "media-input"],
+  "native-media-canvas": [".github/scripts/develop-native.mjs", "media-canvas"],
+  "native-generated-image": [".github/scripts/develop-native.mjs", "generated-image"],
+  "native-imagegen-projection": [".github/scripts/develop-native.mjs", "imagegen-projection"],
 });
 export function selectSuites(names, sdkBundle) {
   if (!names.length || names.some(n => !Object.hasOwn(suites, n)) || new Set(names).size !== names.length) {
