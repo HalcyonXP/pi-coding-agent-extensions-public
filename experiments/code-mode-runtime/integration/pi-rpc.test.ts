@@ -583,7 +583,9 @@ describe.each(["web_search", "imagegen"])("actual %s capability through the real
 						(message) => message.role === "custom" && message.customType === "code-mode-evidence",
 					);
 					expect(protectedMessages).toHaveLength(1);
-					expect(protectedMessages[0].content).toEqual(received.result.content);
+					const protectedMessage = protectedMessages[0];
+					if (protectedMessage.role !== "custom") throw Error("Expected native protected evidence");
+					expect(protectedMessage.content).toEqual(received.result.content);
 				} else if (mode === "success" || mode === "edit") {
 					expect(received.result.content[0]).toMatchObject({ type: "image", mimeType: "image/png" });
 					const canonical = received.result.details.canonicalPath;
