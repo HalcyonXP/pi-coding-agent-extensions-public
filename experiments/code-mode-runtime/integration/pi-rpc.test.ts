@@ -340,7 +340,16 @@ describe.each(["web_search", "imagegen"])("actual %s capability through the real
 	it.each(
 		toolName === "imagegen"
 			? ["success", "deny", "mutate", "revoke", "edit", "queued", "collision"]
-			: ["success", "deny", "mutate", "revoke", "collision", "verified-direct", "verified-nested"],
+			: [
+					"success",
+					"deny",
+					"mutate",
+					"revoke",
+					"collision",
+					"verified-direct",
+					"verified-nested",
+					"experimental-nested",
+				],
 	)("%s preserves provider/auth/approval boundaries", async (mode) => {
 		const probe = new ProbeClass();
 		const entered = barrier();
@@ -436,10 +445,32 @@ describe.each(["web_search", "imagegen"])("actual %s capability through the real
 								mode === "edit"
 									? 'const edited=await tools.call("imagegen",{prompt:"Synthetic edit",referenced_image_paths:["fixture.png"],destination_path:"edited.png"}); emit(JSON.stringify(edited));'
 									: "";
-							outcome = await probe.run(
-								`const r=await tools.call(${JSON.stringify(toolName)},${JSON.stringify(params)}); emit(JSON.stringify(r));${followup}`,
-								{ gateway: ctx.tools, allowedTools: [toolName], signal },
-							);
+							// Both Web profiles require genuine native protected publication.
+							// Keep explicit unprotected cases; do not spoof a protection flag.
+							let scope: ReturnType<NonNullable<ExtensionContext["tools"]>["openScope"]> | undefined;
+							if (toolName === "web_search" && !["verified-nested", "experimental-nested"].includes(mode)) {
+								scope = ctx.tools!.openScope({
+									onResult: async (event) => {
+										await scope!.publishEvidence({
+											content: event.result.content,
+											details: {
+												toolName: event.toolName,
+												toolCallId: event.toolCallId,
+												isError: event.isError,
+												finalized: event.result.details,
+											},
+										});
+									},
+								});
+							}
+							try {
+								outcome = await probe.run(
+									`const r=await tools.call(${JSON.stringify(toolName)},${JSON.stringify(params)}); emit(JSON.stringify(r));${followup}`,
+									{ gateway: scope ?? ctx.tools, allowedTools: [toolName], signal },
+								);
+							} finally {
+								await scope?.close();
+							}
 							return text(JSON.stringify(outcome));
 						},
 					});
@@ -542,11 +573,17 @@ describe.each(["web_search", "imagegen"])("actual %s capability through the real
 				const received = JSON.parse(outcome?.output?.at(-1) ?? "null");
 				expect(received.isError).toBe(mode !== "success" && mode !== "edit");
 				if (mode === "collision") expect(JSON.stringify(received.result)).toMatch(/reserved tool name/);
-				if (mode === "verified-nested") expect(JSON.stringify(received.result)).toMatch(/direct tool call/);
+				if (["verified-nested", "experimental-nested"].includes(mode))
+					expect(JSON.stringify(received.result)).toMatch(/direct tool call/);
 				if (mode === "success" && toolName === "web_search") {
 					expect(JSON.stringify(received)).toContain("turn0search0");
 					expect(received.result.content[1].text).toContain(JSON.stringify(source));
 					expect(received.result.details.verification).toBe("source-contract-only");
+					const protectedMessages = harness.session.messages.filter(
+						(message) => message.role === "custom" && message.customType === "code-mode-evidence",
+					);
+					expect(protectedMessages).toHaveLength(1);
+					expect(protectedMessages[0].content).toEqual(received.result.content);
 				} else if (mode === "success" || mode === "edit") {
 					expect(received.result.content[0]).toMatchObject({ type: "image", mimeType: "image/png" });
 					const canonical = received.result.details.canonicalPath;
@@ -1590,11 +1627,11 @@ describe("practical protected image/source cells with actual capability handlers
 					harness.sessionManager.appendCustomEntry = () => {
 						throw Error("Synthetic disk failure");
 					};
-				let code = 'const r=await tools.imagegen({prompt:"Synthetic PNG",destination_path:"original.png"});';
+				let code = 'const r=await nativeTools.imagegen({prompt:"Synthetic PNG",destination_path:"original.png"});';
 				if (mode === "descendant-web") code = "await tools.outer({});";
 				else if (mode === "forged-reference")
 					code =
-						'const r=await tools.imagegen({prompt:"edit",referenced_image_refs:["img_00000000-0000-0000-0000-000000000000"]});if(!r.isError)throw Error("forged ref accepted");';
+						'const r=await nativeTools.imagegen({prompt:"edit",referenced_image_refs:["img_00000000-0000-0000-0000-000000000000"]});if(!r.isError)throw Error("forged ref accepted");';
 				else if (mode === "image-edit" || mode === "context-reference")
 					code +=
 						'store("image",r.result.content[0].ref);store("evidence",r.result.protected_evidence.ref);if(r.result.content[0].data)throw Error("raw image crossed RPC");';
@@ -1615,7 +1652,7 @@ describe("practical protected image/source cells with actual capability handlers
 				}
 				if (mode === "image-edit") {
 					await invoke(
-						'const ref=load("image");image(ref);const view=evidence(load("evidence"));if(view.text.indexOf("image_reference")<0)throw Error("bad projection");await tools.imagegen({prompt:"Synthetic edit",referenced_image_refs:[ref],destination_path:"edited.png"});',
+						'const ref=load("image");image(ref);const view=evidence(load("evidence"));if(view.text.indexOf("image_reference")<0)throw Error("bad projection");await nativeTools.imagegen({prompt:"Synthetic edit",referenced_image_refs:[ref],destination_path:"edited.png"});',
 					);
 					expect(await readFile(join(harness.tempDir, "original.png"))).toEqual(Buffer.from(png, "base64"));
 					expect(await readFile(join(harness.tempDir, "edited.png"))).toEqual(Buffer.from(png, "base64"));
@@ -1628,7 +1665,7 @@ describe("practical protected image/source cells with actual capability handlers
 					await manager!.close();
 					manager = undefined;
 					await invoke(
-						`const r=await tools.imagegen({prompt:"edit",referenced_image_refs:[${JSON.stringify(reference)}]});if(!r.isError)throw Error("stale ref accepted");`,
+						`const r=await nativeTools.imagegen({prompt:"edit",referenced_image_refs:[${JSON.stringify(reference)}]});if(!r.isError)throw Error("stale ref accepted");`,
 					);
 					expect(authCalls).toBe(1);
 					expect(calls).toBe(1);
@@ -2185,13 +2222,13 @@ describe("normal cohesive Code mode registration and native policy", () => {
 				if (mode === "protected") {
 					const r = outcome(
 						await invoke("exec", {
-							code: '// @exec: {"max_output_tokens":0}\nawait tools.web_search({search_query:[{q:"public production fixture"}]});const r=await tools.imagegen({prompt:"Synthetic production PNG",destination_path:"production.png"});if(r.isError||r.result.content[0].data)throw Error("image projection failed");store("img",r.result.content[0].ref);text("must be suppressed");',
+							code: '// @exec: {"max_output_tokens":0}\nawait tools.web_search({search_query:[{q:"public production fixture"}]});const r=await nativeTools.imagegen({prompt:"Synthetic production PNG",destination_path:"production.png"});if(r.isError||r.result.content[0].data)throw Error("image projection failed");store("img",r.result.content[0].ref);text("must be suppressed");',
 						}),
 					);
 					expect(r).toMatchObject({ status: "completed", output: [], result: { status: "ok" } });
 					const edit = outcome(
 						await invoke("exec", {
-							code: '// @exec: {"max_output_tokens":0}\nconst ref=load("img");image(ref);const r=await tools.imagegen({prompt:"Synthetic production edit",referenced_image_refs:[ref],destination_path:"production-edit.png"});if(r.isError)throw Error("edit failed");',
+							code: '// @exec: {"max_output_tokens":0}\nconst ref=load("img");image(ref);const r=await nativeTools.imagegen({prompt:"Synthetic production edit",referenced_image_refs:[ref],destination_path:"production-edit.png"});if(r.isError)throw Error("edit failed");',
 						}),
 					);
 					expect(edit).toMatchObject({ status: "completed", output: [], result: { status: "ok" } });
