@@ -118,3 +118,19 @@ for(const[name,Runtime]of [['semantic',CellRuntime],['contained Windows',Windows
  const published=[],f=setup(async e=>published.push(e)),store=new CellStore(),runtime=new Runtime({store,evidence:f.broker,output(){throw Error('No guest text');},yield(){}}),failures=[];
  try{const r=await runtime.run(`const r=generatedImage({image_url:${JSON.stringify('data:image/png;base64,'+png)},output_hint:"unverified output.png"});generatedImage({image_url:r.ref});`,{gateway:f.scope,allowedTools:[],signal:AbortSignal.timeout(5000)});assert.equal(r.status,'ok',JSON.stringify(r));assert.equal(published.length,2);assert.equal(published[0].content[0].data,png);assert.equal(published[0].details.output_hint,'unverified output.png');assert.equal(published[1].details.helper,'generatedImage');assert.equal(published[1].content[1].text,INLINE_IMAGE_LABEL);}catch(e){failures.push(e);}finally{try{await runtime.close();}catch(e){failures.push(e);}f.broker.close();store.close();}if(failures.length)throw new AggregateError(failures,'Generated image helper or cleanup failed');
 });
+
+test('JPEG checks later scan headers instead of accepting everything after the first SOS',()=>{
+ const source=Buffer.from(fixtures['image/jpeg'],'base64'),sof=source.indexOf(Buffer.from([255,192])),sos=source.indexOf(Buffer.from([255,218]));assert.ok(sof>0&&sos>sof);
+ const frame=source.subarray(sof,sof+2+source.readUInt16BE(sof+2)),scan=source.subarray(sos,sos+2+source.readUInt16BE(sos+2));
+ const append=bytes=>({type:'image',mimeType:'image/jpeg',data:Buffer.concat([source.subarray(0,-2),bytes,source.subarray(-2)]).toString('base64')});
+ const large=Buffer.from(frame);large.writeUInt16BE(5000,7);
+ for(const bytes of [frame,large,Buffer.from([255,216]),Buffer.from([255,220,0,4,255,255]),Buffer.concat(Array.from({length:128},()=>Buffer.from([255,254,0,2])))])assert.equal(imageInput(append(bytes)),undefined);
+ // These are marker-framing fixtures, not claims that fabricated entropy decodes.
+ assert.ok(imageInput(append(Buffer.from([255,0,1,255,208,2]))));assert.ok(imageInput(append(Buffer.concat([scan,Buffer.from([1,2,3])]))));
+ const bound=append(Buffer.alloc(32768-source.length));assert.equal(imageInput(bound)?.bytes,32768);assert.equal(imageInput(append(Buffer.alloc(32769-source.length))),undefined);
+});
+for(const[name,Runtime]of [['semantic',CellRuntime],['contained Windows',WindowsCellRuntime]])test(name+' JPEG late oversized frame is refused before native publication',{skip:name==='contained Windows'&&process.platform!=='win32'},async()=>{
+ const source=Buffer.from(fixtures['image/jpeg'],'base64'),sof=source.indexOf(Buffer.from([255,192])),extra=Buffer.from(source.subarray(sof,sof+2+source.readUInt16BE(sof+2)));extra.writeUInt16BE(5000,7);const data=Buffer.concat([source.subarray(0,-2),extra,source.subarray(-2)]).toString('base64');
+ let publications=0;const f=setup(async()=>{publications++;}),store=new CellStore(),runtime=new Runtime({store,evidence:f.broker,output(){},yield(){}}),failures=[];
+ try{const r=await runtime.run(`image(${JSON.stringify('data:image/jpeg;base64,'+data)});`,{gateway:f.scope,allowedTools:[],signal:AbortSignal.timeout(5000)});assert.equal(r.code,'IMAGE_REFERENCE_REQUIRED',JSON.stringify(r));assert.equal(publications,0);}catch(e){failures.push(e);}finally{try{await runtime.close();}catch(e){failures.push(e);}f.broker.close();store.close();}if(failures.length)throw new AggregateError(failures,'JPEG marker refusal or cleanup failed');
+});

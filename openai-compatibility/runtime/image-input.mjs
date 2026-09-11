@@ -45,14 +45,31 @@ export function createImageInput() {
     }
     if(mime==="image/jpeg") {
       if(length<16||b(length-2)!==255||b(length-1)!==217)return false;
-      let at=2,frame=false;
-      for(let n=0;n<128&&at+4<=length;n++) {
-        if(b(at++)!==255)return false;
-        let pads=0;while(b(at)===255&&pads++<32)at++;
-        const marker=b(at++),size=be16(at);if(size<2||at+size>length)return false;
+      let at=2,frame=false,scan=false,scans=0;
+      for(let n=0;n<128&&at+2<=length;n++) {
+        if(scan) {
+          // Traverse marker framing, not entropy decoding. Escaped FF bytes and
+          // restart markers are scan data; later headers still require checks.
+          while(at<length) {
+            if(b(at)!==255){at++;continue;}
+            let end=at+1,pads=0;while(end<length&&b(end)===255&&pads++<32)end++;
+            if(end>=length||pads>32)return false;
+            const next=b(end);
+            if(next===0||next>=208&&next<=215){at=end+1;continue;}
+            break;
+          }
+          scan=false;
+        }
+        if(at+2>length||b(at++)!==255)return false;
+        let pads=0;while(at<length&&b(at)===255&&pads++<32)at++;
+        if(at>=length||pads>32)return false;
+        const marker=b(at++);
+        if(marker===217)return frame&&scans>0&&at===length;
+        if(at+2>length)return false;
+        const size=be16(at);if(size<2||at+size>length)return false;
         if(marker===192||marker===193||marker===194) {
           if(frame||size<8||!fits(be16(at+5),be16(at+3)))return false;frame=true;
-        }else if(marker===218)return frame&&size>=6;
+        }else if(marker===218){if(!frame||size<6)return false;scan=true;scans++;}
         else if(!(marker>=224&&marker<=239||marker===219||marker===196||marker===221||marker===254))return false;
         at+=size;
       }
