@@ -1,5 +1,5 @@
 diff --git a/packages/agent/src/agent-loop.ts b/packages/agent/src/agent-loop.ts
-index 193e3fa..51f98e6 100644
+index 193e3fa..29a3779 100644
 --- a/packages/agent/src/agent-loop.ts
 +++ b/packages/agent/src/agent-loop.ts
 @@ -8,8 +8,10 @@ import {
@@ -101,7 +101,7 @@ index 193e3fa..51f98e6 100644
  		};
  	} catch (error) {
  		return {
-@@ -674,6 +691,332 @@ async function prepareToolCall(
+@@ -674,6 +691,333 @@ async function prepareToolCall(
  	}
  }
  
@@ -243,6 +243,7 @@ index 193e3fa..51f98e6 100644
 +							pollTool?.localPolling === "empty-stdin" &&
 +							emptyStdinPoll(input),
 +					);
++					const pollSession = localPoll ? input.session_id : undefined;
 +					let pollEligible = false;
 +					let hadUpdate = false;
 +					const childEmit: AgentEventSink = (event) => {
@@ -301,7 +302,7 @@ index 193e3fa..51f98e6 100644
 +					// No orphan events for queued work cancelled before its genuine start.
 +					// Child calls are never synthetic model transcript turns.
 +					const quietLocalPoll =
-+						pollEligible && !hadUpdate && quietStdinResult(finalized.result, finalized.isError);
++						pollEligible && !hadUpdate && quietStdinResult(finalized.result, finalized.isError, pollSession);
 +					if (started)
 +						await emitToolExecutionEnd(finalized, (event) =>
 +							emit({ ...event, ...(quietLocalPoll ? { localPoll: "quiet" as const } : {}) }),
@@ -434,7 +435,7 @@ index 193e3fa..51f98e6 100644
  async function executePreparedToolCall(
  	prepared: PreparedToolCall,
  	signal: AbortSignal | undefined,
-@@ -759,7 +1102,7 @@ async function finalizeExecutedToolCall(
+@@ -759,7 +1103,7 @@ async function finalizeExecutedToolCall(
  
  	return {
  		toolCall: prepared.toolCall,
@@ -663,10 +664,10 @@ index 0de7edd..526ce19 100644
  		}
 diff --git a/packages/agent/src/local-poll.ts b/packages/agent/src/local-poll.ts
 new file mode 100644
-index 0000000..6c09aed
+index 0000000..bdd1da5
 --- /dev/null
 +++ b/packages/agent/src/local-poll.ts
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,87 @@
 +// Native presentation classification, not guest authority or a token/billing meter.
 +// Tools opt in only when empty stdin is local I/O. Unknown/changed outcomes stay visible.
 +function dataObject(value: unknown): Record<string, unknown> | undefined {
@@ -683,6 +684,14 @@ index 0000000..6c09aed
 +	return result;
 +}
 +
++// Public lookup IDs only. Scope/call identity remains native and string-valued.
++function sessionId(value: unknown): value is string | number {
++	return (
++		(typeof value === "string" && value.length > 0 && value.length <= 1024) ||
++		(typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 2147483647)
++	);
++}
++
 +export function emptyStdinPoll(args: unknown): boolean {
 +	try {
 +		const value = dataObject(args);
@@ -691,9 +700,7 @@ index 0000000..6c09aed
 +				Object.keys(value).every((key) =>
 +					["session_id", "chars", "yield_time_ms", "max_output_tokens"].includes(key),
 +				) &&
-+				typeof value.session_id === "string" &&
-+				value.session_id.length > 0 &&
-+				value.session_id.length <= 1024 &&
++				sessionId(value.session_id) &&
 +				(!Object.hasOwn(value, "chars") || value.chars === ""),
 +		);
 +	} catch {
@@ -701,7 +708,7 @@ index 0000000..6c09aed
 +	}
 +}
 +
-+export function quietStdinResult(result: unknown, isError: boolean): boolean {
++export function quietStdinResult(result: unknown, isError: boolean, requestedSession?: unknown): boolean {
 +	try {
 +		if (isError !== false) return false;
 +		const value = dataObject(result);
@@ -719,9 +726,8 @@ index 0000000..6c09aed
 +				(key) =>
 +					!["session_id", "output", "exit_code", "running", "supervisor_ready", "truncated_bytes"].includes(key),
 +			) ||
-+			typeof details.session_id !== "string" ||
-+			!details.session_id ||
-+			details.session_id.length > 1024 ||
++			!sessionId(details.session_id) ||
++			(requestedSession !== undefined && details.session_id !== requestedSession) ||
 +			details.running !== true ||
 +			details.exit_code !== null ||
 +			details.output !== "" ||
@@ -2048,10 +2054,10 @@ index 0000000..1c53cff
 +});
 diff --git a/packages/agent/test/tool-scopes.test.ts b/packages/agent/test/tool-scopes.test.ts
 new file mode 100644
-index 0000000..12e265b
+index 0000000..5e43262
 --- /dev/null
 +++ b/packages/agent/test/tool-scopes.test.ts
-@@ -0,0 +1,487 @@
+@@ -0,0 +1,500 @@
 +import { describe, expect, it, vi } from "vitest";
 +import { emptyStdinPoll, quietStdinResult } from "../src/local-poll.ts";
 +import { ToolScopeRegistry } from "../src/tool-scopes.ts";
@@ -2467,6 +2473,19 @@ index 0000000..12e265b
 +			{ session_id: "x", localPolling: "empty-stdin" },
 +		])
 +			expect(emptyStdinPoll(value)).toBe(false);
++	});
++	it("accepts positive i32 lookup IDs without broadening native identity or coercing legacy IDs", () => {
++		for (const session_id of [1, 1701, 2147483647]) {
++			expect(emptyStdinPoll({ session_id })).toBe(true);
++			expect(quietStdinResult(result({ session_id }), false, session_id)).toBe(true);
++			expect(quietStdinResult(result({ session_id: String(session_id) }), false, session_id)).toBe(false);
++			expect(quietStdinResult(result({ session_id }), false, String(session_id))).toBe(false);
++			expect(quietStdinResult(result({ session_id }), false, session_id + 1)).toBe(false);
++		}
++		for (const session_id of [0, -0, -1, 1.5, 2147483648, NaN, Infinity, null, {}]) {
++			expect(emptyStdinPoll({ session_id })).toBe(false);
++			expect(quietStdinResult(result({ session_id }), false)).toBe(false);
++		}
 +	});
 +	it("recognizes only unchanged, complete empty-running pipe results", () => {
 +		expect(quietStdinResult(result(), false)).toBe(true);
@@ -2999,10 +3018,10 @@ index b5ee926..63c0364 100644
  }
 diff --git a/packages/coding-agent/src/modes/interactive/components/local-job-group.ts b/packages/coding-agent/src/modes/interactive/components/local-job-group.ts
 new file mode 100644
-index 0000000..037bfe0
+index 0000000..885ce4f
 --- /dev/null
 +++ b/packages/coding-agent/src/modes/interactive/components/local-job-group.ts
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,315 @@
 +import { Container, MouseRegion, stripTerminalSequences, Text, truncateToWidth } from "@earendil-works/pi-tui";
 +import type { AgentSessionEvent } from "../../../core/agent-session.ts";
 +import type { CustomMessage } from "../../../core/messages.ts";
@@ -3013,7 +3032,7 @@ index 0000000..037bfe0
 +
 +type Start = Extract<AgentSessionEvent, { type: "tool_execution_start" }>;
 +type Result = Parameters<ToolExecutionComponent["updateResult"]>[0];
-+type Job = { number: number; status: string; preview: string; session?: string };
++type Job = { number: number; status: string; preview: string; session?: string | number };
 +type Call = { start: Start; args: string; component: ToolExecutionComponent; job: Job; prominent: boolean };
 +
 +// These bounds concern presentation only. No scope/resource authority or result persistence is added.
@@ -3033,11 +3052,14 @@ index 0000000..037bfe0
 +	return copy;
 +}
 +const id = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 1024;
++// Session lookup equality remains typed: numeric 7 must never adopt string "7".
++const sessionId = (value: unknown): value is string | number =>
++	id(value) || (typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 2147483647);
 +function stdin(args: unknown): Record<string, unknown> | undefined {
 +	const value = data(args);
 +	if (
 +		value &&
-+		id(value.session_id) &&
++		sessionId(value.session_id) &&
 +		(!Object.hasOwn(value, "chars") || value.chars === "") &&
 +		Object.keys(value).every((key) => ["session_id", "chars", "yield_time_ms", "max_output_tokens"].includes(key))
 +	)
@@ -3066,7 +3088,9 @@ index 0000000..037bfe0
 +}
 +
 +// Only ordinary successful shell shapes get a short preview. Everything else keeps its native card.
-+export function localJobResult(result: unknown): { output: string; running: boolean; session?: string } | undefined {
++export function localJobResult(
++	result: unknown,
++): { output: string; running: boolean; session?: string | number } | undefined {
 +	try {
 +		const value = data(result);
 +		if (!value || value.isError !== false) return;
@@ -3088,7 +3112,7 @@ index 0000000..037bfe0
 +		)
 +			return;
 +		if (detail.running === true) {
-+			if (!id(detail.session_id) || detail.exit_code !== null) return;
++			if (!sessionId(detail.session_id) || detail.exit_code !== null) return;
 +		} else if (detail.running !== false || detail.exit_code !== 0 || Object.hasOwn(detail, "session_id")) return;
 +		if (!Array.isArray(value.content) || value.content.length !== 1) return;
 +		const block = data(value.content[0]);
@@ -3110,7 +3134,7 @@ index 0000000..037bfe0
 +		return {
 +			output: detail.output,
 +			running: detail.running,
-+			session: detail.running ? (detail.session_id as string) : undefined,
++			session: detail.running ? (detail.session_id as string | number) : undefined,
 +		};
 +	} catch {
 +		return;
@@ -3192,7 +3216,7 @@ index 0000000..037bfe0
 +			this.calls.size >= MAX_RECORDS
 +		)
 +			return false;
-+		const session = start.toolName === "write_stdin" ? (stdin(start.args)?.session_id as string) : undefined;
++		const session = start.toolName === "write_stdin" ? (stdin(start.args)?.session_id as string | number) : undefined;
 +		let job = session ? this.jobs.find((j) => j.session === session) : undefined;
 +		if (!job) {
 +			job = { number: this.jobs.length + 1, status: "call pending", preview: "", session };
@@ -3577,10 +3601,10 @@ index 0000000..16e5eb3
 +}
 diff --git a/packages/coding-agent/test/suite/tool-invocation.test.ts b/packages/coding-agent/test/suite/tool-invocation.test.ts
 new file mode 100644
-index 0000000..35eff2e
+index 0000000..f1af827
 --- /dev/null
 +++ b/packages/coding-agent/test/suite/tool-invocation.test.ts
-@@ -0,0 +1,992 @@
+@@ -0,0 +1,1015 @@
 +// Native scoped invocation regression fixtures.
 +import type { AgentToolInvocation, AgentToolResult, AgentToolScope } from "@earendil-works/pi-agent-core";
 +import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
@@ -3595,6 +3619,7 @@ index 0000000..35eff2e
 +	LocalJobGroup,
 +	localJobAudit,
 +	localJobResult,
++	localJobStart,
 +} from "../../src/modes/interactive/components/local-job-group.ts";
 +import { ToolExecutionComponent } from "../../src/modes/interactive/components/tool-execution.ts";
 +import { InteractiveMode } from "../../src/modes/interactive/interactive-mode.ts";
@@ -4127,7 +4152,7 @@ index 0000000..35eff2e
 +		isError: false,
 +		...extra,
 +	});
-+	const running = (id = "owned") =>
++	const running = (id: string | number = "owned") =>
 +		result({
 +			session_id: id,
 +			output: "",
@@ -4376,6 +4401,28 @@ index 0000000..35eff2e
 +			expect(f.frame().split("\n").length).toBeGreaterThan(2);
 +			expect(f.frame()).toContain(name === "mismatched text" ? "OTHER_RESULT" : "IMPORTANT_OUTPUT");
 +		});
++	it("numeric lookup IDs group by typed equality while native scope/call IDs remain strings", async () => {
++		const f = display(),
++			s = start("numeric-start");
++		await f.emit(s);
++		await f.finish(s, running(1701));
++		const poll = start("numeric-poll", "write_stdin", { session_id: 1701 });
++		expect(localJobStart(poll)).toBe(true);
++		expect(localJobResult(running(1701))).toMatchObject({ session: 1701 });
++		await f.emit(poll);
++		await f.finish(poll, running(1701));
++		expect(f.groups()[0].render(80)).toHaveLength(2);
++		const legacy = start("legacy-poll", "write_stdin", { session_id: "1701" });
++		await f.emit(legacy);
++		await f.finish(legacy, running("1701"));
++		expect(f.groups()[0].render(80)).toHaveLength(3);
++		for (const session_id of [0, -1, 1.5, 2147483648, NaN, Infinity]) {
++			expect(localJobStart(start("invalid", "write_stdin", { session_id }))).toBe(false);
++			expect(localJobResult(running(session_id))).toBeUndefined();
++		}
++		expect(localJobStart({ ...poll, scopeId: 1701 } as any)).toBe(false);
++		expect(localJobStart({ ...poll, toolCallId: 1701 } as any)).toBe(false);
++	});
 +	it("normalizes only known own undefined fields on a copy; key order is not evidence loss", () => {
 +		const r = ended();
 +		expect(localJobResult(r)).toMatchObject({ running: false });

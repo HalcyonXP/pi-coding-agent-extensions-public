@@ -60,7 +60,7 @@ export async function acceptUnifiedWait(session,runtime,nativeStream,cwd) {
    const early=await invoke('exec_command',{cmd:await command('early',"setTimeout(()=>process.stdout.write('WAIT_EARLY\\n'),1500)"),yield_time_ms:0});
    assert.equal(early.value.running,false);assert.equal(early.value.exit_code,0);assert.match(early.value.output,/WAIT_EARLY/);
    const start=await invoke('exec_command',{cmd:await command('background',"process.stdin.resume();const expiry=setTimeout(()=>process.exit(19),90000);process.stdin.once('data',()=>setTimeout(()=>{clearTimeout(expiry);process.stdout.write('WAIT_BACKGROUND\\n');process.stdin.destroy()},35000))"),yield_time_ms:0});
-   assert.equal(start.value.running,true);assert.equal(typeof start.value.session_id,'string');const id=start.value.session_id;
+   assert.equal(start.value.running,true);assert.equal(typeof start.value.session_id,"number");const id=start.value.session_id;
    const input=await invoke('write_stdin',{session_id:id,chars:'arm\n',yield_time_ms:0});assert.equal(input.value.running,true);assert.equal(input.value.session_id,id);assert.ok(input.ms>=200&&input.ms<5000);
    const background=await invoke('write_stdin',{session_id:id,yield_time_ms:60000});assert.equal(background.value.running,false);assert.equal(background.value.exit_code,0);assert.equal(background.value.session_id,undefined);assert.match(background.value.output,/WAIT_BACKGROUND/);
    const cancellable=await invoke('exec_command',{cmd:await command('cancel',"process.stdin.resume();setTimeout(()=>process.exit(19),90000)"),yield_time_ms:0});assert.equal(cancellable.value.running,true);

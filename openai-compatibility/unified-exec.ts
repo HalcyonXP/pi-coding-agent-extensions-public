@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { allocateSessionId, isSessionId, MAX_SESSION_ID } from "./unified-session-id.ts";
 import { existsSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -49,7 +49,7 @@ export interface NativeJobScope {
 interface JobAccess { scope?: NativeJobScope; context?: AbortSignal }
 export interface NativeCompletion extends ExecResult {
 	running: false;
-	session_id: string;
+	session_id: number;
 	output_remaining_bytes: number;
 }
 export interface NativeJobBinding extends JobAccess {
@@ -60,7 +60,7 @@ export interface NativeJobBinding extends JobAccess {
 }
 interface ProcessRecord {
 	access?: JobAccess;
-	id: string;
+	id: number;
 	owner: string;
 	child: ChildProcessWithoutNullStreams;
 	output: Utf8OutputBuffer;
@@ -81,7 +81,7 @@ interface ProcessRecord {
 	stopSettled?: boolean;
 }
 export interface ExecResult {
-	session_id?: string;
+	session_id?: number;
 	output: string;
 	exit_code: number | null;
 	running: boolean;
@@ -98,7 +98,7 @@ function cleanOutput(output: string): string {
 
 /** Pipe-backed process ownership, not a security sandbox or PTY. No detached session survives a reset. */
 export class UnifiedExecManager {
-	private processes = new Map<string, ProcessRecord>();
+	private processes = new Map<number, ProcessRecord>();
 	private sweep: NodeJS.Timeout | undefined;
 	private generation = 0;
 	private launch: (command: string) => Launch | Promise<Launch>;
@@ -144,6 +144,7 @@ export class UnifiedExecManager {
 			if (eligible[0]) this.processes.delete(eligible[0].id);
 			if (this.processes.size >= MAX_RETAINED) throw new Error("Unified exec retained-session limit reached.");
 		}
+		const id = allocateSessionId(); // reserve before resource registration/spawn; never recycle
 		let ownedRecord: ProcessRecord | undefined;
 		// Native registration precedes OS launch, not receipt of a public session ID.
 		const release = binding?.resource.ownResource(async () => {
@@ -161,7 +162,7 @@ export class UnifiedExecManager {
 		} catch (error) { release?.(); throw error; }
 		let done!: () => void, initialDone!: () => void;
 		const initial = new Promise<void>(resolve => { initialDone = resolve; });
-		const record: ProcessRecord = { id: randomUUID(), owner, child, revocation: new AbortController(), access: binding ? {scope:binding.scope,context:binding.context} : undefined, output: new Utf8OutputBuffer(), exitCode: null, closed: false, ready: !launch.supervised, supervised: launch.supervised === true, created: Date.now(), touched: Date.now(), done: new Promise((resolve) => { done = resolve; }) };
+		const record: ProcessRecord = { id, owner, child, revocation: new AbortController(), access: binding ? {scope:binding.scope,context:binding.context} : undefined, output: new Utf8OutputBuffer(), exitCode: null, closed: false, ready: !launch.supervised, supervised: launch.supervised === true, created: Date.now(), touched: Date.now(), done: new Promise((resolve) => { done = resolve; }) };
 		ownedRecord = record;
 		this.processes.set(record.id, record);
 		let prelude = Buffer.alloc(0), admissionTimer: NodeJS.Timeout | undefined;
@@ -227,12 +228,12 @@ export class UnifiedExecManager {
 		if (!first.session_id) this.processes.delete(record.id);
 		return first;
 	}
-	private owned(id: string, owner: string, access?: JobAccess): ProcessRecord {
-		const record = this.processes.get(id);
+	private owned(id: unknown, owner: string, access?: JobAccess): ProcessRecord {
+		const record = isSessionId(id) ? this.processes.get(id) : undefined;
 		if (!record || record.revoked || record.owner !== owner || record.access?.scope !== access?.scope || record.access?.context !== access?.context || record.access?.context?.aborted || access?.scope?.signal.aborted) throw new Error("Unknown, expired, or foreign Unified exec session.");
 		return record;
 	}
-	async write(owner: string, id: string, chars: string, yieldMs: number, maxBytes: number, signal?: AbortSignal, access?: JobAccess): Promise<ExecResult> {
+	async write(owner: string, id: number, chars: string, yieldMs: number, maxBytes: number, signal?: AbortSignal, access?: JobAccess): Promise<ExecResult> {
 		signal?.throwIfAborted();
 		const record = this.owned(id, owner, access);
 		if (Buffer.byteLength(chars) > MAX_INPUT) throw new Error("Unified exec input exceeds 64 KiB.");
@@ -317,16 +318,16 @@ export class UnifiedExecManager {
 		return [...this.processes.values()].filter((record) => record.owner === owner && (!record.revoked || !record.closed || record.completionFailed))
 			.map((record) => ({ session_id: record.id, cleanup_pending: Boolean(record.completionFailed || record.settled || (!record.closed && (record.revoked || record.stop))), ownership: record.access?.scope ? "cell" : "conversation", pid: record.child.pid, running: !record.closed, buffered_bytes: record.output.byteLength, age_seconds: Math.floor((Date.now() - record.created) / 1000) }));
 	}
-	async cancel(owner: string, id: string): Promise<void> {
+	async cancel(owner: string, id: unknown): Promise<void> {
 		// Explicit user control may cancel a same-conversation cell job; model-facing
 		// write_stdin still requires the exact scope. Permit an explicit cleanup retry.
-		const record = this.processes.get(id);
+		const record = isSessionId(id) ? this.processes.get(id) : undefined;
 		if (!record || record.owner !== owner) throw new Error("Unknown, expired, or foreign Unified exec session.");
 		if (!record.closed && record.stopSettled) record.stop = undefined;
 		await this.stop(record, "Cancelled by user.");
 		if (!record.closed) throw new Error("OS process termination was not confirmed.");
 		await record.settled; this.assertSettled(record);
-		this.processes.delete(id);
+		this.processes.delete(record.id);
 	}
 	async close(): Promise<void> { clearInterval(this.sweep); this.sweep = undefined; await this.reset(); }
 }
@@ -341,7 +342,7 @@ const ExecParams = Type.Object({
 	tty: Type.Optional(Type.Literal(false, { description: "Only pipe-backed execution is available; PTY/ConPTY is not implemented." })),
 }, { additionalProperties: false });
 const WriteParams = Type.Object({
-	session_id: Type.String({ minLength: 1 }),
+	session_id: Type.Integer({ minimum: 1, maximum: MAX_SESSION_ID, description: "Numeric lookup ID returned by exec_command/write_stdin; not a PID or native authority. Do not convert strings, reuse expired IDs or relaunch a command to collect output." }),
 	chars: Type.Optional(Type.String({ maxLength: MAX_INPUT, description: "Input text; empty polls. Exactly Ctrl-C (U+0003) kills the process tree; exactly Ctrl-D (U+0004) closes stdin. Not terminal emulation." })),
 	yield_time_ms: yieldTime("Empty/omitted chars: default/floor 5000 ms, maximum 300000 ms. Nonempty input, including control characters: default/floor 250 ms, maximum 30000 ms."),
 	max_output_tokens: outputLimit,

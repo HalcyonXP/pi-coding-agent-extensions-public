@@ -11,11 +11,11 @@ export interface SettingsRow {
 	values?: string[];
 }
 export interface JobRow {
-	session_id: string; cleanup_pending: boolean; ownership: string; running: boolean; buffered_bytes: number; age_seconds: number;
+	session_id: string | number; cleanup_pending: boolean; ownership: string; running: boolean; buffered_bytes: number; age_seconds: number;
 }
 export interface JobsController {
 	read(): JobRow[];
-	cancel(id: string, signal: AbortSignal): Promise<void>;
+	cancel(id: JobRow["session_id"], signal: AbortSignal): Promise<void>;
 }
 export interface SettingsController {
 	jobs?: JobsController;
@@ -156,7 +156,7 @@ export class OpenAIJobsPanel extends Container {
   let jobs:JobRow[];
   try { if(!this.isCurrent())throw Error("Context changed. Return to OpenAI settings."); jobs=this.controller.read(); }
   catch { jobs=[]; this.busy=true; this.feedback.setText(" Unable to refresh jobs. Return to OpenAI settings; no cancellation is available."); }
-  const items:SettingItem[]=jobs.map((job,index)=>({id:job.session_id,label:`Job ${index+1}`,currentValue:job.cleanup_pending?"cleanup pending":job.running?"running":"completed",
+  const items:SettingItem[]=jobs.map((job,index)=>({id:String(job.session_id),label:`Job ${index+1}`,currentValue:job.cleanup_pending?"cleanup pending":job.running?"running":"completed",
    description:settingsText(`${job.session_id} · ${job.ownership} ownership · ${job.age_seconds}s old · ${job.buffered_bytes} buffered bytes. Cancellation cannot undo effects; pending cleanup requires explicit confirmation/retry.`),
    submenu:this.busy?undefined:(_value,done)=>new SettingsList([
     {id:"keep",label:"Keep job",currentValue:"return",values:["keep"],description:"Return without cancellation."},
@@ -168,7 +168,7 @@ export class OpenAIJobsPanel extends Container {
   this.list=new SettingsList(items,8,this.colors(),()=>{if(!this.busy&&!this.closed&&this.width>=32){this.rebuild();this.requestRender();}},()=>this.close(),{enableSearch:true});
   this.addChild(this.list);this.addChild(this.feedback);
  }
- private async cancel(id:string):Promise<void> {
+ private async cancel(id:JobRow["session_id"]):Promise<void> {
   if(this.closed||this.busy||this.width<32||!this.isCurrent())return;
   this.busy=true;this.feedback.setText(" Cancelling owned job…");this.rebuild();this.requestRender();
   try { await this.controller.cancel(id,this.abort.signal);if(!this.closed)this.feedback.setText(" Job cancelled. Snapshot refreshed; effects already performed are not undone."); }

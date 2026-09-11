@@ -10,10 +10,10 @@ function fixture({thirdAllowed=false,readyAt=0,echo=false,foreign=false}={}){
   calls.push({name,args});
   if(name==="exec_command"){
    if(++started===3)return {isError:!thirdAllowed,content:[{type:"text",text:"Durable scope admission unavailable or prior cleanup incomplete"}]};
-   active++;return {isError:false,value:{session_id:String(started),running:true,supervisor_ready:readyAt===0,output:echo?"process.stdout.write(DIRECT_READY);\nReferenceError: DIRECT_READY is not defined\n":readyAt===0?"DIRECT_READY\n":""}};
+   active++;return {isError:false,value:{session_id:started,running:true,supervisor_ready:readyAt===0,output:echo?"process.stdout.write(DIRECT_READY);\nReferenceError: DIRECT_READY is not defined\n":readyAt===0?"DIRECT_READY\n":""}};
   }
   if(name==="read"){reads++;assert.equal(active,2);return {isError:false};}
-  const i=Number(args.session_id)-1;if(foreign)return {isError:true};
+  const i=args.session_id-1;if(foreign)return {isError:true};
   if(args.chars){active--;return {isError:false,value:{running:false,supervisor_ready:true,exit_code:0,output:"DIRECT_DONE\n"}};}
   polls[i]++;return {isError:false,value:{session_id:args.session_id,running:true,supervisor_ready:polls[i]>=readyAt,output:!echo&&polls[i]>=readyAt?"DIRECT_READY\r\n":""}};
  };

@@ -1,4 +1,5 @@
 import type { ExecResult } from "./unified-exec.ts";
+import { isSessionId } from "./unified-session-id.ts";
 
 /** Presentation metadata, not process age, retained-job authority or token telemetry. */
 export interface UnifiedResultMetadata { version: 1; wall_time_ms: number }
@@ -20,7 +21,7 @@ function outcome(value: unknown): ExecResult {
 		data[key as string] = descriptor.value;
 	}
 	if (required.some(key => !Object.hasOwn(data, key)) || typeof data.output !== "string" || data.output.length > 1024 * 1024 || typeof data.running !== "boolean" || !nonnegativeInteger(data.truncated_bytes) || !(data.exit_code === null || (typeof data.exit_code === "number" && Number.isSafeInteger(data.exit_code)))) throw new Error("Unfamiliar Unified exec outcome");
-	if (data.session_id !== undefined && (typeof data.session_id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(data.session_id))) throw new Error("Unfamiliar Unified exec session identifier");
+	if (data.session_id !== undefined && !isSessionId(data.session_id)) throw new Error("Unfamiliar Unified exec session identifier");
 	if (data.running && data.session_id === undefined) throw new Error("Running Unified exec result requires a session identifier");
 	if (data.running && data.exit_code !== null) throw new Error("Unfamiliar running Unified exec exit status");
 	if (data.supervisor_ready !== undefined && typeof data.supervisor_ready !== "boolean") throw new Error("Unfamiliar Unified exec readiness");

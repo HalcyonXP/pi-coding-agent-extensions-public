@@ -10,7 +10,7 @@ const modelReports=(context,id)=>context.messages.flatMap(m=>{const text=typeof 
 export async function acceptAsyncCompletion(session,invoke,outcome,faux,ai,cwd,timing={now:()=>performance.now(),pause}) {
  const quote=s=>`'${s.replaceAll("'","''")}'`,control="async-completion-release.txt";
  const program=`process.stdout.write('ASYNC_READY\\n');setTimeout(()=>process.exit(19),30000);setInterval(()=>{if(require('node:fs').existsSync('${control}')){process.stdout.write('ASYNC_DONE\\n');process.exit(7)}},25)`;
- const first=outcome(await invoke("exec_command",{cmd:`& ${quote(process.execPath)} -e ${quote(program)}; exit $LASTEXITCODE`,yield_time_ms:1}));assert.equal(first.running,true);assert.equal(typeof first.session_id,"string");
+ const first=outcome(await invoke("exec_command",{cmd:`& ${quote(process.execPath)} -e ${quote(program)}; exit $LASTEXITCODE`,yield_time_ms:1}));assert.equal(first.running,true);assert.equal(typeof first.session_id,"number");
  const id=first.session_id;let r=first,output=first.output;
  const readinessDeadline=timing.now()+9000;
  for(let n=0;n<30&&!output.split(/\r?\n/).includes("ASYNC_READY")&&timing.now()+5000<=readinessDeadline;n++){r=outcome(await invoke("write_stdin",{session_id:id,yield_time_ms:300}));output+=r.output;}

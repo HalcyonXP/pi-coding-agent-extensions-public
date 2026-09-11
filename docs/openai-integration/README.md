@@ -12,6 +12,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
 | Supervisor readiness | Private shell-supervisor preamble received; not child acknowledgement receipt, user-command success or native authority |
 | Scope/context identity | Native branded authority and lifecycle identity, not guest IDs, metadata or strings |
+| Unified session ID | Positive numeric lookup key, not a PID or scope/call identity. Native IDs stay opaque strings; history rendering does not restore live lookup authority. See [ID lifecycle](NATIVE-UNIFIED-CONTRACT.md#numeric-lookup-ids). |
 | Protected evidence | Finalized native descendants or direct completion evidence persisted/published through native ownership outside guest text projection; not another live model turn or fsync/crash recovery |
 | Draining | Native resources/publication whose closure is not yet confirmed; still consumes admission |
 | Collector cancellation | Wakes the current Code exec/wait collection without waiting out its return timer; not confirmation of native closure or release of draining admission |

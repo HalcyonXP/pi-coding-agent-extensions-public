@@ -1,4 +1,4 @@
-# Direct Unified exec output contract
+# Unified session IDs and direct output contract
 
 ## Goal and scope
 
@@ -13,11 +13,19 @@ The reference is [`ExecCommandToolOutput` in openai/codex@45305dd229c01e6cb6e122
 | Direct Unified output | One native handler's model-facing text content, not a Code cell result or asynchronous completion report |
 | Call wall time | Integer milliseconds from a monotonic clock around one awaited manager start/write; not process age, CPU time, billing or retention |
 | Process status | The manager's returned collection snapshot; not an application-success inference or continuous live-state guarantee |
-| Retained session ID | An existing lookup key requiring original native context/scope authority; an exited process can retain unread output |
+| Retained session ID | A positive integer lookup key requiring original native context/scope authority; not a PID or an authority token. An exited process can retain unread output |
 | Nested result | Unchanged native `{result,isError}`; Unified data remains in `r.result.details`, with the original JSON content and no new timing metadata |
 | Protected completion | Unchanged once-only native terminal evidence, including its correlation, non-consuming snapshot, persistence and cleanup ownership |
 
 Native invocation/scope checks select the direct versus nested path. Guest arguments, result metadata and IDs do not select a projection or grant authority. Direct calls retain Pi's normal result rendering; there is no new heuristic JSON renderer or formatter applied after result hooks. Unknown/hook-modified content remains ordinary visible output. Historical results, nested quiet/grouped polling and the eight-line Code previews are not rewritten.
+
+## Numeric lookup IDs
+
+Current `session_id` values are integers1–2,147,483,647 in direct/nested results, stdin arguments, Jobs snapshots and protected completion reports. Native scope IDs, call IDs and evidence identities stay opaque strings. Never stringify an ID for JSON `write_stdin` or convert a historical UUID. The CLI's separate `jobs cancel` grammar accepts canonical positive decimal text; its menu passes the captured numeric value, not a parsed display row.
+
+A constant-memory, nonwrapping allocator reserves IDs before resource registration/spawn and never recycles them within the Node realm, including manager reset/replacement and module re-evaluation. Only the sequence survives in runtime memory: no job, credential, authority or settings file is retained. A process restart chooses a fresh random starting point, not durable recovery or a guarantee of global uniqueness. Exhaustion refuses further launches. This differs from the inspected Codex random1,000–99,999 allocator; the aligned surface is the numeric `i32` lookup, not its allocation algorithm or exact error language.
+
+Native quiet-poll/grouping code accepts typed numeric lookup values without broadening native scope/call ID checks. Numeric1701 and legacy string`"1701"` are distinct. A changed returned ID remains visible rather than being classified quiet. Legacy synthetic/history rendering remains readable but cannot admit a historical string ID to current Unified tools. This requires the updated matched host artifacts, not an extension-only schema swap.
 
 ## Bounded nested collection
 
@@ -40,14 +48,14 @@ A stopped process with unread output can return:
 ```text
 Wall time: 0.2140 seconds
 Process exited with code 7
-More output available with session ID example-owned-lookup
+More output available with session ID 1701
 Supervisor preamble: received
 Output:
 Literal "quotes", backslash \, Unicode 雪 🌊
 {"literal":"keep this JSON as text"}
 ```
 
-`example-owned-lookup` is illustrative, not an ID to execute or adopt. A retained ID with `running:false` **must not** be called a running process. A running snapshot says `Process running with session ID ...`; an unknown terminal exit says `Process stopped; exit code unavailable`. Nonzero exit codes remain visible native returned data, not automatically rewritten as thrown invocation errors or top-level `isError:true`. Native validation, ownership, cancellation and manager throws continue through their original error path.
+`1701` is illustrative, not an ID to execute or adopt. A retained ID with `running:false` **must not** be called a running process. A running snapshot says `Process running with session ID ...`; an unknown terminal exit says `Process stopped; exit code unavailable`. Nonzero exit codes remain visible native returned data, not automatically rewritten as thrown invocation errors or top-level `isError:true`. Native validation, ownership, cancellation and manager throws continue through their original error path.
 
 The same `output`, `exit_code`, `running`, `session_id`, `supervisor_ready`, `truncated_bytes` and `termination` fields remain in `message.details`. Direct results additionally contain exactly:
 
@@ -65,15 +73,15 @@ Known readiness, termination and dropped-byte facts appear before `Output:` even
 
 ## Preserved execution and open compatibility work
 
-Apart from the documented defaults, clamped wait requests and cancellable background collection, this source retains schema field names, output ranges, UUID lookup, ownership, hooks/approvals, protected evidence, model/provider/catalog/auth/cache ownership, Fast/footer, saved preferences, native production patch/packages/helper/lock or runtime budgets. Keep two active/draining scopes, four live processes, eight retained records, existing lifetime/idle/readiness/drain limits and same-cell nested polling. Delegated shell still has full OS permissions; no sandbox/escalation, PTY, shell/environment selector, coordinator fallback, invocation-time build/download or automatic idle turn is added.
+Apart from the documented defaults, clamped waits, collection cancellation and numeric lookup transition, this source retains schema field names, output ranges, ownership, hooks/approvals, protected evidence, model/provider/catalog/auth/cache ownership, Fast/footer, saved preferences and runtime budgets. Numeric classification changes the native agent/coding-agent packages and their patch/archive/consumer-integrity pins; the verified helper, other host packages and dependency versions remain unchanged. Keep two active/draining scopes, four live processes, eight retained records, existing lifetime/idle/readiness/drain limits and same-cell nested polling. Delegated shell still has full OS permissions; no sandbox/escalation, PTY, shell/environment selector, coordinator fallback, invocation-time build/download or automatic idle turn is added.
 
-Numeric target IDs, configurable background ceilings, tool-specific nested object projection, complete hook/error/unknown-field behavior and target truncation/history algorithms remain work. Helper/notify, Web/image/context/continuation and lifecycle compatibility remain tracked under #19/#16. Redistribution/provenance/manual public executable delivery remains separately gated by #3. None of these gaps is a permanent waiver.
+Exact target allocation/error behavior, configurable background ceilings, tool-specific nested object projection, complete hook/error/unknown-field behavior and target truncation/history algorithms remain work. Helper/notify, Web/image/context/continuation and lifecycle compatibility remain tracked under #19/#16. Redistribution/provenance/manual public executable delivery remains separately gated by #3. None of these gaps is a permanent waiver.
 
 ## Required validation
 
 Source tests cover literal quotes/backslashes/Unicode/JSON/newlines, status/readiness/termination/loss, retained exited IDs, malformed data, separate clocks, native error propagation, unchanged nested results and both native Responses serializers. `distribution/unified-output-contract.mjs` independently checks actual direct text/details without importing the product formatter or treating metadata as authority.
 
-Installed acceptance uses the original SDK dispatcher, synthetic auth/request SSE seams and real owned Windows shell/stdin/output. Both Responses routes must preserve function-call/result replay, literal before/after output, same-session collection, nonzero exit, partial terminal output, real buffer loss, measured time bounded by an independently observed prompt interval and zero remaining native scopes. Sixteen synthetic model requests are required; these are separate from the existing Code input's 24/12 scenarios, Code output's eight requests and other synthetic fixtures—not token/quota telemetry. Native component checks require visible direct status/loss and unchanged history through expansion. The shell fixture preserves child exit status; command text containing a marker is never sufficient evidence that it ran.
+Installed acceptance uses the original SDK dispatcher, synthetic auth/request SSE seams and real owned Windows shell/stdin/output. Both Responses routes must preserve function-call/result replay, numeric positive-i32 IDs (`numericSessionIDs`), literal before/after output, same-session collection, nonzero exit, partial terminal output, real buffer loss, measured time bounded by an independently observed prompt interval and zero remaining native scopes. Sixteen synthetic model requests are required; these are separate from the existing Code input's 24/12 scenarios, Code output's eight requests and other synthetic fixtures—not token/quota telemetry. Native component checks require visible direct status/loss and unchanged history through expansion. The shell fixture preserves child exit status; command text containing a marker is never sufficient evidence that it ran.
 
 Omitted-default acceptance adds12 separately counted synthetic requests/six scenarios across both native Responses routes: a real1500ms child completes on the initial default wait, direct output returns40,000 bytes with original-ID remainder collection, and a contained cell collects escaped output under unchanged serialized wrappers with all shell controls omitted. Handler seams independently check exact initial/empty/nonempty defaults and current explicit wait clamping. Restoration failures are aggregated; no source fixture or passed development probe substitutes for exact-artifact acceptance.
 
