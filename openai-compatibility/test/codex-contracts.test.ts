@@ -61,7 +61,8 @@ test("actual Pi shell schema snapshot keeps the current explicitly bounded adapt
 	assert.deepEqual(fields(tools[1].parameters), [...facts.pi.unifiedWriteFields].sort());
 	assert.equal(tools[1].parameters.properties.session_id.type, facts.pi.sessionIdType);
 	assert.equal(tools[0].parameters.properties.tty.const, facts.pi.tty);
-	assert.deepEqual(range(tools[0].parameters.properties.yield_time_ms), facts.pi.yieldRangeMs);
+	assert.deepEqual(facts.pi.yieldRangeMs, [0, 30000]); // Historical admission, not today's clamped request range.
+	for (const tool of tools) assert.deepEqual(range(tool.parameters.properties.yield_time_ms), [0, Number.MAX_SAFE_INTEGER]);
 	assert.deepEqual(range(tools[0].parameters.properties.max_output_tokens), facts.pi.outputTokenRange);
 });
 

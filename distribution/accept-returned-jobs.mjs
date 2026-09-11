@@ -18,10 +18,11 @@ export async function acceptReturnedJobs(session, invoke, outcome) {
  assert.equal((await invoke("read",{path:"input.txt"})).isError,false);
  for(const job of jobs){
   let r=job,output=job.output;
-  for(let n=0;n<30&&!output.split(/\r?\n/).includes("DIRECT_READY");n++){
+  const deadline=performance.now()+9000;
+  for(let n=0;n<30&&!output.split(/\r?\n/).includes("DIRECT_READY")&&performance.now()+5000<=deadline;n++){
    r=outcome(await invoke("write_stdin",{session_id:job.session_id,yield_time_ms:300}));output+=r.output;
   }
-  assert.ok(output.split(/\r?\n/).includes("DIRECT_READY"),"Direct job must reach an exact readiness line within the unchanged poll budget");assert.equal(r.running,true);assert.equal(r.supervisor_ready,true);
+  assert.ok(output.split(/\r?\n/).includes("DIRECT_READY"),"Direct job must reach an exact readiness line within the nine-second readiness budget");assert.equal(r.running,true);assert.equal(r.supervisor_ready,true);
   r=outcome(await invoke("write_stdin",{session_id:job.session_id,chars:"finish\n",yield_time_ms:300}));output+=r.output;
   for(let n=0;n<30&&r.running;n++){r=outcome(await invoke("write_stdin",{session_id:job.session_id,yield_time_ms:300}));output+=r.output;}
   assert.equal(r.running,false);assert.equal(r.exit_code,0);assert.ok(output.split(/\r?\n/).includes("DIRECT_DONE"));
