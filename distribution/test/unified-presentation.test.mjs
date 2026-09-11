@@ -14,7 +14,7 @@ test('a stopped retained ID cannot be labelled a running process',()=>{const f=f
 test('partial or legacy-only frame lists cannot certify the combined contract',()=>{for(const n of [0,19,27,31,35,37])assert.throws(()=>validateAllOutputFrames(Array.from({length:n},()=>({name:'synthetic',text:'unaccepted'}))));});
 test('real profile/settings consumers require the whole 36-frame contract while the prior 31 validator stays intact',()=>{
  const profile=readFileSync(new URL('../accept-profile.mjs',import.meta.url),'utf8'),settings=readFileSync(new URL('../accept-settings.mjs',import.meta.url),'utf8'),validator=readFileSync(new URL('../unified-output-presentation.mjs',import.meta.url),'utf8');
- assert.ok(profile.includes('validateAllOutputFrames(settingsMenu.frames)'));assert.ok(settings.includes('frames.push(...codeFrames,...unifiedFrames);validateAllOutputFrames(frames)'));assert.ok(validator.includes('validateReadableFrames(frames.slice(0,31))'));
+ assert.ok(profile.includes('validateAllOutputFrames(settingsMenu.frames)'));assert.ok(settings.includes('exerciseSettings(sdk,bundle,profile,cwd,join(bundle,"extensions/openai-compatibility/index.ts"))') && readFileSync(new URL('../settings-scenarios.mjs',import.meta.url),'utf8').includes('frames.push(...codeFrames,...unifiedFrames);validateAllOutputFrames(frames)'));assert.ok(validator.includes('validateReadableFrames(frames.slice(0,31))'));
 });
 test('native helper refuses unsupported platforms or preserves both primary and restoration failures',async()=>{
  if(process.platform!=='win32'){await assert.rejects(acceptNativeUnifiedOutput({}, {}, ()=>{}));return;}

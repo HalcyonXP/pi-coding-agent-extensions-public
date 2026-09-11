@@ -24,5 +24,5 @@ export function validateCodeOutputAcceptance(messages) {
  const code=messages.filter(m=>['exec','wait'].includes(m.toolName)&&!m.isError),rows=code.map(m=>({name:m.toolName,value:readCodeOutcome(m)}));
  for(const name of ['exec','wait'])assert.ok(rows.some(r=>r.name===name));for(const status of ['running','completed','terminated'])assert.ok(rows.some(r=>r.value.status===status));
  assert.ok(rows.some(r=>r.value.result?.status==='error'&&r.value.output.length===0&&r.value.result.diagnostics));assert.ok(rows.some(r=>r.value.omitted_output_bytes>0&&r.value.output.length===0));assert.ok(rows.some(r=>r.value.output.length>0));
- return {nativeExec:true,nativeWait:true,plainModelOutput:true,measuredPerCallWallTime:true,structuredDetailsRetained:true,failureAndLossVisible:true,legacyJsonEnvelopeNotReturned:true,nestedProjectionChanged:false};
+ return {nativeExec:true,nativeWait:true,plainModelOutput:true,measuredPerCallWallTime:true,structuredDetailsRetained:true,failureAndLossVisible:true,legacyJsonEnvelopeNotReturned:true,nestedProjectionCovered:false};
 }

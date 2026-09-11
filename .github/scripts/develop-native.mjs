@@ -10,10 +10,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { verifyBundle } from "../../distribution/lib.mjs";
 import { acceptUnifiedWait } from "../../distribution/accept-unified-wait.mjs";
 import { acceptProjectedTools } from "../../distribution/accept-projected-tools.mjs";
+import { exerciseSettings } from "../../distribution/settings-scenarios.mjs";
 
 const [suite, bundle] = process.argv.slice(2);
 assert.equal(process.argv.length, 4);
-assert.ok(["unified-wait", "projection"].includes(suite));
+assert.ok(["unified-wait", "projection", "settings"].includes(suite));
 assert.equal(process.platform, "win32"); assert.equal(process.arch, "x64");
 const home = process.env.HOME, profile = process.env.PI_CODING_AGENT_DIR;
 assert.ok(home && profile); assert.equal(home, process.env.USERPROFILE);
@@ -38,6 +39,8 @@ const sdk = await import(pathToFileURL(join(sdkRoot, pkg.exports["."].import)).h
 const cwd = join(home, "workspace"); await mkdir(cwd);
 const failures = []; let session, receipt;
 try {
+  if (suite === "settings") receipt = await exerciseSettings(sdk, bundle, profile, cwd, join(source, "openai-compatibility/index.ts"));
+  else {
   const settings = sdk.SettingsManager.inMemory();
   const resources = new sdk.DefaultResourceLoader({ cwd, agentDir: profile, settingsManager: settings,
     additionalExtensionPaths: [join(source, "openai-compatibility/index.ts")], noExtensions: true, noSkills: true,
@@ -56,6 +59,8 @@ try {
     ? await acceptUnifiedWait(session, runtime, session.agent.streamFunction, cwd, profile)
     : await acceptProjectedTools(session, runtime, session.agent.streamFunction, cwd, resources);
   assert.equal(networkAttempts, 0); assert.equal(session.autoCompactionEnabled, true);
+  }
+  assert.equal(networkAttempts, 0);
 } catch (error) { failures.push(error); }
 finally {
   const clean = async action => { try { await action(); } catch (error) { failures.push(error); } };
