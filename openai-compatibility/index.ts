@@ -10,6 +10,7 @@ import {
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { registerCapabilities } from "./capabilities.ts";
 import { capabilityPreferenceStore } from "./capability-preferences.ts";
+import { unifiedPreferenceStore } from "./unified-preferences.ts";
 import { showOpenAISettings, type SettingsRow } from "./settings-menu.ts";
 
 export const FAST_ICON = "⚡";
@@ -321,6 +322,7 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 	const capabilitySettings = registerCapabilities(pi, withFileMutationQueue, {
 		webSearch: { transport: fetch, profile: "verified-v1" },
 		preferences: capabilityPreferenceStore(getAgentDir()),
+		unifiedPreferences: unifiedPreferenceStore(getAgentDir()),
 		openSettings: (ctx, focus) => openSettings(ctx, focus ?? "imagegen"),
 		fastCommand: (args, ctx) => fastCommand(args, ctx),
 	});
@@ -527,6 +529,7 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 					return messages.join(" ");
 				}
 				await capabilitySettings.change(id, value, ctx, signal);
+				if (id === "background_wait") return `Background wait ceiling: ${value} ms, saved for this profile. Future empty-input polls only; running waits and jobs are unchanged.`;
 				return `${id === "unified_exec" ? "Unified exec" : id === "code_mode" ? "Code mode" : id === "web_search" ? "Web search" : "Image generation"}: ${value} for this session.`;
 			},
 		}, focus);

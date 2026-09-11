@@ -16,8 +16,22 @@ export function initialWaitMs(value?: number, platform: NodeJS.Platform = proces
 	return Math.min(MAX_EXEC_WAIT_MS, Math.max(platform === "win32" ? 10_000 : 250, requestedWait(value, 10_000)));
 }
 
-export function stdinWaitMs(value: number | undefined, chars: string): number {
-	const empty = chars.length === 0;
-	return Math.min(empty ? MAX_BACKGROUND_WAIT_MS : MAX_EXEC_WAIT_MS,
+/** Trusted profile preference, never a tool argument or a larger runtime budget. */
+export function backgroundWaitMs(value: unknown): number {
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 5_000 || value > MAX_BACKGROUND_WAIT_MS) {
+		throw new Error("Background wait ceiling must be an integer from 5000 to 300000 milliseconds.");
+	}
+	return value;
+}
+
+/** CLI canonical decimal text is distinct from noncoercing JSON preference admission. */
+export function parseBackgroundWaitMs(value: string): number {
+	if (typeof value !== "string" || !/^[1-9][0-9]{3,5}$/.test(value)) throw new Error("Background wait ceiling must use canonical decimal milliseconds (5000–300000).");
+	return backgroundWaitMs(Number(value));
+}
+
+export function stdinWaitMs(value: number | undefined, chars: string, backgroundCeiling = MAX_BACKGROUND_WAIT_MS): number {
+	const ceiling = backgroundWaitMs(backgroundCeiling), empty = chars.length === 0;
+	return Math.min(empty ? ceiling : MAX_EXEC_WAIT_MS,
 		Math.max(empty ? 5_000 : 250, requestedWait(value, empty ? 5_000 : 250)));
 }

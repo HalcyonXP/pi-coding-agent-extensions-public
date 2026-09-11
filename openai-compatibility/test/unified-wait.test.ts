@@ -111,3 +111,24 @@ test("manager reset wakes an unconfirmed background collection without dropping 
   assert.equal(f.record.output.peek(100).output, "retained until collected");
  } finally { f.records.clear(); await f.jobs.close(); }
 });
+
+test("configured factory poll retains its captured timer while future polls use the new ceiling", async t => {
+ t.mock.timers.enable({ apis: ["setTimeout"] }); const f = fixture(); let ceiling = 60000;
+ const ctx = { cwd: process.cwd(), sessionManager: { getSessionId: () => "owner" }, tools: { origin: "nested", scope: f.access.scope, contextSignal: f.context.signal } } as unknown as ExtensionContext;
+ // Match only this controlled record's owner; the fixture is not native branding.
+ f.record.owner = "owner:" + process.cwd();
+ const pair = createUnifiedExecTools(f.jobs, () => ({ signal: f.caller.signal, assertCurrent() {}, release() {} }), () => ceiling);
+ try {
+  let finished = false;
+  const pending = pair[1].execute("poll", { session_id: f.record.id, yield_time_ms: 300000 }, undefined, undefined, ctx).then(r => { finished = true; return r; });
+  ceiling = 5000;
+  t.mock.timers.tick(59999); await flush(); assert.equal(finished, false);
+  t.mock.timers.tick(1); const first = await pending;
+  assert.equal(first.details.session_id, f.record.id); assert.equal(first.details.running, true);
+  finished = false;
+  const second = pair[1].execute("poll2", { session_id: f.record.id, yield_time_ms: 300000 }, undefined, undefined, ctx).then(r => { finished = true; return r; });
+  t.mock.timers.tick(4999); await flush(); assert.equal(finished, false);
+  t.mock.timers.tick(1); await second; assert.equal(finished, true);
+  assert.equal(f.records.size, 1); assert.equal(f.record.closed, false);
+ } finally { f.records.clear(); await f.jobs.close(); }
+});

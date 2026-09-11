@@ -194,8 +194,15 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
           }
         }
         Object.freeze(api);
-        Object.defineProperty(globalThis, "tools", { value: api });
-        if (namesJSON !== null) Object.defineProperty(globalThis, "projectedTools", { value: Object.freeze(projectedApi) });
+        Object.freeze(projectedApi);
+        // Cell API migration: recognized Unified results project by default.
+        // Explicit nativeTools preserves the original raw-wrapper contract;
+        // projectedTools remains the identical compatibility alias, not new authority.
+        Object.defineProperty(globalThis, "tools", { value: namesJSON === null ? api : projectedApi });
+        if (namesJSON !== null) {
+          Object.defineProperty(globalThis, "nativeTools", { value: api });
+          Object.defineProperty(globalThis, "projectedTools", { value: projectedApi });
+        }
         return (json, elapsedJSON) => {
           const value = parse(json);
           if (elapsedJSON !== undefined) projection.remember(value, parse(elapsedJSON));
