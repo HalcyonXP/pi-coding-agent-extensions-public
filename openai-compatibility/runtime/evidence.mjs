@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { boundedJSON, resultJSON } from "./rpc-protocol.mjs";
+import { webTextProjection } from "./web-result.mjs";
 
 export const EVIDENCE_LIMITS = Object.freeze({ resultBytes: 16 * 1024 * 1024, retainedBytes: 32 * 1024 * 1024, imageBytes: 8 * 1024 * 1024, records: 64, images: 16, lifetimeMs: 360_000, viewChars: 8192 });
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -61,7 +62,8 @@ export class CellEvidence {
     // scope admission; do not hand the guest references without its journal receipt.
     let imageIndex = 0;
     const view = {...result,content:result.content.map(block => block.type !== "image" ? block : {type:"image_reference",ref:images[imageIndex++].ref,mimeType:"image/png"})};
-    const record = {ref,key,json:JSON.stringify(view),bytes,images,expires:performance.now()+EVIDENCE_LIMITS.lifetimeMs,ready:false};
+    const webText = event.toolName === "web_search" && event.isError === false && webTextProjection(result) !== undefined;
+    const record = {ref,key,json:JSON.stringify(view),bytes,images,webText,expires:performance.now()+EVIDENCE_LIMITS.lifetimeMs,ready:false};
     this.#records.set(ref,record); this.#bytes += bytes;
     for (const image of images) this.#images.set(image.ref,{image,record});
     try {
@@ -81,13 +83,13 @@ export class CellEvidence {
     let n = 0;
     const result = {...JSON.parse(json), content:outcome.result.content.map(block => block.type !== "image" ? block : {
       type:"image_reference", ref:record.images[n].ref, mimeType:"image/png", bytes:record.images[n++].bytes,
-    }), protected_evidence:{ref:record.ref, journaled:true, format:"finalized-result-json"}};
+    }), protected_evidence:{ref:record.ref, journaled:true, format:"finalized-result-json", ...(record.webText ? {projection:"web-text-v1"} : {})}};
     const projected = {isError:outcome.isError,result};
     try { resultJSON(projected); return projected; }
     catch {
       // Explicit projection, not silent flattening: the complete finalized source
       // is already in native presentation/history. Bounded views remain available.
-      return {isError:outcome.isError,result:{content:[{type:"text",text:"Intact finalized evidence was journaled outside Code mode output. Use evidence(ref, offset, length) for bounded JSON views."}], protected_evidence:{...result.protected_evidence,projected:true,characters:record.json.length}, image_refs:record.images.map(image=>image.ref)}};
+      return {isError:outcome.isError,result:{content:[{type:"text",text:"Intact finalized evidence was journaled outside Code mode output. Use evidence(ref, offset, length) for bounded JSON views."}], protected_evidence:{ref:record.ref,journaled:true,format:"finalized-result-json",projected:true,characters:record.json.length}, image_refs:record.images.map(image=>image.ref)}};
     }
   }
   resolveImage(ref) {

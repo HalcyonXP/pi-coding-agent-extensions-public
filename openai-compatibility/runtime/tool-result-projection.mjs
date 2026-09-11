@@ -24,10 +24,31 @@ export const TOOL_RESULT_PROJECTION = `(() => {
     project(name, value) {
       // Unknown, hook-modified, error, loss, unready and terminated results keep
       // their complete wrapper. Projection is data presentation, never evidence.
-      if (name !== "exec_command" && name !== "write_stdin") return value;
+      if (name !== "exec_command" && name !== "write_stdin" && name !== "web_search") return value;
       const elapsed = object(value) ? time(value) : undefined;
       if (!integer(elapsed) || !shape(value, ["result", "isError"]) || value.isError !== false) return value;
       const r = value.result;
+      if (name === "web_search") {
+        // Only native CellEvidence can add this presentation hint, after checking
+        // the finalized content stamp and publishing the complete source evidence.
+        // It is not a service reference, permission or bypass of RPC admission.
+        if (!shape(r, ["content", "details", "protected_evidence"], ["isError"]) || (own(r, "isError") && r.isError !== false)) return value;
+        const p = r.protected_evidence, d = r.details;
+        if (!shape(p, ["ref", "journaled", "format", "projection"]) || typeof p.ref !== "string"
+          || p.journaled !== true || p.format !== "finalized-result-json" || p.projection !== "web-text-v1") return value;
+        if (!shape(d, ["verification", "sourceEvidencePresent", "web_result"])
+          || (d.verification !== "source-contract-only" && d.verification !== "subscription-smoke-verified-subset")
+          || typeof d.sourceEvidencePresent !== "boolean" || !shape(d.web_result, ["version", "sha256"])
+          || d.web_result.version !== 1 || typeof d.web_result.sha256 !== "string") return value;
+        if (!array(r.content) || r.content.length !== (d.sourceEvidencePresent ? 2 : 1)) return value;
+        let text = "";
+        for (let i = 0; i < r.content.length; i++) {
+          const block = r.content[i];
+          if (!shape(block, ["type", "text"]) || block.type !== "text" || typeof block.text !== "string") return value;
+          text += (i === 0 ? "" : "\\n\\n") + block.text;
+        }
+        return text;
+      }
       if (!shape(r, ["content", "details"], ["isError"]) || (own(r, "isError") && r.isError !== false)) return value;
       const d = r.details;
       if (!shape(d, ["output", "exit_code", "running", "truncated_bytes"], ["session_id", "supervisor_ready"])) return value;

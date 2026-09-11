@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CapabilityEpoch } from "../capability-policy.ts";
-import { WebSearchAdapter, WEB_SEARCH_ENDPOINT, WebSearchError, validateSearchCommands, parseSearchEvidence, renderSearchEvidence } from "../web-search.ts";
+import { WebSearchAdapter, WEB_SEARCH_ENDPOINT, WEB_SEARCH_OPERATIONS, WebSearchError, validateSearchCommands, parseSearchEvidence, renderSearchEvidence } from "../web-search.ts";
 import { readBoundedJson } from "../http.ts";
 
 const credentials = { token: "synthetic-subscription-token-never-live", accountId: "synthetic-account-never-live" };
@@ -46,7 +46,7 @@ test("unsupported command fields, empty operations and command floods fail befor
 		{ search_query: [{ q: "x", recency: -1 }] }, { search_query: [{ q: "x", recency: 1.5 }] },
 		{ ...query, input: "private conversation" }, { ...query, encrypted_output: "replay" },
 		{ ...query, settings: { base_url: "https://proxy.example.com" } },
-		{ screenshot: [{ ref_id: "x", pageno: 0 }] }, { image_query: [{ q: "x" }] },
+		{ screenshot: [{ ref_id: "x", pageno: 0 }] }, { image_query: [{ q: " " }] }, { click: [{ ref_id: "turn0view0", id: 1 }] },
 		{ search_query: Array.from({ length: 4 }, () => ({ q: "x" })), open: [{ ref_id: "https://example.com" }] },
 	]) {
 		await assert.rejects(adapter.search({ ...options(), commands, getAuth: async () => { auth++; return credentials; } }), WebSearchError);
@@ -54,12 +54,12 @@ test("unsupported command fields, empty operations and command floods fail befor
 	assert.equal(auth, 0); assert.equal(calls, 0);
 });
 
-test("open/find reject local paths, credentials, IP representations and unverified opaque references", () => {
+test("open/find/screenshot reject local paths, credentials, IP representations and unverified opaque references", () => {
 	for (const ref of [
 		"turn0search0", "file:///C:/secret.txt", "C:\\secret.txt", "//example.com/file", "data:text/plain,secret", "javascript:alert(1)",
 		"http://localhost", "http://localhost.example.local", "http://127.0.0.1", "http://2130706433", "http://0x7f000001", "http://[::1]", "http://169.254.169.254",
 		"https://user:secret@example.com", "https://example.com:8443", "https://example.com#fragment", "https://example.com\\@localhost", "https://example.com/a b",
-	]) for (const commands of [{ open: [{ ref_id: ref }] }, { find: [{ ref_id: ref, pattern: "x" }] }]) assert.throws(() => validateSearchCommands(commands), WebSearchError);
+	]) for (const commands of [{ open: [{ ref_id: ref }] }, { find: [{ ref_id: ref, pattern: "x" }] }, { screenshot: [{ ref_id: ref, pageno: 0 }] }]) assert.throws(() => validateSearchCommands(commands), WebSearchError);
 	assert.doesNotThrow(() => validateSearchCommands({ open: [{ ref_id: "https://example.com/public?q=tools" }] }));
 });
 
@@ -207,4 +207,78 @@ test("a changed authorization check after headers disposes the response without 
 	});
 	await assert.rejects(adapter.search({ ...options(), lease: scopedLease }), WebSearchError);
 	assert.equal(cancelled, true);
+});
+
+const experimentalVariants = {
+ search_query: [{ q: "public documentation", recency: 2, domains: ["example.com"] }],
+ image_query: [{ q: "public diagram", recency: 7, domains: ["example.com"] }],
+ open: [{ ref_id: "https://example.com/page", lineno: 42 }],
+ find: [{ ref_id: "https://example.com/page", pattern: "example" }],
+ screenshot: [{ ref_id: "https://example.com/paper.pdf", pageno: 0 }],
+ finance: [{ ticker: "BTC", type: "crypto", market: "" }],
+ weather: [{ location: "Australia, Queensland, Brisbane", start: "2028-02-29", duration: 7 }],
+ sports: [{ tool: "sports", fn: "schedule", league: "nba", team: "GSW", opponent: "LAL", date_from: "2026-09-01", date_to: "2026-09-30", num_games: 10, locale: "en-US" }],
+ time: [{ utc_offset: "+05:45" }],
+};
+test("experimental nine-family discovery is fixed; click has not been silently admitted", () => {
+ assert.deepEqual(WEB_SEARCH_OPERATIONS, Object.keys(experimentalVariants));
+ assert.equal(Object.isFrozen(WEB_SEARCH_OPERATIONS), true);
+});
+for (const [name, rows] of Object.entries(experimentalVariants)) test(`experimental ${name} forwards exact source-derived fields without new settings or media fetching`, async () => {
+ let calls = 0;
+ const commands = { [name]: rows, response_length: "medium" };
+ const adapter = new WebSearchAdapter(async (url, init) => {
+  calls++; assert.equal(url, WEB_SEARCH_ENDPOINT);
+  const body = JSON.parse(String(init?.body));
+  assert.deepEqual(body.commands, commands);
+  assert.deepEqual(Object.keys(body).sort(), ["commands", "id", "max_output_tokens", "model", "settings"]);
+  assert.deepEqual(body.settings, { search_context_size: "low" });
+  return response();
+ });
+ assert.deepEqual(await adapter.search({ ...options(), commands }), { output: sample.output, results: sample.results });
+ assert.equal(calls, 1, "opaque image URLs/results do not initiate downloads or another service request");
+});
+test("operation cap spans new families, rather than independently granting four of each", () => {
+ const four = { finance: experimentalVariants.finance, weather: experimentalVariants.weather, sports: experimentalVariants.sports, time: experimentalVariants.time };
+ assert.deepEqual(validateSearchCommands(four), four);
+ assert.throws(() => validateSearchCommands({ ...four, image_query: experimentalVariants.image_query }), /one to four total/);
+});
+test("lookup and image variant validation refuses malformed data before authentication or transport", async () => {
+ let auth = 0, calls = 0;
+ const adapter = new WebSearchAdapter(async () => { calls++; return response(); });
+ for (const commands of [
+  { image_query: [{ q: "x", domains: ["*.example.com"] }] },
+  { image_query: [{ q: "x", recency: 3651 }] },
+  { screenshot: [{ ref_id: "https://example.com/p.pdf", pageno: -1 }] },
+  { screenshot: [{ ref_id: "https://example.com/p.pdf", pageno: "0" }] },
+  { screenshot: [{ ref_id: "https://example.com/p.pdf", pageno: 1_000_001 }] },
+  { finance: [{ ticker: " ", type: "equity" }] },
+  { finance: [{ ticker: "A", type: "stock" }] },
+  { finance: [{ ticker: "A", type: "equity", market: "" }] },
+  { finance: [{ ticker: "A", type: "equity", market: "usa" }] },
+  { weather: [{ location: " " }] },
+  { weather: [{ location: "Brisbane", duration: 0 }] },
+  { weather: [{ location: "Brisbane", duration: 367 }] },
+  { sports: [{ fn: "scores", league: "nba" }] },
+  { sports: [{ fn: "standings", league: "f1" }] },
+  { sports: [{ fn: "standings", league: "nba", team: " " }] },
+  { sports: [{ fn: "schedule", league: "nba", num_games: 101 }] },
+  { sports: [{ fn: "schedule", league: "nba", tool: "finance" }] },
+  { sports: [{ fn: "schedule", league: "nba", date_from: "2026-10-01", date_to: "2026-09-30" }] },
+  ...["+24:00", "+05:60", "05:00", "+5:00", "+05:00\n"].map(utc_offset => ({ time: [{ utc_offset }] })),
+  { time: [{ utc_offset: "+00:00", input: "conversation" }] },
+ ]) await assert.rejects(adapter.search({ ...options(), commands, getAuth: async () => { auth++; return credentials; } }), WebSearchError);
+ assert.equal(auth, 0); assert.equal(calls, 0);
+});
+test("lookup dates are calendar checked, not normalized by Date.parse", () => {
+ for (const start of ["0000-01-01", "2026-00-01", "2026-13-01", "2026-01-00", "2026-04-31", "2026-02-29", "1900-02-29", "2026-2-03", "2026-01-01\n"]) {
+  assert.throws(() => validateSearchCommands({ weather: [{ location: "Brisbane", start }] }), WebSearchError);
+  assert.throws(() => validateSearchCommands({ sports: [{ fn: "schedule", league: "nba", date_from: start }] }), WebSearchError);
+ }
+ for (const start of ["0001-01-01", "2000-02-29", "2028-02-29", "9999-12-31"]) assert.doesNotThrow(() => validateSearchCommands({ weather: [{ location: "Brisbane", start }] }));
+});
+test("new variants snapshot nested filters before asynchronous auth", async () => {
+ const commands = structuredClone({ sports: experimentalVariants.sports });
+ const adapter = new WebSearchAdapter(async (_url, init) => { assert.deepEqual(JSON.parse(String(init?.body)).commands.sports, experimentalVariants.sports); return response(); });
+ await adapter.search({ ...options(), commands, getAuth: async () => { commands.sports[0].team = "mutated"; return credentials; } });
 });

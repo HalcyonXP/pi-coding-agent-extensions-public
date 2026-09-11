@@ -11,6 +11,9 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | Code mode | Independently opted-in paired exec/wait with a saved profile choice, bounded QuickJS cells and current native ownership; not ambient Node/V8 |
 | Native Code input | Raw-JavaScript custom provider tool, mapped by Pi to internal `{code}`; options in a first-line pragma, not top-level JSON fields. Wait remains JSON. See [input/result boundaries](NATIVE-CODE-CONTRACT.md). |
 | Code projection | Default `tools` guest view for recognized normal Unified results, with full native-wrapper fallback; `nativeTools` preserves raw access and `projectedTools` is an identical alias. Legacy scripts need migration; native evidence/authority is unchanged. See [projection contract](CODE-RESULT-PROJECTION.md). |
+| Web text projection | Working-source canonical `web_search` guest string after complete native publication and RPC admission; includes all literal text and opaque source associations. Not a Web reference, native citation renderer or new installed acceptance. |
+| Web consistency stamp | `details.web_result` content/label checksum checked after hooks; not a signature or authority. A native post-publication hint permits the guest text view, never extra admission. |
+| Web service reference | Opaque remote `ref_id`, distinct from a native `ev_...` evidence reference. Opaque IDs/citation syntax are not currently admitted as continuation authority; public-URL open remains separate. |
 | Native grammar capability | Selected Pi model's explicit grammar-tool support; absence disables Code without a JSON-provider fallback, not an execution-authority grant |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
 | Supervisor readiness | Private shell-supervisor preamble received; not child acknowledgement receipt, user-command success or native authority |

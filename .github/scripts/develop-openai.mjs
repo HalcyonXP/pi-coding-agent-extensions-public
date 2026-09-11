@@ -26,6 +26,8 @@ const suites = Object.freeze({
   "native-wait": [".github/scripts/develop-native.mjs", "unified-wait"],
   "native-projection": [".github/scripts/develop-native.mjs", "projection"],
   "native-settings": [".github/scripts/develop-native.mjs", "settings"],
+  "native-web": [".github/scripts/develop-native.mjs", "web-projection"],
+  "native-web-sequence": [".github/scripts/develop-native.mjs", "web-sequence"],
 });
 export function selectSuites(names, sdkBundle) {
   if (!names.length || names.some(n => !Object.hasOwn(suites, n)) || new Set(names).size !== names.length) {

@@ -11,17 +11,19 @@ import { verifyBundle } from "../../distribution/lib.mjs";
 import { acceptUnifiedWait } from "../../distribution/accept-unified-wait.mjs";
 import { acceptProjectedTools } from "../../distribution/accept-projected-tools.mjs";
 import { exerciseSettings } from "../../distribution/settings-scenarios.mjs";
+import { exerciseWebProjection, webProjectionTransport } from "../../distribution/web-projection-scenarios.mjs";
 
 const [suite, bundle] = process.argv.slice(2);
 assert.equal(process.argv.length, 4);
-assert.ok(["unified-wait", "projection", "settings"].includes(suite));
+assert.ok(["unified-wait", "projection", "settings", "web-projection", "web-sequence"].includes(suite));
 assert.equal(process.platform, "win32"); assert.equal(process.arch, "x64");
 const home = process.env.HOME, profile = process.env.PI_CODING_AGENT_DIR;
 assert.ok(home && profile); assert.equal(home, process.env.USERPROFILE);
 assert.equal(resolve(profile), resolve(home, "agent")); assert.equal(process.env.PI_OFFLINE, "1");
 for (const key of ["OPENAI_API_KEY", "CODEX_HOME", "NODE_OPTIONS", "GH_TOKEN", "GITHUB_TOKEN"]) assert.equal(process.env[key], undefined);
 let networkAttempts = 0;
-globalThis.fetch = async () => { networkAttempts++; throw Error("Native development forbids external transport"); };
+const webFixture = ["web-projection", "web-sequence"].includes(suite) ? webProjectionTransport() : undefined;
+globalThis.fetch = webFixture ? webFixture.fetch : async () => { networkAttempts++; throw Error("Native development forbids external transport"); };
 const source = fileURLToPath(new URL("../../", import.meta.url));
 const resolvedBundle = await realpath(bundle);
 assert.equal(resolvedBundle, resolve(bundle), "Do not follow a substituted SDK bundle location");
@@ -55,12 +57,13 @@ try {
   await session.bindExtensions({ uiContext: { ...session.extensionRunner.createContext().ui, notify() {} } });
   assert.equal(session.autoCompactionEnabled, true);
   await session.prompt("/openai-tools unified_exec on"); await session.prompt("/openai-tools code_mode on");
-  receipt = suite === "unified-wait"
-    ? await acceptUnifiedWait(session, runtime, session.agent.streamFunction, cwd, profile)
+  if (webFixture) await session.prompt("/openai-tools web_search on");
+  receipt = webFixture ? await exerciseWebProjection(session, runtime, session.agent.streamFunction, cwd, resources, webFixture, suite === "web-sequence" ? "sequence-only" : "full")
+    : suite === "unified-wait" ? await acceptUnifiedWait(session, runtime, session.agent.streamFunction, cwd, profile)
     : await acceptProjectedTools(session, runtime, session.agent.streamFunction, cwd, resources);
   assert.equal(networkAttempts, 0); assert.equal(session.autoCompactionEnabled, true);
   }
-  assert.equal(networkAttempts, 0);
+  assert.equal(networkAttempts, 0); assert.equal(webFixture?.state.externalAttempts ?? 0, 0);
 } catch (error) { failures.push(error); }
 finally {
   const clean = async action => { try { await action(); } catch (error) { failures.push(error); } };
@@ -70,7 +73,7 @@ finally {
     await clean(() => session.dispose());
   }
   await writeFile(join(home, "native-development.json"), JSON.stringify({ kind: "source-on-predecessor-sdk-not-artifact-acceptance",
-    suite, sdkBundleSource: manifest.sourceCommit, sdkManifestSha256, networkAttempts, receipt,
+    suite, sdkBundleSource: manifest.sourceCommit, sdkManifestSha256, networkAttempts: networkAttempts + (webFixture?.state.externalAttempts ?? 0), receipt,
     failures: failures.map(e => ({ name: e.name, message: e.message, stack: e.stack })) }, null, 2) + "\n", { flag: "wx" });
 }
 if (failures.length) throw new AggregateError(failures, "Native development failed; preserve the profile, no effect replay");

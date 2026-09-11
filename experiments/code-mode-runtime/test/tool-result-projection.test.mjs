@@ -46,3 +46,36 @@ test('projection cannot shrink an oversized native wrapper past the RPC limit',a
 test('unawaited opt-in invocation retains detached-work refusal',async()=>{const r=await run('projectedTools.exec_command({});');assert.equal(r.result.code,'DETACHED_TOOL');assert.deepEqual(r.calls,[]);});
 test('portable probe does not acquire opt-in cell projection',async()=>{const r=await evaluate('emit(typeof projectedTools);emit(typeof nativeTools);',{allowedTools:['exec_command'],invoke:async()=>outcome(details())});assert.equal(r.status,'ok');assert.deepEqual(r.output,['undefined','undefined']);});
 for(const [name,Runtime]of [['semantic worker',CellRuntime],['Windows contained worker',WindowsCellRuntime]])test(name+' keeps RPC wrapper/diagnostics and projects only inside guest',{skip:name.startsWith('Windows')&&(process.platform!=='win32'||process.arch!=='x64')},async()=>{const output=[],calls=[],store=new CellStore(),runtime=new Runtime({store,output:v=>output.push(v),yield(){}}),native=outcome(details()),failures=[];try{const r=await runtime.run('const a=await tools.exec_command({cmd:"fixture"});text(a.output);text(a.session_id);text(typeof a.wall_time_seconds);const b=await nativeTools.exec_command({cmd:"raw"});text(JSON.stringify(b));',{gateway:{signal:new AbortController().signal,async invoke(name,args){calls.push({name,args});return native;}},allowedTools:['exec_command'],signal:AbortSignal.timeout(5000)});assert.equal(r.status,'ok');assert.equal(calls.length,2);assert.deepEqual(output.slice(0,3),[details().output,'1701','number']);assert.deepEqual(JSON.parse(output[3]),native);assert.deepEqual(native,outcome(details()));}catch(e){failures.push(e);}finally{try{await runtime.close();}catch(e){failures.push(e);}store.close();}if(failures.length)throw new AggregateError(failures,'Projected worker and/or cleanup failed');});
+
+import { CellEvidence } from '../../../openai-compatibility/runtime/evidence.mjs';
+import { sealWebResult, WEB_TEXT_PREFIX, WEB_SOURCES_PREFIX } from '../../../openai-compatibility/runtime/web-result.mjs';
+function webOutcome(){return {result:sealWebResult([{type:'text',text:WEB_TEXT_PREFIX+'literal 雪\nhttps://example.com/source'},{type:'text',text:WEB_SOURCES_PREFIX+'[{"ref_id":"turn0search0","extra":"opaque"}]'}],'source-contract-only',true),isError:false};}
+async function publishedWeb(native=webOutcome(),name='web_search'){
+ const controller=new AbortController(),published=[],broker=new CellEvidence(controller.signal),scope={id:'native',signal:controller.signal,async publishEvidence(e){published.push(structuredClone(e));}};
+ await broker.capture(scope,{scopeId:scope.id,toolCallId:'native-call',toolName:name,...native});
+ return {broker,scope,published,native,wire:broker.project(native)};
+}
+test('default Web returns literal joined text after publication; nativeTools retains stamped complete wrapper',async()=>{
+ const f=await publishedWeb();try{
+  const r=await run('text(await tools.web_search({}));text(await projectedTools.web_search({}));text(JSON.stringify(await nativeTools.web_search({})));',f.wire,['web_search']);
+  assert.equal(r.result.status,'ok');const text=f.native.result.content.map(b=>b.text).join('\n\n');
+  assert.deepEqual(r.output.slice(0,2),[text,text]);assert.deepEqual(JSON.parse(r.output[2]),f.wire);assert.deepEqual(f.published[0].content,f.native.result.content);
+ }finally{f.broker.close();}
+});
+test('Web hook changes, missing journal, unknown hint and unrelated alias retain full wrappers',async()=>{
+ for(const mode of ['hook','no-journal','hint','compressed','alias']){
+  const native=webOutcome();if(mode==='hook')native.result.content.push({type:'text',text:'HOOK_WARNING'});
+  const name=mode==='alias'?'web-search':'web_search',f=await publishedWeb(native,name);
+  try{const value=structuredClone(f.wire);if(mode==='no-journal')delete value.result.protected_evidence;if(mode==='hint')value.result.protected_evidence.projection='unknown';if(mode==='compressed')value.result.protected_evidence.projected=true;
+   const r=await run('text(JSON.stringify(await tools.web_search({})));',value,[name]);assert.equal(r.result.status,'ok');assert.deepEqual(JSON.parse(r.output[0]),value);
+  }finally{f.broker.close();}
+ }
+});
+test('Web projection captures intrinsics and does not parse or execute opaque source text',async()=>{
+ const f=await publishedWeb();try{const r=await run('const pending=tools.web_search({});Array.prototype.map=()=>{throw Error("forged")};Array.prototype.join=()=>"forged";Object.keys=()=>[];Object.hasOwn=()=>false;JSON.parse=()=>{throw Error("forged")};JSON.stringify=()=>"forged";String.prototype.startsWith=()=>false;text(await pending);',f.wire,['web_search']);assert.equal(r.result.status,'ok');assert.deepEqual(r.output,[f.native.result.content.map(b=>b.text).join('\n\n')]);}finally{f.broker.close();}
+});
+for(const [name,Runtime]of [['semantic worker',CellRuntime],['Windows contained worker',WindowsCellRuntime]])test(name+' Web projection follows actual evidence capture and original RPC cap',{skip:name.startsWith('Windows')&&(process.platform!=='win32'||process.arch!=='x64')},async()=>{
+ const output=[],published=[],controller=new AbortController(),broker=new CellEvidence(controller.signal),store=new CellStore(),runtime=new Runtime({store,evidence:broker,output:v=>output.push(v),yield(){}}),native=webOutcome(),failures=[];
+ const gateway={id:'native',signal:controller.signal,async publishEvidence(e){published.push(structuredClone(e));},async invoke(name){await broker.capture(gateway,{scopeId:'native',toolCallId:'native-call',toolName:name,...native});return native;}};
+ try{const r=await runtime.run('text(await tools.web_search({}));',{gateway,allowedTools:['web_search'],signal:AbortSignal.timeout(5000)});assert.equal(r.status,'ok');assert.deepEqual(output,[native.result.content.map(b=>b.text).join('\n\n')]);assert.deepEqual(published[0].content,native.result.content);}catch(e){failures.push(e);}finally{try{await runtime.close();}catch(e){failures.push(e);}broker.close();store.close();}if(failures.length)throw new AggregateError(failures,'Web projection/cleanup failed');
+});

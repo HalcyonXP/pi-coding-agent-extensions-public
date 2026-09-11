@@ -75,3 +75,10 @@ test("missing child working directory is recorded as launch failure, not success
   assert.equal(result.passed, false); assert.equal(result.error, "ENOENT");
   assert.equal(readFileSync(join(out, "stdout.log")).length, 0);
 });
+
+test("Web native development separates full and incremental URL-sequence coverage under the same SDK isolation", () => {
+ const selected=selectSuites(["native-web", "native-web-sequence"], ".pi/example-bundle");
+ assert.deepEqual(selected.map(s=>s.args.slice(0,2)), [[".github/scripts/develop-native.mjs","web-projection"],[".github/scripts/develop-native.mjs","web-sequence"]]);
+ for(const s of selected)assert.equal(s.args[2],resolve(root,".pi/example-bundle"));
+ assert.throws(()=>selectSuites(["native-web"]),/require --sdk-bundle/);
+});
