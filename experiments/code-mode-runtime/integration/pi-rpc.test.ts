@@ -672,7 +672,7 @@ describe.each(["success", "deny", "mutate", "revoke"])("actual Unified exec thro
 									expect(initial?.isError).toBe(false);
 									let value = initial.result.details;
 									const id = value.session_id;
-									expect(typeof id).toBe("string");
+									expect(typeof id).toBe("number");
 									let output = value.output;
 									// Poll the same owned process. Every fresh isolate stays inside this one awaited
 									// real handler; no expired gateway or assumption that a yield means completion.
@@ -1813,7 +1813,7 @@ describe("returned Unified exec jobs are native-owned after real cell handlers r
 		async (mode) => {
 			const epoch = new AbortController();
 			let manager: Cells | undefined, nativeContext: AbortSignal | undefined, harness: Harness | undefined;
-			let jobId: string | undefined,
+			let jobId: number | undefined,
 				firstCell: string | undefined,
 				authCalls = 0,
 				info: { pid: number; child: number } | undefined;
@@ -1839,9 +1839,9 @@ describe("returned Unified exec jobs are native-owned after real cell handlers r
 							pi.on("tool_result", (event) => {
 								if (
 									event.toolName === "exec_command" &&
-									typeof (event.details as { session_id?: unknown })?.session_id === "string"
+									typeof (event.details as { session_id?: unknown })?.session_id === "number"
 								)
-									jobId = (event.details as { session_id: string }).session_id;
+									jobId = (event.details as { session_id: number }).session_id;
 							});
 							pi.registerTool({
 								name: "cell",
@@ -1950,14 +1950,14 @@ describe("returned Unified exec jobs are native-owned after real cell handlers r
 					try {
 						info = JSON.parse(await readFile(marker, "utf8"));
 						// A child can start before the clamped initial call returns its ID.
-						return typeof jobId === "string";
+						return typeof jobId === "number";
 					} catch {
 						return false;
 					}
 				});
 				expect(Number.isSafeInteger(info!.pid)).toBe(true);
 				expect(Number.isSafeInteger(info!.child)).toBe(true);
-				expect(typeof jobId).toBe("string");
+				expect(typeof jobId).toBe("number");
 				if (mode === "foreign-scope" || mode === "direct-to-cell") {
 					// Only knowledge of the real session ID changes; native access ownership does not.
 					firstCell ??= "direct-conversation-job";

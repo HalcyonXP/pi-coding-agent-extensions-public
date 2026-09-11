@@ -29,12 +29,12 @@ test("invalid requested waits refuse before manager work or native scope admissi
   assert.throws(() => initialWaitMs(value as number), /non-negative safe integer/);
   assert.throws(() => stdinWaitMs(value as number, ""), /non-negative safe integer/);
   assert.equal(Value.Check(pair[0].parameters, { cmd: "not executed", yield_time_ms: value }), false);
-  assert.equal(Value.Check(pair[1].parameters, { session_id: "not owned", yield_time_ms: value }), false);
+  assert.equal(Value.Check(pair[1].parameters, { session_id: 1701, yield_time_ms: value }), false);
   await assert.rejects(pair[0].execute("start", { cmd: "not executed", yield_time_ms: value as number }, undefined, undefined, ctx), /non-negative safe integer/);
-  await assert.rejects(pair[1].execute("write", { session_id: "not owned", yield_time_ms: value as number }, undefined, undefined, ctx), /non-negative safe integer/);
+  await assert.rejects(pair[1].execute("write", { session_id: 1701, yield_time_ms: value as number }, undefined, undefined, ctx), /non-negative safe integer/);
  }
  assert.equal(work, 0); assert.equal(opened, 0); assert.equal(released, 16);
- for (const tool of pair) assert.equal(Value.Check(tool.parameters, { ...(tool.name === "exec_command" ? {cmd: "not executed"} : {session_id: "not owned"}), yield_time_ms: Number.MAX_SAFE_INTEGER }), true);
+ for (const tool of pair) assert.equal(Value.Check(tool.parameters, { ...(tool.name === "exec_command" ? {cmd: "not executed"} : {session_id: 1701}), yield_time_ms: Number.MAX_SAFE_INTEGER }), true);
 });
 
 // Controlled manager records are not native branding or OS-termination evidence.
@@ -45,8 +45,8 @@ function fixture() {
  const access = { context: context.signal, scope: { id: "owned-wait", signal: scope.signal, ownResource() { return () => {}; } } };
  const output = new Utf8OutputBuffer(); output.append("stdout", Buffer.from("retained until collected"));
  let finish!: () => void;
- const record = { id: "owned-wait", owner: "owner", access, revocation: resource, output, exitCode: null, closed: false, ready: true, supervised: false, created: 0, touched: 0, done: new Promise<void>(resolve => { finish = resolve; }), child: { stdin: { writableLength: 0, write() {} } } };
- const records = Reflect.get(jobs, "processes") as Map<string, typeof record>; records.set(record.id, record);
+ const record = { id: 1701, owner: "owner", access, revocation: resource, output, exitCode: null, closed: false, ready: true, supervised: false, created: 0, touched: 0, done: new Promise<void>(resolve => { finish = resolve; }), child: { stdin: { writableLength: 0, write() {} } } };
+ const records = Reflect.get(jobs, "processes") as Map<number, typeof record>; records.set(record.id, record);
  return { jobs, record, context, scope, caller, resource, access, finish, records };
 }
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };

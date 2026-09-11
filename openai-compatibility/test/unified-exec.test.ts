@@ -40,7 +40,7 @@ test("bounded ring buffer reports truncation and drains remaining completed outp
 test("capacity, input limits, cancellation and stale IDs", async () => {
 	const manager = new UnifiedExecManager(node);
 	try {
-		const ids: string[] = [];
+		const ids: number[] = [];
 		for (let i = 0; i < 4; i++) ids.push((await manager.start("one", "setInterval(()=>{},1000)", tmpdir(), 0, 100)).session_id!);
 		await assert.rejects(manager.start("one", "process.exit()", tmpdir(), 0, 100), /limit/);
 		await assert.rejects(manager.write("one", ids[0], "x".repeat(65 * 1024), 0, 100), /64 KiB/);

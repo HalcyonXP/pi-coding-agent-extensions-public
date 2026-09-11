@@ -20,7 +20,7 @@ for (const [name, unit, count, maxTokens] of [
  const tools = createUnifiedExecTools(jobs, lease);
  try {
   let result = await tools[0].execute("initial", { cmd: `process.stdout.write(Buffer.from(${JSON.stringify(Buffer.from(unit).toString("base64"))},'base64').toString().repeat(${count}))`, yield_time_ms: 3000, max_output_tokens: maxTokens }, undefined, undefined, ctx);
-  let combined = "", calls = 0, id: string | undefined;
+  let combined = "", calls = 0, id: number | undefined;
   do {
    assert.ok(++calls <= 12); assert.ok(serialBytes(result) <= RPC_LIMITS.resultBytes, `Serialized result ${serialBytes(result)} exceeds ${RPC_LIMITS.resultBytes}`); resultJSON({ result, isError: false });
    const details = result.details;
@@ -39,12 +39,12 @@ test("direct collection retains its raw output ceiling, independent of nested se
 });
 
 // Deliberate manager-state fixture, not a substitute for native scope authority.
-async function retainedFixture(body: (jobs: UnifiedExecManager, id: string, state: { output: Utf8OutputBuffer; termination?: string }, access: NativeJobBinding) => Promise<void>) {
+async function retainedFixture(body: (jobs: UnifiedExecManager, id: number, state: { output: Utf8OutputBuffer; termination?: string }, access: NativeJobBinding) => Promise<void>) {
  const jobs = new UnifiedExecManager(code => ({ executable: process.execPath, args: ["-e", code] })), owned = scope();
  const access: NativeJobBinding = { scope: owned, resource: owned, context: new AbortController().signal };
  try {
   const first = await jobs.start("owner", "process.stdout.write('retained fixture')", process.cwd(), 0, 4, undefined, access); assert.ok(first.session_id);
-  const state = (Reflect.get(jobs, "processes") as Map<string, { output: Utf8OutputBuffer; termination?: string; done: Promise<void>; settled?: Promise<void> }>).get(first.session_id)!;
+  const state = (Reflect.get(jobs, "processes") as Map<number, { output: Utf8OutputBuffer; termination?: string; done: Promise<void>; settled?: Promise<void> }>).get(first.session_id)!;
   let timer: NodeJS.Timeout | undefined;
   try { await Promise.race([state.done, new Promise((_, reject) => { timer = setTimeout(() => reject(Error("Owned child did not close")), 3000); })]); } finally { clearTimeout(timer); }
   await state.settled;

@@ -9,7 +9,7 @@ export async function acceptReturnedJobs(session, invoke, outcome) {
  const cmd=`& ${quote(process.execPath)} -e ${quote(program)}`;
  const jobs=[];
  for(let n=0;n<2;n++){
-  const job=outcome(await invoke("exec_command",{cmd,yield_time_ms:1}));assert.equal(job.running,true);assert.equal(typeof job.session_id,"string");jobs.push(job);
+  const job=outcome(await invoke("exec_command",{cmd,yield_time_ms:1}));assert.equal(job.running,true);assert.equal(typeof job.session_id,"number");jobs.push(job);
  }
  assert.equal(session.agent.getToolGatewayInfo().activeScopes,2);
  const third=await invoke("exec_command",{cmd:"Write-Output MUST_NOT_LAUNCH",yield_time_ms:1});assert.equal(third.isError,true);assert.match(third.content.filter(c=>c.type==="text").map(c=>c.text).join(""),/Durable scope admission unavailable or prior cleanup incomplete/);

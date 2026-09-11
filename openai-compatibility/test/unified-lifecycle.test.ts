@@ -12,7 +12,7 @@ import { completionEvidence } from "../unified-completion.ts";
 const fixture = "process.stdin.once('end',()=>process.stdout.write('LIFECYCLE_DONE\\n'));process.stdin.resume();setTimeout(()=>process.exit(19),30000).unref()";
 const manager = () => new UnifiedExecManager(code => ({ executable: process.execPath, args: ["-e", code] }));
 type RecordState = { child: ChildProcessWithoutNullStreams; done: Promise<void>; settled?: Promise<void>; closed: boolean; completionFailed?: boolean };
-function record(jobs: UnifiedExecManager, id: string): RecordState { return (Reflect.get(jobs, "processes") as Map<string, RecordState>).get(id)!; }
+function record(jobs: UnifiedExecManager, id: number): RecordState { return (Reflect.get(jobs, "processes") as Map<number, RecordState>).get(id)!; }
 async function closeChild(r: RecordState) {
  r.child.stdin.end();let timer: NodeJS.Timeout | undefined;
  try { await Promise.race([r.done,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error("Owned fixture did not close")),3000);})]); }
@@ -42,7 +42,7 @@ for(const [closedAt,elapsed] of [[16000,65000],[75000,75001],[16000,600000]])tes
 });
 
 test("completed retention still obeys the eight-record capacity bound",async()=>{
- const jobs=manager();const ids:string[]=[];
+ const jobs=manager();const ids:number[]=[];
  try{
   for(let i=0;i<9;i++){const first=await jobs.start("owner",fixture,process.cwd(),0,100);ids.push(first.session_id!);const r=record(jobs,first.session_id!);await closeChild(r);await r.settled;}
   assert.equal(jobs.inspect("owner").length,8);
@@ -103,12 +103,12 @@ test("non-consuming terminal snapshots retain UTF-8 boundaries, omission counter
 });
 
 test("completion evidence correlates the original invocation without leaking extra metadata or duplicating output",()=>{
- const report=completionEvidence("native-call",{session_id:"job",output:"untrusted output",exit_code:0,running:false,truncated_bytes:0,output_remaining_bytes:0,extra:"MUST_NOT_LEAK"} as NativeCompletion);
- assert.equal(report.details.kind,"unified_exec_completion");assert.equal(report.details.toolCallId,"native-call");assert.equal(report.details.session_id,"job");assert.ok(!Object.hasOwn(report.details,"output"));assert.doesNotMatch(JSON.stringify(report),/MUST_NOT_LEAK/);assert.match(report.content[0].text,/not a new command/);assert.throws(()=>completionEvidence("",{} as NativeCompletion),/correlation/);
+ const report=completionEvidence("native-call",{session_id:1701,output:"untrusted output",exit_code:0,running:false,truncated_bytes:0,output_remaining_bytes:0,extra:"MUST_NOT_LEAK"} as NativeCompletion);
+ assert.equal(report.details.kind,"unified_exec_completion");assert.equal(report.details.toolCallId,"native-call");assert.equal(report.details.session_id,1701);assert.ok(!Object.hasOwn(report.details,"output"));assert.doesNotMatch(JSON.stringify(report),/MUST_NOT_LEAK/);assert.match(report.content[0].text,/not a new command/);assert.throws(()=>completionEvidence("",{} as NativeCompletion),/correlation/);
 });
 
 test("capacity eviction prefers an older uncollected result over recently collected partial output",async t=>{
- let clock=1700000000000;t.mock.method(Date,"now",()=>clock);const jobs=manager(),ids:string[]=[];
+ let clock=1700000000000;t.mock.method(Date,"now",()=>clock);const jobs=manager(),ids:number[]=[];
  try{
   for(let n=0;n<8;n++){clock++;const first=await jobs.start("owner",fixture,process.cwd(),0,4);ids.push(first.session_id!);const r=record(jobs,first.session_id!);await closeChild(r);await r.settled;}
   clock++;const partial=await jobs.write("owner",ids[0],"",0,4);assert.equal(partial.running,false);assert.equal(partial.session_id,ids[0]);

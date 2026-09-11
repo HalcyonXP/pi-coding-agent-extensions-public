@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {pollingPresentation} from './polling-presentation.mjs';
 import {validateReadableFrames} from './code-result-presentation.mjs';
-import {readUnifiedOutcome} from './unified-output-contract.mjs';
+import {readLegacyUnifiedOutcome} from './unified-output-contract.mjs';
 export const UNIFIED_OUTPUT_FRAMES=Object.freeze(['unified-output-running','unified-output-retained','unified-output-expanded','unified-output-loss','unified-output-hook-visible']);
 export function validateUnifiedOutputFrames(frames){
  assert.deepEqual(frames.map(f=>f.name),UNIFIED_OUTPUT_FRAMES);for(const f of frames)assert.ok(typeof f.text==='string'&&f.text.trim());
@@ -20,7 +20,7 @@ export async function unifiedOutputFrames(session,native){
  const ui=pollingPresentation(session,native),frames=[];
  const render=async(name,details,text,hook=false)=>{
   ui.history([]);const id='synthetic-'+name,toolName='exec_command';const result={content:[{type:'text',text}],details};
-  if(!hook)readUnifiedOutcome({...result,toolName,isError:false});const saved=JSON.stringify(result);
+  if(!hook)readLegacyUnifiedOutcome({...result,toolName,isError:false});const saved=JSON.stringify(result);
   await ui.fixtureEvent({type:'tool_execution_start',toolCallId:id,toolName,args:{cmd:'synthetic display only'}});
   await ui.fixtureEvent({type:'tool_execution_end',toolCallId:id,toolName,result,isError:false});
   assert.equal(JSON.stringify(result),saved);assert.equal(ui.groups().length,0);frames.push({name,text:ui.frame()});return result;

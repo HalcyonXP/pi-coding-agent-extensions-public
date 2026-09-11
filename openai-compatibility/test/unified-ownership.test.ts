@@ -59,7 +59,7 @@ for(const recovery of ["explicit user retry","independent process close"])test(`
  const independentClose=async()=>{if(record&&!record.closed){const done=new Promise<void>(r=>record!.child.once("close",()=>r()));record.child.kill("SIGKILL");await done;}};
  try{
   const r=await jobs.start("owner",command,process.cwd(),1,64,undefined,a.binding);
-  record=(Reflect.get(jobs,"processes") as Map<string,Record>).get(r.session_id!)!;
+  record=(Reflect.get(jobs,"processes") as Map<number,Record>).get(r.session_id!)!;
   const kill=record.child.kill;restore=()=>{record!.child.kill=kill;};record.child.kill=()=>{throw Error("injected OS cleanup failure");};
   if(process.platform!=="win32"){
    const groupKill=process.kill;

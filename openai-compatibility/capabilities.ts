@@ -1,5 +1,6 @@
 import { createUnifiedExecTools, UnifiedExecManager, unifiedOwner, nativeShellStatus } from "./unified-exec.ts";
 import { randomUUID } from "node:crypto";
+import { parseSessionId } from "./unified-session-id.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { assertOfficialContext, CapabilityEpoch, type CapabilityLease } from "./capability-policy.ts";
@@ -259,7 +260,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 				if (!action && ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.custom === "function" && options.openSettings) { await options.openSettings(ctx, "jobs"); return; }
 				try {
 					const control = jobs(ctx);
-					if (action === "cancel" && extra && !trailing) { await control.cancel(extra, new AbortController().signal); ctx.ui.notify("Unified exec job cancelled.", "info"); }
+					if (action === "cancel" && extra && !trailing) { await control.cancel(parseSessionId(extra), new AbortController().signal); ctx.ui.notify("Unified exec job cancelled.", "info"); }
 					else if ((!action || action === "status") && !extra) ctx.ui.notify(JSON.stringify(control.read(), null, 2), "info");
 					else ctx.ui.notify("Usage: /openai-tools jobs [status | cancel <session_id>]", "warning");
 				} catch (error) { ctx.ui.notify((error as Error).message, "warning"); }

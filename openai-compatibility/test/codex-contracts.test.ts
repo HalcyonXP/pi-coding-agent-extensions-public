@@ -59,16 +59,18 @@ test("contract fixture refuses malformed encoding and oversized input", () => {
 test("actual Pi shell schema snapshot keeps the current explicitly bounded adaptation", () => {
 	assert.deepEqual(fields(tools[0].parameters), [...facts.pi.unifiedExecFields].sort());
 	assert.deepEqual(fields(tools[1].parameters), [...facts.pi.unifiedWriteFields].sort());
-	assert.equal(tools[1].parameters.properties.session_id.type, facts.pi.sessionIdType);
+	assert.equal(facts.pi.sessionIdType, "string"); // Immutable historical audit, superseded below.
+	assert.equal(tools[1].parameters.properties.session_id.type, "integer");
+	assert.deepEqual(range(tools[1].parameters.properties.session_id), [1, 2147483647]);
 	assert.equal(tools[0].parameters.properties.tty.const, facts.pi.tty);
 	assert.deepEqual(facts.pi.yieldRangeMs, [0, 30000]); // Historical admission, not today's clamped request range.
 	for (const tool of tools) assert.deepEqual(range(tool.parameters.properties.yield_time_ms), [0, Number.MAX_SAFE_INTEGER]);
 	assert.deepEqual(range(tools[0].parameters.properties.max_output_tokens), facts.pi.outputTokenRange);
 });
 
-test("numeric target IDs, fractional waits and unsupported controls are not silently admitted by Pi", () => {
-	assert.ok(Value.Check(tools[1].parameters, { session_id: "synthetic-owned-lookup", chars: "" }));
-	assert.equal(Value.Check(tools[1].parameters, { session_id: 42 }), false);
+test("numeric IDs supersede UUID input without admitting fractions, coercion or unsupported controls", () => {
+	assert.ok(Value.Check(tools[1].parameters, { session_id: 42, chars: "" }));
+	for (const session_id of ["synthetic-owned-lookup", "42", 0, -1, 1.5, 2147483648, null]) assert.equal(Value.Check(tools[1].parameters, { session_id }), false);
 	for (const extra of [{ tty: true }, { shell: "other-shell" }, { login: true }, { environment_id: "other" }, { sandbox_permissions: "require_escalated" }, { additional_permissions: {} }, { prefix_rule: ["synthetic"] }, { timeout_ms: 10000 }, { yield_time_ms: 1.5 }, { max_output_tokens: 0 }]) {
 		assert.equal(Value.Check(tools[0].parameters, { cmd: "synthetic-not-executed", ...extra }), false);
 	}
@@ -89,7 +91,7 @@ test("omitted Unified defaults deliberately supersede the historical Pi defaults
 	const pair = createUnifiedExecTools(manager, () => ({ signal: new AbortController().signal, assertCurrent() {}, release() {} }));
 	const ctx = { cwd: process.cwd(), sessionManager: { getSessionId: () => "synthetic-contract" } } as unknown as ExtensionContext;
 	const start = await pair[0].execute("synthetic-start", { cmd: "not-executed" }, undefined, undefined, ctx);
-	await pair[1].execute("synthetic-poll", { session_id: "synthetic-owned-lookup" }, undefined, undefined, ctx);
+	await pair[1].execute("synthetic-poll", { session_id: 42 }, undefined, undefined, ctx);
 	assert.equal(calls.length, 2);
 	assert.equal(facts.pi.yieldDefaultMs, 1000); assert.equal(facts.pi.outputDefaultTokens, 4096);
 	assert.equal(calls[0][3], facts.unified.initialYield.defaultMs);
