@@ -1,6 +1,8 @@
 import { createUnifiedExecTools, UnifiedExecManager, unifiedOwner, nativeShellStatus } from "./unified-exec.ts";
 import { randomUUID } from "node:crypto";
 import { parseSessionId } from "./unified-session-id.ts";
+import { backgroundWaitMs, parseBackgroundWaitMs, MAX_BACKGROUND_WAIT_MS } from "./unified-wait.ts";
+import type { UnifiedPreferenceStore } from "./unified-preferences.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { assertOfficialContext, CapabilityEpoch, type CapabilityLease } from "./capability-policy.ts";
@@ -24,6 +26,8 @@ export interface CapabilityOptions {
 	fastCommand?: (args: string, ctx: ExtensionContext) => Promise<void>;
 	/** Trusted profile-local storage, not a model/tool parameter. Omitted in isolated compositions. */
 	preferences?: CapabilityPreferenceStore;
+	/** Separate bounded return-wait preference; supplies no execution authority. */
+	unifiedPreferences?: UnifiedPreferenceStore;
 }
 class CapabilityPreferenceError extends Error {}
 export interface CapabilitySettings {
@@ -47,6 +51,15 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 	const enabled = new Set(["imagegen"]);
 	let preferences: CapabilityPreferences = { ...DEFAULT_CAPABILITIES };
 	let preferenceError: string | undefined;
+	let maxBackgroundWaitMs = MAX_BACKGROUND_WAIT_MS;
+	let unifiedPreferenceError: string | undefined;
+	function currentBackgroundWaitMs(): number {
+		if (unifiedPreferenceError) throw new CapabilityPreferenceError(unifiedPreferenceError);
+		return backgroundWaitMs(maxBackgroundWaitMs);
+	}
+	function backgroundWaitStatus(): string {
+		return unifiedPreferenceError ?? `${options.unifiedPreferences ? "Saved profile" : "Session"} background wait ceiling: ${maxBackgroundWaitMs} ms. Applies to future empty-input polls only; running waits and process limits are unchanged.`;
+	}
 	const groups: Record<CapabilityName, string[]> = { imagegen: ["imagegen"], web_search: ["web_search"], unified_exec: ["exec_command", "write_stdin"], code_mode: ["exec", "wait"] };
 	const definitions = new Map<string, ToolDefinition>();
 	const pending = new Map<string, CapabilityLease>();
@@ -89,7 +102,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		});
 	}
 	add(createImagegenTool((ctx, signal) => leaseFor("imagegen", ctx, signal), () => turnId, mutationQueue));
-	for (const tool of createUnifiedExecTools(processes, leaseFor)) add(tool);
+	for (const tool of createUnifiedExecTools(processes, leaseFor, currentBackgroundWaitMs)) add(tool);
 	if (search) add(createWebSearchTool(search, (ctx, signal) => leaseFor("web_search", ctx, signal), options.webSearch?.profile));
 
 	function sync(ctx: ExtensionContext) {
@@ -131,6 +144,12 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			preferenceError = "Saved capability preferences could not be read. All capability choices are off; preserve the profile file.";
 			ctx.ui.notify(preferenceError, "warning");
 		}
+		unifiedPreferenceError = undefined;
+		try { maxBackgroundWaitMs = backgroundWaitMs(options.unifiedPreferences ? options.unifiedPreferences.read() : MAX_BACKGROUND_WAIT_MS); }
+		catch {
+			unifiedPreferenceError = "Saved Unified wait preferences are invalid. Unified exec is unavailable; preserve and repair the profile file, then reload. Other capabilities and Jobs cancellation remain separate.";
+			ctx.ui.notify(unifiedPreferenceError, "warning");
+		}
 		// Restore choices, never authority or jobs. Passive inspection cannot launch,
 		// authenticate or relax native admission. A newer boundary wins this race.
 		const [shell, code] = await Promise.all([
@@ -140,7 +159,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		]);
 		if (revision !== preferenceEpoch) return;
 		for (const name of CAPABILITY_NAMES) {
-			if (!preferences[name] || (name === "web_search" && !search) || (name === "unified_exec" && !shell?.available) || (name === "code_mode" && !code?.available)) continue;
+			if (!preferences[name] || (name === "web_search" && !search) || (name === "unified_exec" && (!shell?.available || unifiedPreferenceError)) || (name === "code_mode" && !code?.available)) continue;
 			for (const tool of groups[name]) enabled.add(tool);
 		}
 		sync(ctx);
@@ -184,6 +203,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		signal?.throwIfAborted();
 		if (name === "web_search" && !search) throw new CapabilityPreferenceError("Web search unavailable: this composition has no configured search transport/profile.");
 		if (name === "unified_exec" && action === "on") {
+			currentBackgroundWaitMs();
 			const requestedEpoch = preferenceEpoch, status = await nativeShellStatus();
 			if (requestedEpoch !== preferenceEpoch) throw new CapabilityPreferenceError("Unified exec preference change revoked by a newer policy/session boundary.");
 			signal?.throwIfAborted();
@@ -205,6 +225,15 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		preferenceError = undefined;
 		for (const tool of groups[name]) { if (action === "on") enabled.add(tool); else enabled.delete(tool); }
 		await reset(ctx);
+	}
+	function changeBackgroundWait(value: string, signal?: AbortSignal): void {
+		signal?.throwIfAborted();
+		const requested = parseBackgroundWaitMs(value);
+		// The store validates the latest file before replacing it. No await, reset,
+		// lease revocation or job cancellation: only future calls use this snapshot.
+		options.unifiedPreferences?.write(requested);
+		maxBackgroundWaitMs = requested;
+		unifiedPreferenceError = undefined;
 	}
 	async function readSettings(ctx: ExtensionContext): Promise<SettingsRow[]> {
 		const revision = preferenceEpoch;
@@ -229,6 +258,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			const names = groups[id];
 			const reason = !trusted ? "Select an official native OpenAI route." : id === "web_search" && !search ? "No search transport configured."
 				: !names.every(name => ownership.owns(name)) ? "Tool names are excluded, conflicting or replaced."
+				: id === "unified_exec" && unifiedPreferenceError ? unifiedPreferenceError
 				: id === "unified_exec" && !shell.available ? shell.reason
 				: id === "code_mode" && !code.available ? codeReasons[code.reason ?? ""] ?? "Native runtime is unavailable." : undefined;
 			const saved = `${options.preferences ? "Saved for this Pi profile" : "Session preference"}: ${preferences[id] ? "on" : "off"}.`;
@@ -243,12 +273,14 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			{ id: "subscription", label: "Codex subscription", value: !trusted ? "not inspected" : auth.startsWith("Codex OAuth configured") ? "configured" : auth.startsWith("missing") ? "login required" : "unavailable", description: `${auth}. Opening settings never refreshes credentials or probes service access.` },
 			{ id: "runtime", label: "Code runtime", value: !code.available ? "unavailable" : code.native?.drainingScopes ? "draining" : code.native?.activeScopes === 2 ? "busy" : "ready", description: code.available ? `Verified Windows preflight; launch is checked again. Native scopes: ${code.native?.activeScopes ?? 0} active, ${code.native?.drainingScopes ?? 0} draining / 2. Draining blocks new admission; no fallback.` : codeReasons[code.reason ?? ""] ?? "Compatible native host and verified prebuilt helper required; no runtime download or compiler." },
 		);
+		rows.push({ id: "background_wait", label: "Background wait ceiling", value: unifiedPreferenceError ? "unavailable" : String(maxBackgroundWaitMs),
+			description: backgroundWaitStatus(), values: unifiedPreferenceError ? undefined : [...new Set([String(maxBackgroundWaitMs), "5000", "10000", "30000", "60000", "120000", "300000"])].sort((a, b) => Number(a) - Number(b)) });
 		return rows;
 	}
 	pi.registerCommand("openai-tools", {
 		description: "OpenAI settings, Fast, capability switches and owned jobs",
 		getArgumentCompletions(prefix) {
-			const values = ["status", "fast", "fast on", "fast off", "fast toggle", "fast status", "jobs", "jobs status", "jobs cancel ", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
+			const values = ["status", "fast", "fast on", "fast off", "fast toggle", "fast status", "jobs", "jobs status", "jobs cancel ", "background-wait status", "background-wait 5000", "background-wait 300000", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
 			const matches = values.filter(value => value.startsWith(prefix.trim().toLowerCase())).map(value => ({ value, label: value }));
 			return matches.length ? matches : null;
 		},
@@ -256,6 +288,14 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			if (!args.trim() && ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.custom === "function" && options.openSettings) { await options.openSettings(ctx); return; }
 			const [name, action, extra, trailing] = args.trim().split(/\s+/);
 			if (name === "fast" && options.fastCommand) { await options.fastCommand(args.trim().slice(4).trim(), ctx); return; }
+			if (name === "background-wait") {
+				if (extra) { ctx.ui.notify("Usage: /openai-tools background-wait [status | <5000–300000 milliseconds>]", "warning"); return; }
+				try {
+					if (action && action !== "status") changeBackgroundWait(action);
+					ctx.ui.notify(backgroundWaitStatus(), unifiedPreferenceError ? "warning" : "info");
+				} catch { ctx.ui.notify("Could not change background wait ceiling. Use canonical decimal milliseconds from 5000 to 300000; preserve and repair any invalid profile file. Current settings were not changed.", "warning"); }
+				return;
+			}
 			if (name === "jobs") {
 				if (!action && ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.custom === "function" && options.openSettings) { await options.openSettings(ctx, "jobs"); return; }
 				try {
@@ -268,7 +308,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			}
 			if (name && name !== "status") {
 				if (!["imagegen", "unified_exec", "web_search", "code_mode"].includes(name) || !["on", "off"].includes(action) || extra) {
-					ctx.ui.notify("Usage: /openai-tools [status | fast on|off|toggle|status | jobs status|cancel <session_id> | imagegen|unified_exec|web_search|code_mode on|off]", "warning"); return;
+					ctx.ui.notify("Usage: /openai-tools [status | fast on|off|toggle|status | jobs status|cancel <session_id> | background-wait status|<milliseconds> | imagegen|unified_exec|web_search|code_mode on|off]", "warning"); return;
 				}
 				try { await changePreference(name, action, ctx); }
 				catch (error) { if (!(error instanceof CapabilityPreferenceError)) throw error; ctx.ui.notify(error.message, "warning"); return; }
@@ -285,7 +325,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			const codeDescription = !codeStatus.available ? `unavailable; ${codeStatus.reason}`
 				: `${pi.getActiveTools().includes("exec") ? "enabled" : "off; /openai-tools code_mode on"}; Windows x64 native preflight ready (launch rechecked); native scopes ${codeStatus.native!.activeScopes} active, ${codeStatus.native!.drainingScopes} draining / 2${codeStatus.native!.drainingScopes ? "; new native admission blocked until confirmed cleanup" : ""}`;
 			const conflicts = [...definitions.keys()].filter(name => !ownership.owns(name));
-			ctx.ui.notify(`OpenAI capabilities (${reason})\nTool ownership: ${conflicts.length ? `unavailable/conflicting/excluded: ${conflicts.join(", ")}` : "verified (Pi 0.85 schema identity)"}\nSubscription: ${auth}\nImage generation: ${pi.getActiveTools().includes("imagegen") ? "enabled; Codex OAuth required at execution" : "unavailable/disabled"}\nWeb search: ${searchStatus}\nCode mode: ${codeDescription}\nUnified exec: ${!shellStatus.available ? `unavailable; ${shellStatus.reason}` : pi.getActiveTools().includes("exec_command") ? "enabled (full OS permissions, pipes only)" : "off; /openai-tools unified_exec on"}\n${preferenceError ?? `${options.preferences ? "Saved profile preferences" : "Session preferences"}: ${CAPABILITY_NAMES.map(name => `${name}=${preferences[name] ? "on" : "off"}`).join(", ")}.`}\nDirect jobs share two native scopes with Code mode; draining blocks admission. Patched-host direct completions enter native history and the next safe model request; no automatic idle turn or incremental output stream. Poll for remaining output; completed results have capacity-based retention. Jobs/cells are not restored.\nNo API fallback. Historical conversation images are not removed by this policy.`, "info");
+			ctx.ui.notify(`OpenAI capabilities (${reason})\nTool ownership: ${conflicts.length ? `unavailable/conflicting/excluded: ${conflicts.join(", ")}` : "verified (Pi 0.85 schema identity)"}\nSubscription: ${auth}\nImage generation: ${pi.getActiveTools().includes("imagegen") ? "enabled; Codex OAuth required at execution" : "unavailable/disabled"}\nWeb search: ${searchStatus}\nCode mode: ${codeDescription}\nUnified exec: ${!shellStatus.available ? `unavailable; ${shellStatus.reason}` : pi.getActiveTools().includes("exec_command") ? "enabled (full OS permissions, pipes only)" : "off; /openai-tools unified_exec on"}\n${preferenceError ?? `${options.preferences ? "Saved profile preferences" : "Session preferences"}: ${CAPABILITY_NAMES.map(name => `${name}=${preferences[name] ? "on" : "off"}`).join(", ")}.`}\n${backgroundWaitStatus()}\nDirect jobs share two native scopes with Code mode; draining blocks admission. Patched-host direct completions enter native history and the next safe model request; no automatic idle turn or incremental output stream. Poll for remaining output; completed results have capacity-based retention. Jobs/cells are not restored.\nNo API fallback. Historical conversation images are not removed by this policy.`, "info");
 		},
 	});
 	return {
@@ -295,7 +335,8 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			signal.throwIfAborted();
 			if (revision !== menuEpoch) throw new Error("Settings context changed. Reopen the menu.");
 			if (!rows.find(row => row.id === id)?.values?.includes(value)) throw new Error("This capability is unavailable or read-only.");
-			await changePreference(id, value, ctx, signal);
+			if (id === "background_wait") changeBackgroundWait(value, signal);
+			else await changePreference(id, value, ctx, signal);
 		},
 		contextVersion: () => menuEpoch,
 		onBoundary(close) { menuBoundaries.add(close); return () => { menuBoundaries.delete(close); }; },

@@ -12,7 +12,7 @@ import { verifiedExecutable } from "./runtime/native/artifact.mjs";
 import { completionEvidence } from "./unified-completion.ts";
 import { directUnifiedResult } from "./unified-exec-output.ts";
 import { resultJSON } from "./runtime/rpc-protocol.mjs";
-import { initialWaitMs, stdinWaitMs, MAX_EXEC_WAIT_MS, MAX_BACKGROUND_WAIT_MS } from "./unified-wait.ts";
+import { initialWaitMs, stdinWaitMs, backgroundWaitMs, MAX_EXEC_WAIT_MS, MAX_BACKGROUND_WAIT_MS } from "./unified-wait.ts";
 
 const MAX_PROCESSES = 4;
 const MAX_RETAINED = 8;
@@ -344,7 +344,7 @@ const ExecParams = Type.Object({
 const WriteParams = Type.Object({
 	session_id: Type.Integer({ minimum: 1, maximum: MAX_SESSION_ID, description: "Numeric lookup ID returned by exec_command/write_stdin; not a PID or native authority. Do not convert strings, reuse expired IDs or relaunch a command to collect output." }),
 	chars: Type.Optional(Type.String({ maxLength: MAX_INPUT, description: "Input text; empty polls. Exactly Ctrl-C (U+0003) kills the process tree; exactly Ctrl-D (U+0004) closes stdin. Not terminal emulation." })),
-	yield_time_ms: yieldTime("Empty/omitted chars: default/floor 5000 ms, maximum 300000 ms. Nonempty input, including control characters: default/floor 250 ms, maximum 30000 ms."),
+	yield_time_ms: yieldTime("Empty/omitted chars: default/floor 5000 ms, profile-configured maximum up to 300000 ms. Nonempty input, including control characters: default/floor 250 ms, maximum 30000 ms."),
 	max_output_tokens: outputLimit,
 }, { additionalProperties: false });
 
@@ -413,7 +413,8 @@ function nestedReadLimit(maxBytes: number, preview: (limit: number) => ExecResul
 	}
 	return best;
 }
-export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (name: "exec_command" | "write_stdin", ctx: ExtensionContext, signal?: AbortSignal) => CapabilityLease) {
+export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (name: "exec_command" | "write_stdin", ctx: ExtensionContext, signal?: AbortSignal) => CapabilityLease,
+	getBackgroundWaitMs: () => number = () => MAX_BACKGROUND_WAIT_MS) {
 	return [{
 		name: "exec_command", label: "Unified exec", description: "Start a native local command, collect bounded output, and keep a same-context session for polling/stdin. Full OS permissions; no sandbox or PTY. The patched host shares TWO active/draining native scopes across direct jobs and Code mode, separately from the four-process manager limit. A third direct start can be refused without cancelling earlier jobs. running:true with supervisor_ready:false means startup is unconfirmed, not command success. On the compatible patched host, returned direct jobs publish a bounded completion snapshot through the native protected history/UI and next safe model request; this does not interrupt a request or start an idle turn. Poll write_stdin for readiness/input/remaining output. Completed results are retained until collected, capacity-evicted, cancelled or reset, not a one-minute poll deadline. Direct results contain process status, measured time for this awaited operation (not process age), and literal returned output; structured fields remain in native details. An exited process can retain a session ID for unread output, not because it is still running. Nested results retain their JSON/details wrapper and jobs still belong to their original cell. Never relaunch just to wait. Jobs are not restored after reload/context changes; native context and process lifetime/idle limits still apply. Does not replace Pi's PowerShell tool.",
 		parameters: ExecParams,
@@ -422,6 +423,7 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 			let binding: NativeJobBinding | undefined;
 			try {
 				const waitMs = initialWaitMs(params.yield_time_ms);
+				backgroundWaitMs(getBackgroundWaitMs()); // Refuse invalid trusted policy before starting any work.
 				binding = await nativeBinding(ctx, contextSignal => getLease("exec_command", ctx, contextSignal));
 				const started = binding?.scope ? undefined : performance.now();
 				const value = await manager.start(unifiedOwner(ctx), params.cmd, path.resolve(ctx.cwd, params.workdir ?? "."), waitMs, (params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS) * 4, lease.signal, binding);
@@ -431,7 +433,7 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 			finally { lease.release(); }
 		},
 	} satisfies ToolDefinition<typeof ExecParams>, {
-		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. A nested call cannot adopt another cell's ID or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. On the matching updated native host, unchanged empty-running cell polls are local work hidden from the TUI and ordinary audit context; direct calls, input, output/loss, errors and terminal results remain visible. Print meaningful changes rather than each unchanged poll. No extra model request is made per local poll; explicitly printed output still becomes model input. Direct calls return status, per-call wall time and literal returned output, with structured fields in native details; nested calls retain their JSON/details wrapper. Requested waits are clamped: empty polls 5000–300000 ms, nonempty input 250–30000 ms. Completion can return sooner. Zero requests the applicable floor; return wait is not process age or lifetime. IDs expire on provider/session changes or reload.",
+		name: "write_stdin", label: "Unified exec input", description: "Poll or write to a Unified exec session owned by this conversation and, for native cell jobs, the original cell scope. A nested call cannot adopt another cell's ID or a direct job. Empty chars polls, Ctrl-C cancels the tree, Ctrl-D closes input. On the matching updated native host, unchanged empty-running cell polls are local work hidden from the TUI and ordinary audit context; direct calls, input, output/loss, errors and terminal results remain visible. Print meaningful changes rather than each unchanged poll. No extra model request is made per local poll; explicitly printed output still becomes model input. Direct calls return status, per-call wall time and literal returned output, with structured fields in native details; nested calls retain their JSON/details wrapper. Requested waits are clamped: empty polls 5000 ms to the profile ceiling (default/hard maximum 300000 ms), nonempty input 250–30000 ms. Profile changes affect future calls, not an already pending wait. Completion can return sooner. Zero requests the applicable floor; return wait is not process age or lifetime. IDs expire on provider/session changes or reload.",
 		// Native-only declaration; never exposed as a model/guest permission parameter.
 		localPolling: "empty-stdin",
 		parameters: WriteParams,
@@ -441,7 +443,8 @@ export function createUnifiedExecTools(manager: UnifiedExecManager, getLease: (n
 				const access = nativeAccess(ctx);
 				const started = access.scope ? undefined : performance.now();
 				const chars = params.chars ?? "";
-				const waitMs = stdinWaitMs(params.yield_time_ms, chars);
+				const ceiling = backgroundWaitMs(getBackgroundWaitMs());
+				const waitMs = stdinWaitMs(params.yield_time_ms, chars, ceiling);
 				const value = await manager.write(unifiedOwner(ctx), params.session_id, chars, waitMs, (params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS) * 4, lease.signal, access);
 				const wallTimeMs = started === undefined ? undefined : Math.round(performance.now() - started);
 				lease.assertCurrent(); return wallTimeMs === undefined ? nestedResult(value) : directUnifiedResult(value, wallTimeMs);

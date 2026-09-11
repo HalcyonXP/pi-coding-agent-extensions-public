@@ -14,16 +14,23 @@ import {readUnifiedOutcome} from './unified-output-contract.mjs';
 export function validateUnifiedWait(rows) {
  assert.deepEqual(rows.map(r=>r.api),['openai-responses','openai-codex-responses']);
  for(const r of rows) {
-  assert.equal(r.requests,11);
-  for(const key of ['explicitInitialFloor','nonemptyFloor','backgroundCollectedOnce','originalID','cancelledLongWait','historyUnchanged'])assert.equal(r[key],true);
+  assert.equal(r.requests,11);assert.equal(r.configuredCeilingMs,60000);
+  for(const key of ['explicitInitialFloor','nonemptyFloor','backgroundCollectedOnce','originalID','cancelledLongWait','historyUnchanged','invalidCeilingPreserved','preferenceChangePreservedJob'])assert.equal(r[key],true);
   assert.ok(Number.isFinite(r.backgroundMs)&&r.backgroundMs>30000&&r.backgroundMs<60000);
   assert.ok(Number.isFinite(r.cancelMs)&&r.cancelMs>=0&&r.cancelMs<5000);
   assert.equal(r.activeScopes,0);assert.equal(r.drainingScopes,0);
  }
- return {explicitWaitClamping:true,backgroundWaitBeyond30Seconds:true,originalIDCollected:true,longWaitCancelled:true,nativeScopesReleased:true,syntheticModelRequests:22,scenarios:6,liveServiceCalls:0};
+ return {explicitWaitClamping:true,backgroundWaitBeyond30Seconds:true,configuredBackgroundCeiling:true,originalIDCollected:true,longWaitCancelled:true,nativeScopesReleased:true,syntheticModelRequests:22,scenarios:6,liveServiceCalls:0};
 }
 
-export async function acceptUnifiedWait(session,runtime,nativeStream,cwd) {
+export async function acceptUnifiedWait(session,runtime,nativeStream,cwd,profile) {
+ assert.ok(profile);const preferenceFile=join(profile,'openai-compatibility-unified.json');
+ const configure=async ceiling=>{
+  const before=session.agent.getToolGatewayInfo();
+  await session.prompt(`/openai-tools background-wait ${ceiling}`);
+  assert.deepEqual(JSON.parse(await readFile(preferenceFile,'utf8')),{version:1,maxBackgroundWaitMs:ceiling});
+  const after=session.agent.getToolGatewayInfo();assert.equal(after.activeScopes,before.activeScopes);assert.equal(after.drainingScopes,before.drainingScopes);
+ };
  const folder=await mkdtemp(join(cwd,'unified wait ')),before=session.model,active=[...session.getActiveToolNames()].sort(),rows=[],invocations=[],failures=[];
  const descriptors={stream:Object.getOwnPropertyDescriptor(session.agent,'streamFunction'),auth:Object.getOwnPropertyDescriptor(runtime,'getAuth'),check:Object.getOwnPropertyDescriptor(runtime,'checkAuth')};
  let cancelTimer,cancelStarted,armCancel=false,ends=[];
@@ -62,11 +69,15 @@ export async function acceptUnifiedWait(session,runtime,nativeStream,cwd) {
    const start=await invoke('exec_command',{cmd:await command('background',"process.stdin.resume();const expiry=setTimeout(()=>process.exit(19),90000);process.stdin.once('data',()=>setTimeout(()=>{clearTimeout(expiry);process.stdout.write('WAIT_BACKGROUND\\n');process.stdin.destroy()},35000))"),yield_time_ms:0});
    assert.equal(start.value.running,true);assert.equal(typeof start.value.session_id,"number");const id=start.value.session_id;
    const input=await invoke('write_stdin',{session_id:id,chars:'arm\n',yield_time_ms:0});assert.equal(input.value.running,true);assert.equal(input.value.session_id,id);assert.ok(input.ms>=200&&input.ms<5000);
-   const background=await invoke('write_stdin',{session_id:id,yield_time_ms:60000});assert.equal(background.value.running,false);assert.equal(background.value.exit_code,0);assert.equal(background.value.session_id,undefined);assert.match(background.value.output,/WAIT_BACKGROUND/);
+   assert.equal(session.agent.getToolGatewayInfo().activeScopes,1);
+   await configure(60000);const savedPreference=await readFile(preferenceFile);
+   await session.prompt('/openai-tools background-wait 300001');assert.deepEqual(await readFile(preferenceFile),savedPreference);
+   const background=await invoke('write_stdin',{session_id:id,yield_time_ms:300000});assert.equal(background.value.running,false);assert.equal(background.value.exit_code,0);assert.equal(background.value.session_id,undefined);assert.match(background.value.output,/WAIT_BACKGROUND/);
    const cancellable=await invoke('exec_command',{cmd:await command('cancel',"process.stdin.resume();setTimeout(()=>process.exit(19),90000)"),yield_time_ms:0});assert.equal(cancellable.value.running,true);
+   await configure(300000);
    const cancelled=await invoke('write_stdin',{session_id:cancellable.value.session_id,yield_time_ms:300000},true);
    const info=session.agent.getToolGatewayInfo();assert.equal(info.activeScopes,0);assert.equal(info.drainingScopes,0);
-   rows.push({api:model.api,requests:total,explicitInitialFloor:true,nonemptyFloor:true,backgroundCollectedOnce:true,originalID:true,cancelledLongWait:true,historyUnchanged:true,backgroundMs:background.ms,cancelMs:cancelled.ms,activeScopes:info.activeScopes,drainingScopes:info.drainingScopes});
+   rows.push({api:model.api,requests:total,configuredCeilingMs:60000,invalidCeilingPreserved:true,preferenceChangePreservedJob:true,explicitInitialFloor:true,nonemptyFloor:true,backgroundCollectedOnce:true,originalID:true,cancelledLongWait:true,historyUnchanged:true,backgroundMs:background.ms,cancelMs:cancelled.ms,activeScopes:info.activeScopes,drainingScopes:info.drainingScopes});
   }
  } catch(e) {failures.push(e);} finally {
   clearTimeout(cancelTimer);armCancel=false;
@@ -101,7 +112,7 @@ async function installedProfile(bundle){
   const settings=sdk.SettingsManager.inMemory(),resources=new sdk.DefaultResourceLoader({cwd,agentDir:profile,settingsManager:settings,additionalExtensionPaths:[join(bundle,'extensions/openai-compatibility/index.ts')],noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true});await resources.reload();assert.deepEqual(resources.getExtensions().errors,[]);
   const runtime=await sdk.ModelRuntime.create({authPath:join(profile,'auth.json'),modelsPath:null,allowModelNetwork:false,refreshOnCreate:false});runtime.hasConfiguredAuth=()=>true;runtime.isUsingOAuth=id=>id==='openai-codex';runtime.getAuth=async()=>({auth:{apiKey:'synthetic-default-profile'}});runtime.checkAuth=async()=>true;
   ({session}=await sdk.createAgentSession({cwd,agentDir:profile,modelRuntime:runtime,model:runtime.getModel('openai','gpt-6-astra'),settingsManager:settings,sessionManager:sdk.SessionManager.create(cwd,join(profile,'sessions')),resourceLoader:resources}));await session.bindExtensions({uiContext:{...session.extensionRunner.createContext().ui,notify(){}}});
-  assert.equal(session.autoCompactionEnabled,true);await session.prompt('/openai-tools unified_exec on');await session.prompt('/openai-tools code_mode on');nativeUnifiedWait=await acceptUnifiedWait(session,runtime,session.agent.streamFunction,cwd);assert.equal(networkAttempts,0);assert.equal(session.autoCompactionEnabled,true);
+  assert.equal(session.autoCompactionEnabled,true);await session.prompt('/openai-tools unified_exec on');await session.prompt('/openai-tools code_mode on');nativeUnifiedWait=await acceptUnifiedWait(session,runtime,session.agent.streamFunction,cwd,profile);assert.equal(networkAttempts,0);assert.equal(session.autoCompactionEnabled,true);
  }catch(e){failures.push(e);}finally{const cleanup=async f=>{try{await f();}catch(e){failures.push(e);}};if(session){await cleanup(()=>session.agent.abort());await cleanup(()=>session.extensionRunner.emit({type:'session_shutdown',reason:'quit'}));await cleanup(()=>session.dispose());}}
  if(failures.length)throw new AggregateError(failures,'Isolated native-wait fixture failed; retain profile and logs');console.log(JSON.stringify({state:'passed',nativeUnifiedWait,networkAttempts,compactionEnabled:true}));
 }

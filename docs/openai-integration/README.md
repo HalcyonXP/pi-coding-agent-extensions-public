@@ -2,13 +2,15 @@
 
 This guide describes the public source's implementation and constraints, not an inherited private project's approval history. The target is **Codex-compatible observable tool behavior within Pi**, not merely similar names. See the pinned [compatibility contract and remaining gaps](CODEX-COMPATIBILITY.md). Read [architecture](ARCHITECTURE.md), [supported/deviating surface](FINAL-ACCEPTANCE.md), [validation](VALIDATION.md), [security](SECURITY.md), [local preview versus public release](LOCAL-PREVIEW.md) and [isolated installation](PRIVATE-RELEASE.md).
 
+Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, focused development commands and milestone acceptance. Functional completion and public redistribution remain separate.
+
 | Term | Meaning in this project |
 | --- | --- |
 | Native/upstream models | Pi 0.85.1's own catalog/auth/transport/cache behavior; no extension provider factory or model backport |
 | Patched/private host | Genuine pinned Pi source plus the explicit twenty-path native patch; not stock Pi, an official upstream binary, or a visibility claim |
 | Code mode | Independently opted-in paired exec/wait with a saved profile choice, bounded QuickJS cells and current native ownership; not ambient Node/V8 |
 | Native Code input | Raw-JavaScript custom provider tool, mapped by Pi to internal `{code}`; options in a first-line pragma, not top-level JSON fields. Wait remains JSON. See [input/result boundaries](NATIVE-CODE-CONTRACT.md). |
-| Opt-in Code projection | Pi-specific `projectedTools` guest data view for recognized normal Unified results, with native-wrapper fallback; unchanged `tools` API and evidence/authority. See [projection contract](CODE-RESULT-PROJECTION.md). |
+| Code projection | Default `tools` guest view for recognized normal Unified results, with full native-wrapper fallback; `nativeTools` preserves raw access and `projectedTools` is an identical alias. Legacy scripts need migration; native evidence/authority is unchanged. See [projection contract](CODE-RESULT-PROJECTION.md). |
 | Native grammar capability | Selected Pi model's explicit grammar-tool support; absence disables Code without a JSON-provider fallback, not an execution-authority grant |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
 | Supervisor readiness | Private shell-supervisor preamble received; not child acknowledgement receipt, user-command success or native authority |
@@ -51,7 +53,7 @@ This guide describes the public source's implementation and constraints, not an 
 | Cell completion | The cell returned a terminal result; a failed cell is labelled failed. Not a blanket assertion that all delegated jobs succeeded |
 | Code output omission | Bytes already omitted by the existing guest-output budget; prominently reported, not recoverable merely by expanding the UI |
 | Omitted Unified controls | Initial wait10,000 ms; empty stdin5,000 ms/nonempty250 ms; output10,000 approximate tokens. Separate from Code defaults and execution budgets |
-| Requested Unified wait | Non-negative safe-integer request clamped before native work: Windows initial10,000–30,000 ms (other platforms250–30,000); empty stdin5,000–300,000; nonempty250–30,000. Zero selects the floor; closure/cancellation can end collection sooner, without enlarging process lifetime or certifying cleanup |
+| Requested Unified wait | Non-negative safe-integer request clamped before native work: Windows initial10,000–30,000 ms (other platforms250–30,000); empty stdin5,000 to the profile ceiling (default/hard maximum300,000); nonempty250–30,000. Zero selects the floor; closure/cancellation can end collection sooner, without enlarging process lifetime or certifying cleanup |
 | Nested output slice | UTF-8 collection bounded by the complete serialized native wrapper; unread bytes retain their original ID, distinct from lost output and later hook/aggregate-limit failures |
 | Unified output loss | Bytes already dropped from the shell buffer, not unread retained output; further polling or expansion cannot recover the dropped bytes |
 | Safe model step | Next native model request after valid tool-result ordering permits queued evidence; never modification of an already in-flight request |

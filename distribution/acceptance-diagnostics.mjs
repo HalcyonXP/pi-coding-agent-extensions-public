@@ -8,7 +8,7 @@ const knownCodes=new Set([...ERROR_CODES,...RPC_ERRORS]);
 // No runtime/poll/teardown budget is widened and no service call is introduced.
 export function shellReadinessCode(command){
  if(typeof command!=="string")throw new TypeError("Shell acceptance command must be a string");
- return `// @exec: {"yield_time_ms":30000}\nlet r=await tools.exec_command({cmd:${JSON.stringify(command)},yield_time_ms:1});if(r.isError)throw Error("launch denied");let o=r.result.details.output;const deadline=Date.now()+9000;for(let i=0;i<30&&!o.includes("READY")&&Date.now()+5000<=deadline;i++){r=await tools.write_stdin({session_id:r.result.details.session_id,yield_time_ms:300});if(r.isError)throw Error("poll denied");o+=r.result.details.output;}if(!o.includes("READY"))throw Error("not ready");`;
+ return `// @exec: {"yield_time_ms":30000}\nlet r=await nativeTools.exec_command({cmd:${JSON.stringify(command)},yield_time_ms:1});if(r.isError)throw Error("launch denied");let o=r.result.details.output;const deadline=Date.now()+9000;for(let i=0;i<30&&!o.includes("READY")&&Date.now()+5000<=deadline;i++){r=await nativeTools.write_stdin({session_id:r.result.details.session_id,yield_time_ms:300});if(r.isError)throw Error("poll denied");o+=r.result.details.output;}if(!o.includes("READY"))throw Error("not ready");`;
 }
 const terminationKinds=new Map([
  ["Native supervisor admission failed.","supervisor-admission"],

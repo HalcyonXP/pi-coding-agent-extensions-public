@@ -1942,7 +1942,7 @@ describe("returned Unified exec jobs are native-owned after real cell handlers r
 				if (mode === "direct-to-cell")
 					await invoke({ cmd, yield_time_ms: 1, max_output_tokens: 128 }, "exec_command");
 				else {
-					const body = `let r=await tools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:1,max_output_tokens:128});if(r.isError)throw Error("launch denied");const id=r.result.details.session_id;let out=r.result.details.output;for(let n=0;n<30&&!out.includes("READY");n++){r=await tools.write_stdin({session_id:id,yield_time_ms:300,max_output_tokens:128});if(r.isError)throw Error("same owner denied");out+=r.result.details.output;}if(!out.includes("READY"))throw Error("not ready");text("guest-shell-budget-marker");yield_control();await new Promise(r=>setTimeout(r,${["complete", "failure", "stdin"].includes(mode) ? 400 : 10000}));${mode === "failure" ? 'throw Error("guest failed after returning shell");' : mode === "stdin" ? 'r=await tools.write_stdin({session_id:id,chars:"finish\\n",yield_time_ms:3000,max_output_tokens:128});if(r.isError||!r.result.details.output.includes("ACK:"))throw Error("stdin failed");' : ""}`;
+					const body = `let r=await nativeTools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:1,max_output_tokens:128});if(r.isError)throw Error("launch denied");const id=r.result.details.session_id;let out=r.result.details.output;for(let n=0;n<30&&!out.includes("READY");n++){r=await nativeTools.write_stdin({session_id:id,yield_time_ms:300,max_output_tokens:128});if(r.isError)throw Error("same owner denied");out+=r.result.details.output;}if(!out.includes("READY"))throw Error("not ready");text("guest-shell-budget-marker");yield_control();await new Promise(r=>setTimeout(r,${["complete", "failure", "stdin"].includes(mode) ? 400 : 10000}));${mode === "failure" ? 'throw Error("guest failed after returning shell");' : mode === "stdin" ? 'r=await nativeTools.write_stdin({session_id:id,chars:"finish\\n",yield_time_ms:3000,max_output_tokens:128});if(r.isError||!r.result.details.output.includes("ACK:"))throw Error("stdin failed");' : ""}`;
 					await invoke({ code: body });
 					expect(outcomes[0].status).toBe("running");
 				}
@@ -1962,7 +1962,7 @@ describe("returned Unified exec jobs are native-owned after real cell handlers r
 					// Only knowledge of the real session ID changes; native access ownership does not.
 					firstCell ??= "direct-conversation-job";
 					await invoke({
-						code: `const r=await tools.write_stdin({session_id:${JSON.stringify(jobId)},chars:"unauthorized\\n",yield_time_ms:1});if(!r.isError||!JSON.stringify(r.result.content).includes("foreign Unified exec session"))throw Error("foreign job accepted or wrong rejection");`,
+						code: `const r=await nativeTools.write_stdin({session_id:${JSON.stringify(jobId)},chars:"unauthorized\\n",yield_time_ms:1});if(!r.isError||!JSON.stringify(r.result.content).includes("foreign Unified exec session"))throw Error("foreign job accepted or wrong rejection");`,
 					});
 					expect(outcomes.at(-1)).toMatchObject({ status: "completed", result: { status: "ok" } });
 					expect(processAlive(info!.pid)).toBe(true);
@@ -2216,7 +2216,7 @@ describe("normal cohesive Code mode registration and native policy", () => {
 						cmd = `& ${q(process.execPath)} ${q(program)} ${q(marker)}; exit $LASTEXITCODE`;
 					const r = outcome(
 						await invoke("exec", {
-							code: `// @exec: {"yield_time_ms":1}\nlet r=await tools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:1});let out=r.result.details.output;const id=r.result.details.session_id;for(let n=0;n<30&&!out.includes("READY");n++){r=await tools.write_stdin({session_id:id,yield_time_ms:300});out+=r.result.details.output;}if(!out.includes("READY"))throw Error("no native readiness");yield_control();await new Promise(r=>setTimeout(r,200));`,
+							code: `// @exec: {"yield_time_ms":1}\nlet r=await nativeTools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:1});let out=r.result.details.output;const id=r.result.details.session_id;for(let n=0;n<30&&!out.includes("READY");n++){r=await nativeTools.write_stdin({session_id:id,yield_time_ms:300});out+=r.result.details.output;}if(!out.includes("READY"))throw Error("no native readiness");yield_control();await new Promise(r=>setTimeout(r,200));`,
 						}),
 					);
 					await eventually(async () => {

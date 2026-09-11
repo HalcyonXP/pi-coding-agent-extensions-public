@@ -1,6 +1,6 @@
 # Code tool metadata
 
-The native Code coordinator exposes `ALL_TOOLS`: a frozen array of frozen `{name, description}` records for exactly the eligible active tool names in `TOOL_NAMES`, in the same order. Descriptions are copied from Pi's native tool definitions. `tools.NAME(args)` remains the genuine native delegation route; its result remains `{result,isError}`. This helper changes neither nested result projection nor direct Code/Unified output.
+The native Code coordinator exposes `ALL_TOOLS`: a frozen array of frozen `{name, description}` records for exactly the eligible active tool names in `TOOL_NAMES`, in the same order. Descriptions are copied from Pi's native tool definitions. `tools.NAME(args)` remains a genuine native delegation route. Discovery itself changes neither result projection nor direct output; the separate [guest API migration](CODE-RESULT-PROJECTION.md) now projects recognized Unified results through `tools` and preserves `{result,isError}` through explicit `nativeTools`.
 
 ```javascript
 const tool = ALL_TOOLS.find(tool => tool.name === "read");
