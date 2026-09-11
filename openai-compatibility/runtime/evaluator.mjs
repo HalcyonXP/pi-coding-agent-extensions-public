@@ -8,6 +8,7 @@ import { CELL_BOOTSTRAP } from "./cell-bootstrap.mjs";
 import { CELL_LIMITS, validOperation } from "./cell-protocol.mjs";
 import { toolMetadataJSON } from "./tool-metadata.mjs";
 import { CELL_HELPER_ERRORS } from "./cell-helper-errors.mjs";
+import { TOOL_RESULT_PROJECTION } from "./tool-result-projection.mjs";
 
 // cell is a native worker composition seam, never a guest-selected runtime flag.
 export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, cell } = {}) {
@@ -61,8 +62,9 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
     const deferred = context.newPromise();
     const entry = { deferred, settled: false, kind, timer };
     pendingTools.set(toolCalls, entry);
-    Promise.resolve().then(() => { if (disposed || fatal || exited || entry.cancelled) throw new Error("CANCELLED"); return run(); }).then(
-      value => { if (disposed || entry.cancelled) return; entry.json = JSON.stringify(value); entry.settled = true; wake?.(); },
+    let started;
+    Promise.resolve().then(() => { if (disposed || fatal || exited || entry.cancelled) throw new Error("CANCELLED"); started = performance.now(); return run(); }).then(
+      value => { if (disposed || entry.cancelled) return; entry.elapsedMs = Math.max(0, Math.round(performance.now() - started)); entry.json = JSON.stringify(value); entry.settled = true; wake?.(); },
       () => { if (disposed || entry.cancelled) return; entry.error = true; entry.settled = true; wake?.(); },
     ).catch(() => { if (disposed || entry.cancelled) return; entry.error = true; entry.settled = true; wake?.(); });
     return deferred.handle;
@@ -158,7 +160,10 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
       const bootstrap = context.evalCode(`(bridge, namesJSON) => {
         const stringify = JSON.stringify;
         const parse = JSON.parse;
-        const api = Object.create(null);
+        const api = Object.create(null), projectedApi = Object.create(null);
+        const projection = ${TOOL_RESULT_PROJECTION};
+        const then = Function.prototype.call.bind(Promise.prototype.then);
+        const projectedCall = (name, args) => then(call(name, args), value => projection.project(name, value));
         const call = (name, args) => {
           // Named cell tools accept serialized JSON objects; parsing stays inside
           // the bounded guest. Portable tools.call and native gateway input stay objects.
@@ -174,6 +179,7 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
           const names = parse(namesJSON), aliases = Object.create(null);
           for (const name of names) {
             Object.defineProperty(api, name, {value: args => call(name, args)});
+            Object.defineProperty(projectedApi, name, {value: args => projectedCall(name, args)});
             // Under the admitted native identifier grammar only hyphens need
             // normalization. Canonical names and metadata remain unchanged.
             const alias = name.replace(/-/g, "_");
@@ -181,12 +187,20 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
           }
           for (const name of names) {
             const alias = name.replace(/-/g, "_");
-            if (aliases[alias] === 1 && !Object.hasOwn(api, alias)) Object.defineProperty(api, alias, {value: args => call(name, args)});
+            if (aliases[alias] === 1 && !Object.hasOwn(api, alias)) {
+              Object.defineProperty(api, alias, {value: args => call(name, args)});
+              Object.defineProperty(projectedApi, alias, {value: args => projectedCall(name, args)});
+            }
           }
         }
         Object.freeze(api);
         Object.defineProperty(globalThis, "tools", { value: api });
-        return (json) => parse(json);
+        if (namesJSON !== null) Object.defineProperty(globalThis, "projectedTools", { value: Object.freeze(projectedApi) });
+        return (json, elapsedJSON) => {
+          const value = parse(json);
+          if (elapsedJSON !== undefined) projection.remember(value, parse(elapsedJSON));
+          return value;
+        };
       }`, "bootstrap.js", { type: "global" });
       try {
         if (bootstrap.error) return fail("HOST_FAILED");
@@ -293,11 +307,14 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
           return fail("TOOL_RESULT_LIMIT");
         }
         const json = context.newString(entry.json);
-        const decoded = context.callFunction(decode, context.undefined, json);
+        // Private monotonic bridge timing is separate from the unchanged native
+        // result JSON/RPC budget. Guest clocks and result metadata cannot supply it.
+        const elapsed = cell && entry.kind === "tool" ? context.newString(JSON.stringify(entry.elapsedMs)) : undefined;
+        const decoded = context.callFunction(decode, context.undefined, json, elapsed ?? context.undefined);
         try {
           if (decoded.error) return fail(fatal ?? "EXECUTION_FAILED");
           entry.deferred.resolve(decoded.value);
-        } finally { decoded.dispose(); json.dispose(); entry.deferred.dispose(); }
+        } finally { decoded.dispose(); json.dispose(); elapsed?.dispose(); entry.deferred.dispose(); }
         pendingTools.delete(id);
       }
       if (runtime.hasPendingJob()) {

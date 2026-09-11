@@ -79,8 +79,8 @@ Target direct output is image content with an optional artifact hint. Its nested
 
 ## Next implementation order and invariants
 
-1. Native freeform input and the direct Code text/details transition are described separately and require their own source/artifact acceptance. Direct Code and Unified SDK consumers use details; historical messages and nested `{result,isError}` consumers remain intact. The separate direct Unified contract does not settle tool-specific nested projection or exact truncation/history behavior. Next design those without conflating them with direct status formatting.
-2. Resolve defaults/ID round trips and documented unsupported options without copying retention/lifetime numbers or advertising unenforced permissions/PTY.
+1. Native freeform input and the direct Code text/details transition are described separately and require their own source/artifact acceptance. Direct Code and Unified SDK consumers use details; historical messages and nested `{result,isError}` consumers remain intact. The separate direct Unified contract does not settle tool-specific nested projection or exact truncation/history behavior. [Opt-in Unified projections](CODE-RESULT-PROJECTION.md) now preserve the default wrapper API and adapt only recognized normal results, without conflating them with direct status formatting. Default namespace migration and other tool-specific results remain work.
+2. Retain implemented default/wait/numeric-ID round trips while addressing documented unsupported options and configurable background ceilings, without copying retention/lifetime numbers or advertising unenforced permissions/PTY.
 3. Audit helper implementation/notifications and bounded Web/reference/context behavior. Batch related implementations before the full cohort acceptance cycle; preserve failures and required native frame/ownership/evidence regressions.
 4. Complete image reference/projection and native lifecycle/terminal gaps, plus issue #3's separate actual-payload release gates.
 

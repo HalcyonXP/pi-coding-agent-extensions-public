@@ -28,6 +28,7 @@ import {acceptNestedOutput} from "./accept-nested-output.mjs";
 import {acceptUnifiedDefaultsProfile} from "./accept-unified-defaults.mjs";
 import {acceptCodeDrainProfile} from "./accept-code-drain.mjs";
 import {acceptUnifiedWaitProfile} from "./accept-unified-wait.mjs";
+import {acceptProjectedToolsProfile} from "./accept-projected-tools.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32"&&process.arch==="x64","Usage: node distribution/accept.mjs <private Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -106,13 +107,14 @@ try{
  const nativeUnifiedDefaults=await acceptUnifiedDefaultsProfile(bundle);
  assert.equal(JSON.stringify(session.messages),parentHistory,"Isolated large-output fixture must not mutate the parent conversation");
  const nativeUnifiedWait=await acceptUnifiedWaitProfile(bundle);
+ const nativeProjectedTools=await acceptProjectedToolsProfile(bundle);
  assert.equal(JSON.stringify(session.messages),parentHistory,"Isolated wait fixture must not mutate the parent conversation");
  const nativeCodeDrain=await acceptCodeDrainProfile(bundle);
  assert.equal(JSON.stringify(session.messages),parentHistory,"Isolated cancellation fixture must not revoke or mutate the parent conversation");
  const imageCopyRecovery=await acceptImageCopyRecovery(invoke,outcome,cwd,image,token);
  assert.equal(session.agent.getToolGatewayInfo().activeScopes,0);assert.equal(session.agent.getToolGatewayInfo().drainingScopes,0);
  session.agent.state.model=faux.getModel();await session.extensionRunner.emit({type:"model_select",model:faux.getModel(),previousModel:official,source:"set"});assert.ok(!session.getActiveToolNames().includes("exec"));assert.equal((await invoke("exec",{code:'text("must not run")'})).isError,true);assert.equal(auth,4);assert.equal(requests,3);
- console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,savedCapabilityPreferences:true,returnedJobs,asyncCompletion,quietLocalPolling,compactLocalJobs,readableCodeResults,nativeCodeTransport,nativeCodeOutput,nativeUnifiedOutput,nativeToolMetadata,coordinatorCompatibility,imageCopyRecovery,nativeHelperFeedback,nativeNestedOutput,nativeUnifiedDefaults,nativeUnifiedWait,nativeCodeDrain,originalPngSha256:sha256(image)}));
+ console.log(JSON.stringify({status:"passed",bundle,profile,syntheticRequests:requests,syntheticAuthCalls:auth,toolResults:results.length,helper:"real Windows contained",host:"actual installed native SDK",boundedCellDiagnostics:true,consolidatedOwnedJobs:true,savedCapabilityPreferences:true,returnedJobs,asyncCompletion,quietLocalPolling,compactLocalJobs,readableCodeResults,nativeCodeTransport,nativeCodeOutput,nativeUnifiedOutput,nativeToolMetadata,coordinatorCompatibility,imageCopyRecovery,nativeHelperFeedback,nativeNestedOutput,nativeUnifiedDefaults,nativeUnifiedWait,nativeProjectedTools,nativeCodeDrain,originalPngSha256:sha256(image)}));
 }finally{
  codeUI?.close();
  if(session){session.agent.abort();await session.extensionRunner.emit({type:"session_shutdown",reason:"quit"});session.dispose();}
