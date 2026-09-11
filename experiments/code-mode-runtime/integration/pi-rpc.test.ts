@@ -661,9 +661,10 @@ describe.each(["success", "deny", "mutate", "revoke"])("actual Unified exec thro
 									// initial floor. Start through this SAME native scope, then exercise
 									// stdin/cancellation through the unchanged RPC probe. Returned production
 									// cells below cover initial exec through their real coordinator path.
-									const initial = mode === "deny" || mode === "mutate"
-										? await call("exec_command", initialArgs)
-										: await scope.invoke("exec_command", initialArgs);
+									const initial =
+										mode === "deny" || mode === "mutate"
+											? await call("exec_command", initialArgs)
+											: await scope.invoke("exec_command", initialArgs);
 									if (mode === "deny" || mode === "mutate") {
 										expect(initial?.isError).toBe(true);
 										return text("native fixture complete");
