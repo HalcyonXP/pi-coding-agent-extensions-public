@@ -70,8 +70,11 @@ test("already delegated late results are not inspected after exit",async()=>{
   finish({get content(){reads++;return [];}});
   await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,0);
 });
-test("guest getters used to forward images stay under the execution watchdog",async()=>{
-  const r=await cell('image({get type(){while(true){}}});');assert.equal(r.result.code,"EXECUTION_LIMIT");assert.equal(r.operations.length,0);
+test("image reference accessors refuse before executing guest getters",async()=>{
+  const r=await cell('image({get type(){while(true){}}});');assert.equal(r.result.code,"IMAGE_REFERENCE_REQUIRED");assert.equal(r.operations.length,0);
+});
+test("guest Proxy descriptor traps remain under the unchanged execution watchdog",async()=>{
+  const r=await cell('image(new Proxy({}, {getOwnPropertyDescriptor(){while(true){}}}));');assert.equal(r.result.code,"EXECUTION_LIMIT");assert.equal(r.operations.length,0);
 });
 
 import {CellEvidence} from '../../../openai-compatibility/runtime/evidence.mjs';

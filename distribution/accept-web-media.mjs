@@ -32,6 +32,7 @@ try{
  if(['web','web-profile'].includes(cohort))await session.prompt('/openai-tools web_search on');else await fixture.prepare(bundle);
  const stream=session.agent.streamFunction;
  result=cohort==='web'?await exerciseWebProjection(session,runtime,stream,cwd,resources,fixture):cohort==='web-profile'?await exerciseWebProfile(session,runtime,stream,cwd,profile,fixture):cohort==='imagegen'?await exerciseImagegenProjection(session,runtime,stream,cwd,resources,fixture):await exerciseMediaInput(session,runtime,stream,cwd,fixture);
+ if(cohort==='media'){assert.equal(result.descriptorSafeImageInputs,true);assert.deepEqual(result.rows.map(row=>[row.api,row.descriptorSafeImageInputs]),[['openai-responses',true],['openai-codex-responses',true]]);}
  assert.equal(externalAttempts,0);assert.equal(fixture.state.externalAttempts,0);assert.equal(session.autoCompactionEnabled,true);
 }catch(e){failures.push(e);}finally{
  const clean=async f=>{try{await f();}catch(e){failures.push(e);}};

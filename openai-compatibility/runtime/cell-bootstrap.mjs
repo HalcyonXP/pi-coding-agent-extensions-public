@@ -31,9 +31,14 @@ export const CELL_BOOTSTRAP = `(operation, control, namesJSON, metadataJSON = nu
   define(globalThis, "load", {value: key => { const v=parse(operation(stringify({kind:"load",key}))); return v.found ? v.value : undefined; }});
   define(globalThis, "image", {value: (value, ...extra) => {
     if (extra.length || value !== null && typeof value === "object" && (has(value,"detail") || has(value,"_meta"))) reject("IMAGE_REFERENCE_REQUIRED", "image detail hints are unsupported");
-    // Reference forwarding uses native originals; inline inputs are separate, bounded data.
+    // Probe references through captured own descriptors too: an inline value or
+    // inherited guest getter must not execute while choosing the input form.
+    const type = value !== null && typeof value === "object" ? descriptor(value,"type") : undefined;
+    const projected = type && has(type,"value") && type.value === "image_reference";
+    const mime = projected ? descriptor(value,"mimeType") : undefined;
+    const reference = projected ? descriptor(value,"ref") : undefined;
     const ref = typeof value === "string" && isImageRef(value) ? value
-      : value !== null && typeof value === "object" && value.type === "image_reference" && typeof value.mimeType === "string" && imageMime(value.mimeType) ? value.ref : undefined;
+      : mime && has(mime,"value") && typeof mime.value === "string" && imageMime(mime.value) && reference && has(reference,"value") ? reference.value : undefined;
     const payload=create(null);
     if (typeof ref === "string" && isImageRef(ref)) { payload.kind="image";payload.ref=ref; }
     else {

@@ -6,6 +6,7 @@ import {readFileSync} from 'node:fs';
 const read=p=>readFileSync(new URL(p,import.meta.url),'utf8');
 test('new installed Web/media cohorts use exact artifact extension with isolation before SDK import',()=>{
  const s=read('../accept-web-media.mjs');assert.match(s,/process\.argv\.length===4/);assert.match(s,/await verifyBundle\(bundle\)/);assert.match(s,/await verifyCuration\(bundle/);assert.match(s,/join\(bundle,'extensions\/openai-compatibility\/index.ts'\)/);assert.doesNotMatch(s,/source-on-predecessor|additionalExtensionPaths:\[join\(source/);
+ assert.match(s,/assert\.equal\(result\.descriptorSafeImageInputs,true\)/);assert.match(s,/result\.rows\.map\(row=>\[row\.api,row\.descriptorSafeImageInputs\]\)/);assert.match(s,/\[\['openai-responses',true\],\['openai-codex-responses',true\]\]/);
  assert.ok(s.indexOf('Object.assign(process.env,env)')<s.indexOf('const sdk=await import'));assert.ok(s.indexOf('globalThis.fetch=async')<s.indexOf("await import('./web-projection"));assert.match(s,/runtime\.getAuth=async/);assert.match(s,/runtime\.checkAuth=async/);assert.match(s,/allowModelNetwork:false,refreshOnCreate:false/);assert.match(s,/assert\.equal\(session\.autoCompactionEnabled,true\)/);assert.doesNotMatch(s,/setAutoCompactionEnabled\(false\)/);assert.match(s,/session\.extensionRunner\.emit\(\{type:'session_shutdown'/);assert.match(s,/session\.dispose\(\)/);assert.match(s,/flag:'wx'/);
 });
 function assertCohortWorkflow(source){
