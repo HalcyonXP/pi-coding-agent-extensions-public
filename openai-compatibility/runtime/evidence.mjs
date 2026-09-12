@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { boundedJSON, resultJSON } from "./rpc-protocol.mjs";
+import { webTextProjection } from "./web-result.mjs";
+import { imageInput, INLINE_IMAGE_LABEL } from "./image-input.mjs";
+import { validOperation } from "./cell-protocol.mjs";
+import { normalImagegenProjection } from "./imagegen-result.mjs";
 
 export const EVIDENCE_LIMITS = Object.freeze({ resultBytes: 16 * 1024 * 1024, retainedBytes: 32 * 1024 * 1024, imageBytes: 8 * 1024 * 1024, records: 64, images: 16, lifetimeMs: 360_000, viewChars: 8192 });
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -45,29 +49,35 @@ export class CellEvidence {
       await scope.publishEvidence({content:[{type:"text",text:`Code mode: ${event.toolName} ${event.isError ? "failed" : "returned"}.`}], details:{toolName:event.toolName,toolCallId:event.toolCallId,isError:event.isError,auditOnly:true}});
       this.#assert(); return;
     }
-    const key = hash(json + String(event.isError));
+    await this.#retain(scope, result, json, {toolName:event.toolName,toolCallId:event.toolCallId,isError:event.isError}, hash(json + String(event.isError)));
+  }
+  async #retain(scope, result, json, metadata, key) {
+    this.#prune(); scope.signal.throwIfAborted();
+    if (typeof scope.publishEvidence !== "function") throw unavailable();
     const bytes = Buffer.byteLength(json);
     if (this.#records.size >= EVIDENCE_LIMITS.records || this.#bytes + bytes > EVIDENCE_LIMITS.retainedBytes) throw unavailable();
     const images = [];
     for (const block of result.content) if (block.type === "image") {
-      if (typeof block.data !== "string" || block.mimeType !== "image/png" || !/^[A-Za-z0-9+/]+={0,2}$/.test(block.data)) throw unavailable();
-      const data = Buffer.from(block.data, "base64");
-      if (!data.length || data.length > EVIDENCE_LIMITS.imageBytes || data.toString("base64") !== block.data || data.subarray(0,8).toString("hex") !== "89504e470d0a1a0a") throw unavailable();
-      images.push({ref: `img_${randomUUID()}`, data:block.data, mimeType:block.mimeType, bytes:data.length});
+      const image = imageInput({type:"image",data:block.data,mimeType:block.mimeType}, EVIDENCE_LIMITS.imageBytes, false);
+      if (!image) throw unavailable();
+      images.push({ref: `img_${randomUUID()}`, ...image});
     }
     if (this.#images.size + images.length > EVIDENCE_LIMITS.images) throw unavailable();
     const ref = `ev_${randomUUID()}`;
     // Reserve before async publication. Failed/ambiguous native journaling retains
     // scope admission; do not hand the guest references without its journal receipt.
     let imageIndex = 0;
-    const view = {...result,content:result.content.map(block => block.type !== "image" ? block : {type:"image_reference",ref:images[imageIndex++].ref,mimeType:"image/png"})};
-    const record = {ref,key,json:JSON.stringify(view),bytes,images,expires:performance.now()+EVIDENCE_LIMITS.lifetimeMs,ready:false};
+    const view = {...result,content:result.content.map(block => block.type !== "image" ? block : {type:"image_reference",ref:images[imageIndex++].ref,mimeType:block.mimeType})};
+    const webText = metadata.toolName === "web_search" && metadata.isError === false && webTextProjection(result) !== undefined;
+    const imagegen = metadata.toolName === "imagegen" && metadata.isError === false && normalImagegenProjection(result);
+    const record = {ref,key,json:JSON.stringify(view),bytes,images,webText,imagegen,origin:metadata.origin,expires:performance.now()+EVIDENCE_LIMITS.lifetimeMs,ready:false};
     this.#records.set(ref,record); this.#bytes += bytes;
     for (const image of images) this.#images.set(image.ref,{image,record});
     try {
-      await scope.publishEvidence({content:result.content, details:{toolName:event.toolName,toolCallId:event.toolCallId,isError:event.isError, evidence_ref:ref, image_refs:images.map(image=>image.ref), finalized:result.details}});
+      await scope.publishEvidence({content:result.content, details:{...metadata, evidence_ref:ref, image_refs:images.map(image=>image.ref), finalized:result.details}});
       this.#assert(); scope.signal.throwIfAborted();
-      record.ready = true; this.#keys.set(key,record);
+      record.ready = true; if (key !== undefined) this.#keys.set(key,record);
+      return record;
     } catch { throw unavailable(); }
   }
   project(outcome) {
@@ -80,14 +90,14 @@ export class CellEvidence {
     }
     let n = 0;
     const result = {...JSON.parse(json), content:outcome.result.content.map(block => block.type !== "image" ? block : {
-      type:"image_reference", ref:record.images[n].ref, mimeType:"image/png", bytes:record.images[n++].bytes,
-    }), protected_evidence:{ref:record.ref, journaled:true, format:"finalized-result-json"}};
+      type:"image_reference", ref:record.images[n].ref, mimeType:record.images[n].mimeType, bytes:record.images[n++].bytes,
+    }), protected_evidence:{ref:record.ref, journaled:true, format:"finalized-result-json", ...(record.webText ? {projection:"web-text-v1"} : record.imagegen ? {projection:"imagegen-v1"} : {})}};
     const projected = {isError:outcome.isError,result};
     try { resultJSON(projected); return projected; }
     catch {
       // Explicit projection, not silent flattening: the complete finalized source
       // is already in native presentation/history. Bounded views remain available.
-      return {isError:outcome.isError,result:{content:[{type:"text",text:"Intact finalized evidence was journaled outside Code mode output. Use evidence(ref, offset, length) for bounded JSON views."}], protected_evidence:{...result.protected_evidence,projected:true,characters:record.json.length}, image_refs:record.images.map(image=>image.ref)}};
+      return {isError:outcome.isError,result:{content:[{type:"text",text:"Intact finalized evidence was journaled outside Code mode output. Use evidence(ref, offset, length) for bounded JSON views."}], protected_evidence:{ref:record.ref,journaled:true,format:"finalized-result-json",projected:true,characters:record.json.length}, image_refs:record.images.map(image=>image.ref)}};
     }
   }
   resolveImage(ref) {
@@ -97,10 +107,21 @@ export class CellEvidence {
   }
   async apply(operation, scope) {
     this.#prune(); scope.signal.throwIfAborted();
-    if (operation.kind === "image") {
+    if (!validOperation(operation)) throw unavailable();
+    const generated = operation.kind === "generated-image" || operation.kind === "generated-image-inline";
+    const hint = generated && Object.hasOwn(operation,"output_hint") ? [{type:"text",text:`Generated image output hint (unverified; not a save receipt): ${operation.output_hint}`}] : [];
+    const helper = generated ? {helper:"generatedImage",...(hint.length ? {output_hint:operation.output_hint} : {})} : {};
+    if (operation.kind === "image-inline" || operation.kind === "generated-image-inline") {
+      const metadata = {origin:"guest-inline",helper:"image",...helper};
+      const result = {content:[{type:"image",data:operation.data,mimeType:operation.mimeType},{type:"text",text:INLINE_IMAGE_LABEL},...hint],details:metadata};
+      const record = await this.#retain(scope, result, boundedJSON(result, EVIDENCE_LIMITS.resultBytes, "TOOL_RESULT_LIMIT"), metadata);
+      return {published:true,ref:record.images[0].ref,evidence_ref:record.ref};
+    }
+    if (operation.kind === "image" || operation.kind === "generated-image") {
       const image = this.resolveImage(operation.ref);
-      await scope.publishEvidence({content:[image],details:{image_ref:operation.ref,repeated:true}});
-      this.#assert(); return {published:true};
+      const inline = this.#images.get(operation.ref)?.record.origin === "guest-inline";
+      await scope.publishEvidence({content:[image,...(inline ? [{type:"text",text:INLINE_IMAGE_LABEL}] : []),...hint],details:{image_ref:operation.ref,repeated:true,...(inline ? {origin:"guest-inline"} : {}),...helper}});
+      this.#assert(); scope.signal.throwIfAborted(); return {published:true};
     }
     const record = this.#records.get(operation.ref);
     if (!record?.ready) throw unavailable();

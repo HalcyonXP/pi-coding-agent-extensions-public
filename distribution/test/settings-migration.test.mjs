@@ -33,3 +33,19 @@ test("installed settings remain fixed to the actual bundle, with shared scenario
  assert.match(entry,/process\.argv\.length===3/);assert.match(entry,/verifyBundle\(bundle\)/);assert.match(entry,/exerciseSettings\(sdk,bundle,profile,cwd,join\(bundle,"extensions\/openai-compatibility\/index.ts"\)\)/);
  assert.match(profile,/validateWaitSettings\(settingsMenu.waitSettings\)/);assert.match(profile,/savedUnifiedWaitPreference:true/);assert.match(profile,/Rollback preserves the wait ceiling/);
 });
+
+import{validateWebProfileFrameMigration}from'../settings-frame-migration.mjs';
+import{validateWebSettings}from'../settings-scenarios.mjs';
+function webFrames(){
+ const previous={frames:Array.from({length:36},(_,i)=>({name:'synthetic-'+i,text:'untouched'})),waitSettings:{frames:receipt().frames}};
+ const count=[[7,'fast-before'],[8,'fast-applying'],[9,'fast-saved'],[10,'capabilities-before'],[15,'capabilities-restored'],[16,'fast-after-exclusions'],[17,'capabilities-excluded']],hint=[[7,'fast-before'],[10,'capabilities-before'],[14,'jobs-inside-openai'],[15,'capabilities-restored'],[16,'fast-after-exclusions'],[17,'capabilities-excluded'],[18,'jobs-after-exclusions']];
+ for(const[i,name]of count){previous.frames[i].name=name;previous.frames[i].text+='\n  (1/10)';}for(const[i,name]of hint){previous.frames[i].name=name;previous.frames[i].text+='\n'+' Changes apply immediately. Tool changes cancel running capability work.'.padEnd(80);}for(const i of[0,2,4,5])previous.waitSettings.frames[i].text+='\n'+' Changes apply immediately. Tool changes cancel running capability work.'.padEnd(80);
+ const current=structuredClone(previous);for(const f of[...current.frames,...current.waitSettings.frames])f.text=f.text.replace('  (1/10)','  (1/11)').replace(' Changes apply immediately. Tool changes cancel running capability work.'.padEnd(80),' Capability switches cancel running work. Web admission profile changes require'.padEnd(80)+'\n'+' reload.'.padEnd(80));return{previous,current};
+}
+test('Web profile layout migration preserves all other original and wait frames exactly',()=>{
+ const{previous,current}=webFrames(),before=JSON.stringify(previous);assert.deepEqual(validateWebProfileFrameMigration(previous,current),{historicalFrames:43,currentHistoricalFrames:43,unchangedHistoricalFrames:30,mainFramesChanged:9,waitFramesChanged:4,delta:'web-profile-row-count-ten-to-eleven-and-reload-guidance'});assert.equal(JSON.stringify(previous),before);
+ for(const mutate of[r=>r.frames[0].text+='new',r=>r.frames[7].text=r.frames[7].text.replace('/11)','/12)'),r=>r.frames[7].text=r.frames[7].text.replace(' reload.',' live.'),r=>r.frames[14].name='changed',r=>r.waitSettings.frames[0].text=r.waitSettings.frames[0].text.replace('300000','60000'),r=>r.waitSettings.frames.reverse()]){const r=structuredClone(current);mutate(r);assert.throws(()=>validateWebProfileFrameMigration(previous,r));}
+ assert.throws(()=>validateWebProfileFrameMigration(previous,previous));
+});
+function webReceipt(){return{savedProfile:true,reloadRequired:true,restoredSchema:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,preferencesIndependent:true,frames:['before','saved','restored','save-failed','invalid','excluded','excluded-saved'].map((n,i)=>({name:'web-profile-'+n,text:'→ Web admission profile '+['verified-v1','experimental','experimental','experimental','unavailable','experimental','verified-v1'][i]+(i===1?'\nReload extensions or restart Pi':i===3?'\nChange failed: preserved':'')}))};}
+test('Web settings receipt requires each saved/effective, failed-save, invalid and excluded control',()=>{assert.equal(validateWebSettings(webReceipt()),true);for(const k of Object.keys(webReceipt())){const r=webReceipt();delete r[k];assert.throws(()=>validateWebSettings(r));}for(let i=0;i<7;i++){const r=webReceipt();r.frames[i].text='missing state';assert.throws(()=>validateWebSettings(r));}});

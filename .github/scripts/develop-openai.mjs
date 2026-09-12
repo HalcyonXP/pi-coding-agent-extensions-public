@@ -12,10 +12,10 @@ const extension = "openai-compatibility/test/";
 const runtime = "experiments/code-mode-runtime/test/";
 const tests = (...files) => ["--test", "--test-concurrency=1", ...files];
 const suites = Object.freeze({
-  coordinator: tests(...["coordinator-compatibility", "helper-feedback", "tool-metadata", "tool-result-projection"].map(n => `${runtime}${n}.test.mjs`)),
+  coordinator: tests(...["coordinator-compatibility", "helper-feedback", "tool-metadata", "tool-result-projection", "image-input"].map(n => `${runtime}${n}.test.mjs`)),
   unified: tests(`${extension}unified-*.test.ts`),
-  settings: tests("openai-compatibility/index.test.mjs", ...["settings-menu", "jobs-menu", "capability-preferences", "unified-preferences", "capabilities"].map(n => `${extension}${n}.test.ts`)),
-  "web-media": tests(...["web-search*", "verified-search", "imagegen-*"].map(n => `${extension}${n}.test.ts`)),
+  settings: tests("openai-compatibility/index.test.mjs", ...["settings-menu", "jobs-menu", "capability-preferences", "unified-preferences", "web-preferences", "capabilities"].map(n => `${extension}${n}.test.ts`)),
+  "web-media": tests(...["web-search*", "verified-search", "web-preferences", "imagegen-*"].map(n => `${extension}${n}.test.ts`)),
   lifecycle: tests(...["cell-manager", "draining-wait", "evidence"].map(n => `${runtime}${n}.test.mjs`)),
   extension: tests("openai-compatibility/index.test.mjs", `${extension}*.test.ts`),
   runtime: tests(`${runtime}*.test.mjs`),
@@ -26,6 +26,13 @@ const suites = Object.freeze({
   "native-wait": [".github/scripts/develop-native.mjs", "unified-wait"],
   "native-projection": [".github/scripts/develop-native.mjs", "projection"],
   "native-settings": [".github/scripts/develop-native.mjs", "settings"],
+  "native-web": [".github/scripts/develop-native.mjs", "web-projection"],
+  "native-web-sequence": [".github/scripts/develop-native.mjs", "web-sequence"],
+  "native-web-profile": [".github/scripts/develop-native.mjs", "web-profile"],
+  "native-media": [".github/scripts/develop-native.mjs", "media-input"],
+  "native-media-canvas": [".github/scripts/develop-native.mjs", "media-canvas"],
+  "native-generated-image": [".github/scripts/develop-native.mjs", "generated-image"],
+  "native-imagegen-projection": [".github/scripts/develop-native.mjs", "imagegen-projection"],
 });
 export function selectSuites(names, sdkBundle) {
   if (!names.length || names.some(n => !Object.hasOwn(suites, n)) || new Set(names).size !== names.length) {
@@ -41,23 +48,8 @@ const write = (path, value) => writeFileSync(path, value, { flag: "wx" });
 const json = (path, value) => write(path, `${JSON.stringify(value, null, 2)}\n`);
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 
-/** OS execution variables only. Establish this environment before importing any SDK. */
-export function isolatedEnvironment(home, inherited = process.env) {
-  mkdirSync(home);
-  for (const name of ["tmp", "roaming", "local", "agent"]) mkdirSync(join(home, name));
-  for (const name of ["gitconfig", "npm-user", "npm-global"]) write(join(home, name), "");
-  const env = {
-    HOME: home, USERPROFILE: home, APPDATA: join(home, "roaming"), LOCALAPPDATA: join(home, "local"),
-    TEMP: join(home, "tmp"), TMP: join(home, "tmp"), PI_CODING_AGENT_DIR: join(home, "agent"),
-    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(home, "gitconfig"),
-    npm_config_userconfig: join(home, "npm-user"), npm_config_globalconfig: join(home, "npm-global"),
-    PI_OFFLINE: "1", PI_TELEMETRY: "0",
-  };
-  for (const key of ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "ComSpec", "PATHEXT"]) {
-    if (inherited[key] !== undefined) env[key] = inherited[key];
-  }
-  return env;
-}
+export {isolatedEnvironment} from "../../distribution/isolated-environment.mjs";
+import {isolatedEnvironment} from "../../distribution/isolated-environment.mjs";
 
 /** One attempted child, no automatic retry. Private byte logs survive success and failure. */
 export function runStep(directory, args, cwd, env) {

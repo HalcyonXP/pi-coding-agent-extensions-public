@@ -27,6 +27,7 @@ const EXTENSION_VERSION = "0.2.0";
 const TOOL_NAME = "imagegen";
 import type { CapabilityLease } from "../capability-policy.ts";
 import { resolveSubscriptionAuth } from "../subscription.ts";
+import { sealImagegenResult } from "../runtime/imagegen-result.mjs";
 
 interface ImagegenDetails {
 	status: "working" | "completed";
@@ -270,7 +271,7 @@ export function createImagegenTool(
 					result.background ? `Background: ${result.background}.` : undefined,
 				].filter(Boolean).join(" ");
 
-				return {
+				return sealImagegenResult({
 					content: [
 						{ type: "image", data: result.imageBase64, mimeType: "image/png" },
 						{ type: "text", text: summary },
@@ -285,7 +286,7 @@ export function createImagegenTool(
 						quality: result.quality,
 						size: result.size,
 					} satisfies ImagegenDetails,
-				};
+				});
 			} finally { lease.release(); }
 		},
 	} satisfies ToolDefinition<typeof ImagegenParams>;

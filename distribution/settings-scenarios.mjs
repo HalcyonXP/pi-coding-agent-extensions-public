@@ -16,13 +16,20 @@ export function validateWaitSettings(result){
  assert.match(result.frames[3].text,/Change failed:/);assert.match(result.frames[4].text,/→ Background wait ceiling\s+unavailable/);
  return true;
 }
+export function validateWebSettings(result){
+ for(const key of ["savedProfile","reloadRequired","restoredSchema","failedSaveUnchanged","invalidFilePreserved","exclusionsPreserved","preferencesIndependent"])assert.equal(result[key],true);
+ assert.deepEqual(result.frames.map(f=>f.name),["web-profile-before","web-profile-saved","web-profile-restored","web-profile-save-failed","web-profile-invalid","web-profile-excluded","web-profile-excluded-saved"]);
+ for(const [i,value]of [[0,"verified-v1"],[1,"experimental"],[2,"experimental"],[3,"experimental"],[4,"unavailable"],[5,"experimental"],[6,"verified-v1"]])assert.match(result.frames[i].text,new RegExp(`→ Web admission profile\\s+${value}\\b`));
+ assert.match(result.frames[1].text,/Reload extensions or restart Pi/);assert.match(result.frames[3].text,/Change failed:/);return true;
+}
 export async function exerciseSettings(sdk,bundle,profile,cwd,extensionPath){
-const failures=[],waitFrames=[];let completed=false;
+const failures=[],waitFrames=[],webFrames=[];let completed=false;
 const frames=[],codeFrames=[],unifiedFrames=[],capabilities=["imagegen","web_search","exec","wait","exec_command","write_stdin"];
 const clean=s=>s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,"");
 const capture=(name,panel)=>{const lines=panel.render(80).map(clean);assert.ok(lines.every(line=>line.length<160));frames.push({name,text:lines.join("\n")});return lines.join("\n");};
 const until=async predicate=>{const end=performance.now()+10000;while(performance.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,10));}throw Error("Settings interaction did not settle");};
-const waitFile=join(profile,"openai-compatibility-unified.json");
+const waitFile=join(profile,"openai-compatibility-unified.json"),webFile=join(profile,"openai-compatibility-web.json");
+const captureWeb=(name,panel)=>{const text=panel.render(80).map(clean).join("\n");webFrames.push({name,text});return text;};
 const captureWait=(name,panel)=>{const text=panel.render(80).map(clean).join("\n");waitFrames.push({name,text});return text;};
 try{
 sdk.initTheme("dark",false);
@@ -103,6 +110,27 @@ sdk.initTheme("dark",false);
     await session.prompt("/openai-tools jobs status");assert.equal(notices.at(-1),"[]");
     await writeFile(waitFile,saved); // Restore only this successfully asserted, owned fixture.
    }
+   const waitBefore=await readFile(waitFile),webSchema=()=>session.getAllTools().find(t=>t.name==="web_search")?.parameters;
+   const originalWebSchema=structuredClone(webSchema());
+   drive=async panel=>{
+    for(const char of "Web admission")panel.handleInput(char);
+    assert.match(captureWeb(excluded?"web-profile-excluded":"web-profile-before",panel),new RegExp(`→ Web admission profile\\s+${excluded?"experimental":"verified-v1"}`));
+    panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));
+    captureWeb(excluded?"web-profile-excluded-saved":"web-profile-saved",panel);assert.equal(JSON.parse(await readFile(webFile,"utf8")).profile,excluded?"verified-v1":"experimental");assert.deepEqual(webSchema(),originalWebSchema);
+   };
+   await session.prompt("/openai-tools");
+   if(excluded)assert.ok(capabilities.every(name=>!session.getActiveToolNames().includes(name)));
+   else{
+    const saved=await readFile(webFile);await session.reload();assert.ok(Object.hasOwn(webSchema().properties,"weather"));
+    drive=async panel=>{
+     for(const char of "Web admission")panel.handleInput(char);captureWeb("web-profile-restored",panel);
+     await writeFile(webFile,"invalid preserved Web fixture");panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));captureWeb("web-profile-save-failed",panel);assert.equal(await readFile(webFile,"utf8"),"invalid preserved Web fixture");
+    };
+    await session.prompt("/openai-tools");await session.reload();assert.equal(webSchema(),undefined);assert.ok(session.getActiveToolNames().includes("exec_command"));assert.ok(session.getActiveToolNames().includes("exec"));
+    drive=async panel=>{for(const char of "Web admission")panel.handleInput(char);captureWeb("web-profile-invalid",panel);panel.handleInput("\r");};
+    await session.prompt("/openai-tools");assert.equal(await readFile(webFile,"utf8"),"invalid preserved Web fixture");await writeFile(join(profile,"invalid-web-settings-fixture.txt"),await readFile(webFile),{flag:"wx"});await writeFile(webFile,saved);
+   }
+   assert.deepEqual(await readFile(waitFile),waitBefore);
    assert.deepEqual(await readFile(join(profile,"openai-compatibility.json")),fastBefore);assert.deepEqual(await readFile(join(profile,"openai-compatibility-capabilities.json")),capabilitiesBefore);
   }catch(error){failures.push(error);}finally{
    for(const close of [()=>session.extensionRunner.emit({type:"session_shutdown",reason:"quit"}),()=>session.dispose()])try{await close();}catch(error){failures.push(error);}
@@ -110,9 +138,10 @@ sdk.initTheme("dark",false);
   if(failures.length)throw new AggregateError(failures,"Native settings scenario/cleanup failed; preserve evidence");
  }
  frames.push(...codeFrames,...unifiedFrames);validateAllOutputFrames(frames);
- const waitSettings={savedCeiling:true,restoredCeiling:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,frames:waitFrames};validateWaitSettings(waitSettings);completed=true;
- return {status:"passed",waitSettings,nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,compactLocalJobPresentation:true,readableCodePresentation:true,nativeUnifiedOutputPresentation:true,frames};
+ const waitSettings={savedCeiling:true,restoredCeiling:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,frames:waitFrames};validateWaitSettings(waitSettings);
+ const webSettings={savedProfile:true,reloadRequired:true,restoredSchema:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,preferencesIndependent:true,frames:webFrames};validateWebSettings(webSettings);completed=true;
+ return {status:"passed",waitSettings,webSettings,nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,compactLocalJobPresentation:true,readableCodePresentation:true,nativeUnifiedOutputPresentation:true,frames};
 }catch(error){if(!failures.includes(error))failures.push(error);throw error;}finally{
- try{await writeFile(join(profile,"settings-observations.json"),JSON.stringify({completed,frames,waitFrames,failures:failures.map(e=>({name:e.name,message:e.message,stack:e.stack}))},null,2)+"\n",{flag:"wx"});}catch(error){throw new AggregateError([...failures,error],"Settings scenario/evidence capture failed");}
+ try{await writeFile(join(profile,"settings-observations.json"),JSON.stringify({completed,frames,waitFrames,webFrames,failures:failures.map(e=>({name:e.name,message:e.message,stack:e.stack}))},null,2)+"\n",{flag:"wx"});}catch(error){throw new AggregateError([...failures,error],"Settings scenario/evidence capture failed");}
 }
 }

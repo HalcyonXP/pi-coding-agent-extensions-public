@@ -136,7 +136,7 @@ test("missing engine in a path with spaces is reported, not replaced by Node eva
   const directory = await mkdtemp(join(tmpdir(), "pi runtime missing engine "));
   const stdout = [], stderr = []; let probe;
   await withFixtureCleanup(async () => {
-    for (const file of ["worker.mjs", "protocol.mjs", "engine.mjs", "evaluator.mjs", "rpc-protocol.mjs", "cell-bootstrap.mjs", "cell-protocol.mjs", "tool-metadata.mjs", "cell-helper-errors.mjs", "tool-result-projection.mjs"]) await cp(new URL(`../../../openai-compatibility/runtime/${file}`, import.meta.url), join(directory, file));
+    for (const file of ["worker.mjs", "protocol.mjs", "engine.mjs", "evaluator.mjs", "rpc-protocol.mjs", "cell-bootstrap.mjs", "image-input.mjs", "cell-protocol.mjs", "tool-metadata.mjs", "cell-helper-errors.mjs", "tool-result-projection.mjs"]) await cp(new URL(`../../../openai-compatibility/runtime/${file}`, import.meta.url), join(directory, file));
     probe = new RuntimeProbe({ launch: () => {
       const child = spawn(process.execPath, [join(directory, "worker.mjs")], {
         cwd: directory, env: workerEnvironment(), stdio: "pipe", windowsHide: true,

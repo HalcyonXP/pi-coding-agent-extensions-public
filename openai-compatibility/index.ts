@@ -11,6 +11,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { registerCapabilities } from "./capabilities.ts";
 import { capabilityPreferenceStore } from "./capability-preferences.ts";
 import { unifiedPreferenceStore } from "./unified-preferences.ts";
+import { webPreferenceStore } from "./web-preferences.ts";
 import { showOpenAISettings, type SettingsRow } from "./settings-menu.ts";
 
 export const FAST_ICON = "⚡";
@@ -317,12 +318,14 @@ function formatError(error: unknown): string {
 export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 	// Pi 0.85.1+ owns catalogs, auth, transports and cache compatibility.
 	// This extension composes capability policy, Fast mode and the shared footer.
-	// D14 verified this bounded Web subset. Profile choices persist; restoration
-	// remains passive and never substitutes for current execution authority.
+	// The default stays the narrow verified Web subset. Explicit experimental
+	// preference applies only on extension load, not live schema replacement.
+	// Saved choices never substitute for current execution authority.
 	const capabilitySettings = registerCapabilities(pi, withFileMutationQueue, {
 		webSearch: { transport: fetch, profile: "verified-v1" },
 		preferences: capabilityPreferenceStore(getAgentDir()),
 		unifiedPreferences: unifiedPreferenceStore(getAgentDir()),
+		webPreferences: webPreferenceStore(getAgentDir()),
 		openSettings: (ctx, focus) => openSettings(ctx, focus ?? "imagegen"),
 		fastCommand: (args, ctx) => fastCommand(args, ctx),
 	});
@@ -529,6 +532,7 @@ export default function openAICompatibilityLayer(pi: ExtensionAPI): void {
 					return messages.join(" ");
 				}
 				await capabilitySettings.change(id, value, ctx, signal);
+				if (id === "web_profile") return `Saved Web admission profile: ${value}. Reload extensions or restart Pi to apply; current schemas and work are unchanged. Experimental is source-contract-only, not live-verified.`;
 				if (id === "background_wait") return `Background wait ceiling: ${value} ms, saved for this profile. Future empty-input polls only; running waits and jobs are unchanged.`;
 				return `${id === "unified_exec" ? "Unified exec" : id === "code_mode" ? "Code mode" : id === "web_search" ? "Web search" : "Image generation"}: ${value} for this session.`;
 			},

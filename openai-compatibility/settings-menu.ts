@@ -67,7 +67,7 @@ export class OpenAISettingsPanel extends Container {
 			hint: text => theme.fg("dim", text.replace("Esc to cancel", "Esc to close")),
 		}, (id, value) => { void this.change(id, value); }, () => this.closeMenu(), { enableSearch: true });
 		this.list.selectItem(focus);
-		this.feedback = new Text(theme.fg("dim", "Changes apply immediately. Tool changes cancel running capability work."), 1, 0);
+		this.feedback = new Text(theme.fg("dim", rows.some(row => row.id === "web_profile") ? "Capability switches cancel running work. Web admission profile changes require reload." : "Changes apply immediately. Tool changes cancel running capability work."), 1, 0);
 		this.addChild(new DynamicBorder(text => theme.fg("border", text)));
 		this.addChild(new Text(theme.fg("accent", "OpenAI settings"), 1, 0));
 		this.addChild(new Text(theme.fg("muted", "Preferences saved for this profile · Jobs are not restored"), 1, 0));

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { harness, model, token } from "./capability-fixture.ts";
-import { WEB_SEARCH_ENDPOINT } from "../web-search.ts";
+import { WEB_SEARCH_ENDPOINT, renderSearchEvidence } from "../web-search.ts";
 const commands = { search_query: [{ q: "official documentation", domains: ["openai.com"] }] };
 const evidence = { output: "Source citeturn0search0 https://openai.com/", results: [{ title: "Official source", url: "https://openai.com/", marker: "turn0search0", future: { preserved: true } }] };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
@@ -32,7 +32,7 @@ for (const provider of ["openai", "openai-codex"]) test(`actual Web search tool 
 		const result = await execute(h); assert.equal(result.content.length, 2);
 		assert.ok(JSON.stringify(result).includes(evidence.output)); assert.ok(JSON.stringify(result).includes("Official source"));
 		assert.ok(!JSON.stringify(result).includes("never replay")); assert.ok(!JSON.stringify(result).includes(token));
-		assert.deepEqual(result.details, { verification: "source-contract-only", sourceEvidencePresent: true });
+		assert.deepEqual(result.details, renderSearchEvidence(evidence).details);
 		assert.equal(await h.emit("tool_result", { toolName: "web_search", toolCallId: "search", ...result }), undefined);
 		assert.equal(calls, 1); assert.equal(h.authCalls(), 1);
 	} finally { await h.emit("session_shutdown"); }
@@ -130,4 +130,18 @@ test("status distinguishes configuration/auth/provider/runtime without refresh o
 		await assert.rejects(execute(h, "registry-error"), (error: Error) => { assert.ok(!error.message.includes(token)); return true; });
 		assert.ok(!JSON.stringify(h.notices).includes(token)); assert.equal(h.authCalls(), 0);
 	} finally { await h.emit("session_shutdown"); }
+});
+
+for (const tools of [{ origin: "nested" }, { origin: "nested", hasProtectedResults: () => false }, {}, { origin: "unknown" }]) test("experimental variants require protected native evidence before auth", async () => {
+ const h = setup(); Object.assign(h.ctx, { tools });
+ try { await enable(h); await assert.rejects(execute(h, "unprotected", { time: [{ utc_offset: "+00:00" }] }), /protected native Code mode scope/); assert.equal(h.authCalls(), 0); }
+ finally { await h.emit("session_shutdown"); }
+});
+test("experimental protected nested path retains raw source evidence and source-only verification", async () => {
+ const h = setup(); Object.assign(h.ctx, { tools: { origin: "nested", hasProtectedResults: () => true } });
+ try {
+  await enable(h); const result = await execute(h, "protected", { finance: [{ ticker: "A", type: "equity", market: "USA" }] });
+  assert.deepEqual(result.details, renderSearchEvidence(evidence).details);
+  assert.ok(JSON.stringify(result).includes(evidence.output)); assert.equal(h.authCalls(), 1);
+ } finally { await h.emit("session_shutdown"); }
 });

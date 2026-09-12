@@ -13,7 +13,7 @@ import {fileURLToPath} from "node:url";
 import {verifyBundle,run,sha256} from "./lib.mjs";
 import {verifyCuration} from "./curate-payload.mjs";
 import {validateAllOutputFrames} from "./unified-output-presentation.mjs";
-import {validateWaitSettings} from "./settings-scenarios.mjs";
+import {validateWaitSettings,validateWebSettings} from "./settings-scenarios.mjs";
 assert.ok(process.argv.length===3&&process.platform==="win32","Usage: node distribution/accept-profile.mjs <Windows bundle>");
 const bundle=resolve(process.argv[2]),{manifest}=await verifyBundle(bundle);
 await verifyCuration(bundle,manifest,await readFile(new URL("./payload-policy.json",import.meta.url)));
@@ -43,6 +43,12 @@ async function cli(rolledBack,restarted=false){
    assert.match(await prompt("/openai-tools background-wait 300001"),/Current settings were not changed/);
   }else assert.match(status,/background wait ceiling: 60000 ms/);
   assert.deepEqual(JSON.parse(await readFile(join(profile,"openai-compatibility-unified.json"),"utf8")),{version:1,maxBackgroundWaitMs:60000});
+  if(!rolledBack&&!restarted){
+   assert.match(status,/Web admission profile: verified-v1; effective: verified-v1/);
+   assert.match(await prompt("/openai-tools web-profile experimental"),/Web admission profile: experimental; effective: verified-v1/);
+   assert.match(await prompt("/openai-tools web-profile unknown"),/Saved selection and effective schema were not changed/);
+  }else assert.match(status,/Web admission profile: experimental; effective: experimental/);
+  assert.deepEqual(JSON.parse(await readFile(join(profile,"openai-compatibility-web.json"),"utf8")),{version:1,profile:"experimental"});
   assert.throws(()=>run(process.execPath,[installer,"--rollback",profile],{env}),/EEXIST/,"Active native CLI ownership blocks rollback");
   if(!rolledBack&&!restarted){
    assert.match(status,/Image generation: enabled/);assert.match(await prompt("/openai-tools imagegen off"),/Image generation: unavailable\/disabled/);
@@ -59,14 +65,16 @@ await cli(false);
 const preferencePath=join(profile,"openai-compatibility-capabilities.json"),preferencesBefore=sha256(await readFile(preferencePath));
 assert.deepEqual(JSON.parse(await readFile(preferencePath,"utf8")),{version:1,capabilities:{imagegen:false,web_search:true,unified_exec:true,code_mode:true}});
 const waitPreferencePath=join(profile,"openai-compatibility-unified.json"),waitPreferenceBefore=sha256(await readFile(waitPreferencePath));
-await cli(false,true);assert.equal(sha256(await readFile(preferencePath)),preferencesBefore);assert.equal(sha256(await readFile(waitPreferencePath)),waitPreferenceBefore);
+const webPreferencePath=join(profile,"openai-compatibility-web.json"),webPreferenceBefore=sha256(await readFile(webPreferencePath));
+await cli(false,true);assert.equal(sha256(await readFile(preferencePath)),preferencesBefore);assert.equal(sha256(await readFile(waitPreferencePath)),waitPreferenceBefore);assert.equal(sha256(await readFile(webPreferencePath)),webPreferenceBefore);
 // Ordinary settings can change through normal native UI; rollback preserves them.
 const settings=JSON.parse(await readFile(join(profile,"settings.json"),"utf8"));settings.defaultThinkingLevel="low";await writeFile(join(profile,"settings.json"),JSON.stringify(settings,null,2)+"\n");
 const settingsBefore=sha256(await readFile(join(profile,"settings.json")));
 run(process.execPath,[installer,"--rollback",profile],{env});assert.equal(sha256(await readFile(join(profile,"settings.json"))),settingsBefore);
 await cli(true);assert.equal(sha256(await readFile(preferencePath)),preferencesBefore,"Rollback/excluded on commands never erase or change saved choices");assert.equal(sha256(await readFile(waitPreferencePath)),waitPreferenceBefore,"Rollback preserves the wait ceiling");
+assert.equal(sha256(await readFile(webPreferencePath)),webPreferenceBefore,"Rollback preserves the Web admission profile, not entitlement");
 assert.equal(sha256(await readFile(join(profile,"auth.json"))),authBefore);assert.equal(sha256(await readFile(join(originals,"original.bin"))),originalBefore);
 const settingsMenu=JSON.parse(run(process.execPath,[fileURLToPath(new URL("./accept-settings.mjs",import.meta.url)),bundle],{env}));
 assert.equal(settingsMenu.status,"passed");assert.equal(settingsMenu.networkAttempts,0);assert.equal(settingsMenu.normalAndExcludedContexts,true);assert.equal(settingsMenu.consolidatedJobs,true);assert.equal(settingsMenu.savedCapabilityPreferences,true);assert.equal(settingsMenu.quietPollingPresentation,true);assert.equal(settingsMenu.compactLocalJobPresentation,true);assert.equal(settingsMenu.readableCodePresentation,true);assert.equal(settingsMenu.nativeUnifiedOutputPresentation,true);validateAllOutputFrames(settingsMenu.frames);
-validateWaitSettings(settingsMenu.waitSettings);
-console.log(JSON.stringify({status:"passed",savedUnifiedWaitPreference:true,bundle,profile,nativeCli:"actual bundled RPC",rollback:"native exclusions, Fast retained",credentialsCopied:false,hostedRequests:0,settingsAndOriginalsPreserved:true,savedCapabilityPreferences:true,settingsMenu}));
+validateWaitSettings(settingsMenu.waitSettings);validateWebSettings(settingsMenu.webSettings);
+console.log(JSON.stringify({status:"passed",savedUnifiedWaitPreference:true,savedWebAdmissionProfile:true,bundle,profile,nativeCli:"actual bundled RPC",rollback:"native exclusions, Fast retained",credentialsCopied:false,hostedRequests:0,settingsAndOriginalsPreserved:true,savedCapabilityPreferences:true,settingsMenu}));

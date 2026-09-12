@@ -202,3 +202,22 @@ test("verified argument capture remains independent of caller mutation", () => {
 	assert.equal(captured.search_query?.[0].q, "public docs");
 	assert.equal(captured.response_length, "short");
 });
+
+test("normal verified-v1 activation does not inherit experimental lookup/media families", async () => {
+ const h = setup();
+ try {
+  await h.enable();
+  for (const args of [
+   { image_query: [{ q: "public diagram" }] },
+   { screenshot: [{ ref_id: "https://example.com/paper.pdf", pageno: 0 }] },
+   { finance: [{ ticker: "A", type: "equity", market: "USA" }] },
+   { weather: [{ location: "Brisbane" }] },
+   { sports: [{ fn: "standings", league: "nba" }] },
+   { time: [{ utc_offset: "+00:00" }] },
+  ]) {
+   assert.throws(() => validateVerifiedSearch(args), /other variants are unavailable/);
+   await assert.rejects(h.call(args), /Invalid web_search arguments/);
+  }
+  assert.equal(h.authCalls(), 0); assert.deepEqual(h.requests, []);
+ } finally { await h.emit("session_shutdown"); }
+});
