@@ -17,6 +17,7 @@ const suites = Object.freeze({
   settings: tests("openai-compatibility/index.test.mjs", ...["settings-menu", "jobs-menu", "capability-preferences", "unified-preferences", "web-preferences", "capabilities"].map(n => `${extension}${n}.test.ts`)),
   "web-media": tests(...["web-search*", "verified-search", "web-preferences", "imagegen-*"].map(n => `${extension}${n}.test.ts`)),
   context: tests(`${extension}web-history.test.ts`, `${extension}web-context.test.ts`, `${runtime}notifications.test.mjs`, `${extension}helper-feedback.test.ts`, "distribution/test/helper-feedback.test.mjs"),
+  "profile-receipts": tests("distribution/test/profile-receipt.test.mjs"),
   "context-receipts": tests("distribution/test/native-context.test.mjs", "distribution/test/code-output.test.mjs", "distribution/test/notification-ack.test.mjs"),
   lifecycle: tests(...["cell-manager", "draining-wait", "evidence"].map(n => `${runtime}${n}.test.mjs`)),
   extension: tests("openai-compatibility/index.test.mjs", `${extension}*.test.ts`),

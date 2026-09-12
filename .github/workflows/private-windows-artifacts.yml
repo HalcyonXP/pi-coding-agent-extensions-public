@@ -53,7 +53,7 @@ jobs:
       - name: Actual installed SDK, normal entry, contained worker, protected evidence and shell
         run: node distribution/accept.mjs '.pi/extracted artifact'
       - name: Actual bundled CLI, isolated installation, ownership and rollback
-        run: node distribution/accept-profile.mjs '.pi/extracted artifact'
+        run: node distribution/accept-profile-framed.mjs '.pi/extracted artifact'
       - name: Actual installed Web projection and URL sequence
         timeout-minutes: 5
         run: node distribution/accept-web-media.mjs '.pi/extracted artifact' web
