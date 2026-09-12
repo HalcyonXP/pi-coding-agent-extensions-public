@@ -1700,7 +1700,7 @@ index 0000000..aa99b8c
 +});
 diff --git a/packages/agent/test/tool-context-loop.test.ts b/packages/agent/test/tool-context-loop.test.ts
 new file mode 100644
-index 0000000..2bd1281
+index 0000000..38397de
 --- /dev/null
 +++ b/packages/agent/test/tool-context-loop.test.ts
 @@ -0,0 +1,154 @@
@@ -1711,9 +1711,9 @@ index 0000000..2bd1281
 +	type Message,
 +	type Model,
 +} from "@earendil-works/pi-ai";
-+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 +import { Type } from "typebox";
 +import { expect, it } from "vitest";
++import { convertResponsesMessages } from "../../ai/src/api/openai-responses-shared.ts";
 +import { Agent, type AgentTool, type AgentToolInvocation } from "../src/index.ts";
 +import type { AgentToolTextContext } from "../src/types.ts";
 +
@@ -4927,14 +4927,14 @@ index 0000000..16e5eb3
 +}
 diff --git a/packages/coding-agent/test/suite/tool-context.test.ts b/packages/coding-agent/test/suite/tool-context.test.ts
 new file mode 100644
-index 0000000..950e886
+index 0000000..f3e9f69
 --- /dev/null
 +++ b/packages/coding-agent/test/suite/tool-context.test.ts
 @@ -0,0 +1,101 @@
 +import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 +import { Type } from "typebox";
 +import { expect, it } from "vitest";
++import { convertResponsesMessages } from "../../../ai/src/api/openai-responses-shared.ts";
 +import { createHarness } from "./harness.ts";
 +
 +// Native compaction entries/navigation and extension hooks, with a real Responses

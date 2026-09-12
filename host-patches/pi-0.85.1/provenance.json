@@ -4,7 +4,7 @@
   "commit": "d981de1229ef899957bbe968bc8dcda02a21f477",
   "npmVersion": "0.85.1",
   "patch": "parent-bound-invocation.patch",
-  "patchSha256": "70f1e28fae0c826ddd218e57ff29de788ff973bb02581b6af6fce4ff34ea29fa",
+  "patchSha256": "e37750247c57ee4c62e4e8ed06d8749f62a108046493d97eaa6a40942f906739",
   "license": "LICENSE.pi",
   "status": "private-native-host-not-installed",
   "licenseSha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
