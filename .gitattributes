@@ -11,6 +11,8 @@ openai-compatibility/runtime/native/*.json text eol=lf
 # Installed acceptance compares these scoped grants with canonical source bytes.
 distribution/LICENSE text eol=lf
 distribution/NOTICE text eol=lf
+host-patches/LICENSE text eol=lf
+host-patches/NOTICE text eol=lf
 # Supplemental grants retain reviewed upstream bytes, including original line endings.
 distribution/notices/LICENSE.* -text
 # Curation proof is compared byte-for-byte against matching trusted source.

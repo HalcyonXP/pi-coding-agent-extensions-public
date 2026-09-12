@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from "node:assert/strict";
 import test from "node:test";
-import {readFile} from "node:fs/promises";
+import {readFile,mkdtemp,rm} from "node:fs/promises";
+import {join} from "node:path";
+import {tmpdir} from "node:os";
 import {createHash} from "node:crypto";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
+import {isolatedEnvironment} from "../isolated-environment.mjs";
 const read=path=>readFile(new URL(`../../${path}`,import.meta.url),"utf8");
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 test("native patch contributions have a complete MIT grant with non-personal attribution",async()=>{
@@ -30,12 +33,27 @@ test("licensing clarification preserves native patch and upstream notice byte pi
 });
 test("builder copies both native grants and their scope notice from canonical source",async()=>{
  const builder=await read("distribution/build.mjs");
- const copyLoop=builder.split("\n").find(line=>line.startsWith("for(const path of [")&&line.includes('"distribution/lib.mjs"'));
+ const copyLoop=builder.split(/\r?\n/).find(line=>line.startsWith("for(const path of [")&&line.includes('"distribution/lib.mjs"'));
  assert.ok(copyLoop);for(const path of ["host-patches/LICENSE","host-patches/NOTICE","host-patches/pi-0.85.1/LICENSE.pi"])
   assert.ok(copyLoop.includes(JSON.stringify(path)),path);
  assert.ok(copyLoop.endsWith("await copySource(path,join(out,path));"));
  const checked=spawnSync(process.execPath,["--check",fileURLToPath(new URL("../build.mjs",import.meta.url))],{windowsHide:true,encoding:"utf8",timeout:30000,maxBuffer:1024*1024});
  assert.equal(checked.status,0,checked.stderr);assert.equal(checked.error,undefined);
+});
+test("isolated CRLF Git checkout retains canonical patch grants and complete builder lines",async()=>{
+ const root=await mkdtemp(join(tmpdir(),"patch-grant-checkout-")),env=isolatedEnvironment(join(root,"home"));let passed=false;
+ try{
+  const git=(args,input)=>{const r=spawnSync("git",args,{cwd:root,env,input,windowsHide:true,encoding:null,timeout:30000,maxBuffer:2*1024*1024});assert.equal(r.status,0,r.stderr?.toString());assert.equal(r.error,undefined);return r.stdout.toString("utf8").trim();};
+  // No commits, credentials, network or global configuration changes. Only this
+  // synthetic repository's index/configuration and ordinary checkout are used.
+  git(["init","--template="]);git(["config","--local","core.autocrlf","true"]);
+  const paths=[".gitattributes","host-patches/LICENSE","host-patches/NOTICE","distribution/build.mjs"],originals=new Map();
+  for(const path of paths){const bytes=await readFile(new URL(`../../${path}`,import.meta.url));originals.set(path,bytes);const oid=git(["hash-object","-w","--stdin"],bytes);git(["update-index","--add","--cacheinfo","100644",oid,path]);}
+  git(["checkout-index","--all"]);
+  for(const path of ["host-patches/LICENSE","host-patches/NOTICE"]){const bytes=await readFile(join(root,path));assert.equal(bytes.includes(13),false);assert.ok(bytes.equals(originals.get(path)));}
+  const builder=await readFile(join(root,"distribution/build.mjs"),"utf8");assert.ok(builder.includes("\r\n"));
+  const line=builder.split(/\r?\n/).find(s=>s.startsWith("for(const path of [")&&s.includes('"distribution/lib.mjs"'));assert.ok(line.endsWith("await copySource(path,join(out,path));"));passed=true;
+ }finally{if(passed)await rm(root,{recursive:true,force:true});}
 });
 test("public navigation distinguishes the patch grant from redistribution clearance",async()=>{
  assert.ok((await read("README.md")).includes("host-patches/LICENSE"));
