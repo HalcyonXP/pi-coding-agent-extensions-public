@@ -34,7 +34,8 @@ if (args.includes("--host")) {
   run("Actual engine / Pi gateway integration", root, [".github/scripts/test-code-mode-rpc.mjs", "--rpc"]);
   const host = join(root, ".pi", "host-rpc-checkout");
   const vitest = join(host, "node_modules", "vitest", "dist", "cli.js");
-  run("Real agent regressions", join(host, "packages", "agent"), [vitest, "--run", "test/tool-scopes.test.ts", "test/tool-invocation.test.ts", "test/agent-loop.test.ts", "test/agent.test.ts"], { PI_OFFLINE: "1" });
-  run("Real session regressions", join(host, "packages", "coding-agent"), [vitest, "--run", "test/suite/tool-invocation.test.ts", "test/tool-result-images.test.ts", "test/suite/agent-session-model-extension.test.ts"], { PI_OFFLINE: "1" });
+  run("Native serialized request regressions", join(host, "packages", "ai"), [vitest, "--run", "test/serialized-request.test.ts", "test/openai-codex-stream.test.ts"], { PI_OFFLINE: "1" });
+  run("Real agent regressions", join(host, "packages", "agent"), [vitest, "--run", "test/tool-scopes.test.ts", "test/tool-invocation.test.ts", "test/agent-loop.test.ts", "test/agent.test.ts", "test/notification-scopes.test.ts", "test/tool-context.test.ts", "test/tool-context-loop.test.ts"], { PI_OFFLINE: "1" });
+  run("Real session regressions", join(host, "packages", "coding-agent"), [vitest, "--run", "test/suite/tool-invocation.test.ts", "test/tool-result-images.test.ts", "test/suite/agent-session-model-extension.test.ts", "test/suite/tool-notifications.test.ts", "test/suite/tool-context.test.ts"], { PI_OFFLINE: "1" });
 }
 console.log("\nAll selected offline checks passed. This does not run live probes, migration, production packaging or the unrestricted upstream provider suite.");

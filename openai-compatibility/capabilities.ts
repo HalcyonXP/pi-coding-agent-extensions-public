@@ -64,7 +64,15 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 	// an admitted request when a saved preference changes. Reload is explicit.
 	const effectiveWebProfile = savedWebProfile;
 	function webProfileStatus(): string {
-		return webPreferenceError ?? `${options.webPreferences ? "Saved" : "Trusted composition"} Web admission profile: ${savedWebProfile}; effective: ${effectiveWebProfile}. ${savedWebProfile !== effectiveWebProfile ? "Reload extensions or restart Pi to apply; current requests and schemas are unchanged. " : ""}Experimental is source-contract-only, not live-verified or additional authority/entitlement.`;
+		return webPreferenceError ?? `${options.webPreferences ? "Saved" : "Trusted composition"} Web admission profile: ${savedWebProfile}; effective: ${effectiveWebProfile}. ${savedWebProfile !== effectiveWebProfile ? "Reload extensions or restart Pi to apply; current requests and schemas are unchanged. " : ""}Experimental is source-contract-only, not live-verified or additional authority/entitlement.${savedWebProfile === "experimental-context" || effectiveWebProfile === "experimental-context" ? " experimental-context explicitly forwards bounded recent native user/assistant text to subscription Web search after reload. Literal text is not secret-scrubbed; missing finalized native context refuses. Other profiles remain context-free." : ""}`;
+	}
+	function webProfileSettingsStatus(): string {
+		// The native settings view bounds descriptions to 300 characters. Keep the
+		// disclosure warning visible; do not bury it after the longer CLI status.
+		if (!webPreferenceError && (savedWebProfile === "experimental-context" || effectiveWebProfile === "experimental-context")) {
+			return `Context disclosure forwards bounded recent native user/assistant text to subscription Web; not secret-scrubbed. Saved: ${savedWebProfile}; effective: ${effectiveWebProfile}. Reload extensions or restart Pi to apply changes. Missing native context refuses; no fallback.`;
+		}
+		return webProfileStatus();
 	}
 	function currentBackgroundWaitMs(): number {
 		if (unifiedPreferenceError) throw new CapabilityPreferenceError(unifiedPreferenceError);
@@ -297,13 +305,13 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 		);
 		rows.push({ id: "background_wait", label: "Background wait ceiling", value: unifiedPreferenceError ? "unavailable" : String(maxBackgroundWaitMs),
 			description: backgroundWaitStatus(), values: unifiedPreferenceError ? undefined : [...new Set([String(maxBackgroundWaitMs), "5000", "10000", "30000", "60000", "120000", "300000"])].sort((a, b) => Number(a) - Number(b)) });
-		if (options.webPreferences) rows.push({ id: "web_profile", label: "Web admission profile", value: webPreferenceError ? "unavailable" : savedWebProfile!, description: webProfileStatus(), values: webPreferenceError ? undefined : ["verified-v1", "experimental"] });
+		if (options.webPreferences) rows.push({ id: "web_profile", label: "Web admission profile", value: webPreferenceError ? "unavailable" : savedWebProfile!, description: webProfileSettingsStatus(), values: webPreferenceError ? undefined : ["verified-v1", "experimental", "experimental-context"] });
 		return rows;
 	}
 	pi.registerCommand("openai-tools", {
 		description: "OpenAI settings, Fast, capability switches and owned jobs",
 		getArgumentCompletions(prefix) {
-			const values = ["status", "fast", "fast on", "fast off", "fast toggle", "fast status", "jobs", "jobs status", "jobs cancel ", "web-profile status", "web-profile verified-v1", "web-profile experimental", "background-wait status", "background-wait 5000", "background-wait 300000", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
+			const values = ["status", "fast", "fast on", "fast off", "fast toggle", "fast status", "jobs", "jobs status", "jobs cancel ", "web-profile status", "web-profile verified-v1", "web-profile experimental", "web-profile experimental-context", "background-wait status", "background-wait 5000", "background-wait 300000", ...Object.keys(groups).flatMap(name => [`${name} on`, `${name} off`])];
 			const matches = values.filter(value => value.startsWith(prefix.trim().toLowerCase())).map(value => ({ value, label: value }));
 			return matches.length ? matches : null;
 		},
@@ -312,11 +320,11 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			const [name, action, extra, trailing] = args.trim().split(/\s+/);
 			if (name === "fast" && options.fastCommand) { await options.fastCommand(args.trim().slice(4).trim(), ctx); return; }
 			if (name === "web-profile") {
-				if (extra) { ctx.ui.notify("Usage: /openai-tools web-profile [status | verified-v1 | experimental]", "warning"); return; }
+				if (extra) { ctx.ui.notify("Usage: /openai-tools web-profile [status | verified-v1 | experimental | experimental-context]", "warning"); return; }
 				try {
 					if (action && action !== "status") changeWebProfile(action);
 					ctx.ui.notify(webProfileStatus(), webPreferenceError ? "warning" : "info");
-				} catch { ctx.ui.notify("Could not change Web admission profile. Use verified-v1 or experimental; preserve any invalid profile file. Saved selection and effective schema were not changed.", "warning"); }
+				} catch { ctx.ui.notify("Could not change Web admission profile. Use verified-v1, experimental or experimental-context; preserve any invalid profile file. Saved selection and effective schema were not changed.", "warning"); }
 				return;
 			}
 			if (name === "background-wait") {
@@ -339,7 +347,7 @@ export function registerCapabilities(pi: ExtensionAPI, mutationQueue: MutationQu
 			}
 			if (name && name !== "status") {
 				if (!["imagegen", "unified_exec", "web_search", "code_mode"].includes(name) || !["on", "off"].includes(action) || extra) {
-					ctx.ui.notify("Usage: /openai-tools [status | fast on|off|toggle|status | jobs status|cancel <session_id> | background-wait status|<milliseconds> | web-profile status|verified-v1|experimental | imagegen|unified_exec|web_search|code_mode on|off]", "warning"); return;
+					ctx.ui.notify("Usage: /openai-tools [status | fast on|off|toggle|status | jobs status|cancel <session_id> | background-wait status|<milliseconds> | web-profile status|verified-v1|experimental|experimental-context | imagegen|unified_exec|web_search|code_mode on|off]", "warning"); return;
 				}
 				try { await changePreference(name, action, ctx); }
 				catch (error) { if (!(error instanceof CapabilityPreferenceError)) throw error; ctx.ui.notify(error.message, "warning"); return; }

@@ -7,13 +7,15 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | Term | Meaning in this project |
 | --- | --- |
 | Native/upstream models | Pi 0.85.1's own catalog/auth/transport/cache behavior; no extension provider factory or model backport |
-| Patched/private host | Genuine pinned Pi source plus the explicit twenty-path native patch; not stock Pi, an official upstream binary, or a visibility claim |
+| Patched/private host | Genuine pinned Pi source plus the explicit thirty-three-path native patch; not stock Pi, an official upstream binary, or a visibility claim |
 | Code mode | Independently opted-in paired exec/wait with a saved profile choice, bounded QuickJS cells and current native ownership; not ambient Node/V8 |
 | Native Code input | Raw-JavaScript custom provider tool, mapped by Pi to internal `{code}`; options in a first-line pragma, not top-level JSON fields. Wait remains JSON. See [input/result boundaries](NATIVE-CODE-CONTRACT.md). |
 | Code projection | Default `tools` guest view for recognized normal Unified results, with full native-wrapper fallback; `nativeTools` preserves raw access and `projectedTools` is an identical alias. Legacy scripts need migration; native evidence/authority is unchanged. See [projection contract](CODE-RESULT-PROJECTION.md). |
 | Web text projection | Working-source canonical `web_search` guest string after complete native publication and RPC admission; includes all literal text and opaque source associations. Not a Web reference, native citation renderer or new installed acceptance. |
 | Web consistency stamp | `details.web_result` content/label checksum checked after hooks; not a signature or authority. A native post-publication hint permits the guest text view, never extra admission. |
-| Web admission profile | Working-source saved `verified-v1`/`experimental` schema choice; applies only after extension reload/restart, not a Pi installation profile or execution authority. [Saved/effective contract](WEB-PROFILES.md). |
+| Web admission profile | Saved schema choice requiring reload/restart. `verified-v1` and `experimental` remain context-free; working-source `experimental-context` explicitly opts into bounded native conversation disclosure. Not an installation profile or execution authority. [Contract](WEB-PROFILES.md). |
+| Native text snapshot | Current-invocation-only user/assistant text captured after context hooks, confirmed against the native serialized request and successful completion. Not raw ancestry, a secret scrubber or authority inferred from matching text. |
+| Code notification | Working-source `await notify(value)`: additional native tool-result output tied to the original exec across waits. Active-turn queue acceptance, not model consumption, a toast, custom-message metadata promotion or another tool completion/usage event. |
 | Web service reference | Opaque remote `ref_id`, distinct from a native `ev_...` evidence reference. Opaque IDs/citation syntax are not currently admitted as continuation authority; public-URL open remains separate. |
 | Native grammar capability | Selected Pi model's explicit grammar-tool support; absence disables Code without a JSON-provider fallback, not an execution-authority grant |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |

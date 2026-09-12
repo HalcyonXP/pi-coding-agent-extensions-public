@@ -1,5 +1,5 @@
 diff --git a/packages/agent/src/agent-loop.ts b/packages/agent/src/agent-loop.ts
-index 193e3fa..29a3779 100644
+index 193e3fa..9e112c5 100644
 --- a/packages/agent/src/agent-loop.ts
 +++ b/packages/agent/src/agent-loop.ts
 @@ -8,8 +8,10 @@ import {
@@ -26,7 +26,46 @@ index 193e3fa..29a3779 100644
  	PrepareNextTurnContext,
  	StreamFn,
  } from "./types.ts";
-@@ -456,14 +463,13 @@ async function executeToolCallsSequential(
+@@ -289,6 +296,9 @@ async function streamAssistantResponse(
+ 		messages = await config.transformContext(messages, signal);
+ 	}
+ 
++	// Capture only the hook-approved native message roles. Conversion and payload
++	// hooks may still remove/change text; no view is available until confirmation.
++	const confirmTextContext = config.captureToolTextContext?.(messages, config.model.api);
+ 	// Convert to LLM-compatible messages (AgentMessage[] → Message[])
+ 	const llmMessages = await config.convertToLlm(messages);
+ 
+@@ -307,6 +317,12 @@ async function streamAssistantResponse(
+ 		...config,
+ 		apiKey: resolvedApiKey,
+ 		signal,
++		onSerializedRequest: confirmTextContext
++			? (body) => {
++					confirmTextContext.confirm(body);
++					config.onSerializedRequest?.(body);
++				}
++			: config.onSerializedRequest,
+ 	});
+ 
+ 	let partialMessage: AssistantMessage | null = null;
+@@ -353,6 +369,7 @@ async function streamAssistantResponse(
+ 					await emit({ type: "message_start", message: { ...finalMessage } });
+ 				}
+ 				await emit({ type: "message_end", message: finalMessage });
++				confirmTextContext?.complete(!signal?.aborted && ["stop", "toolUse"].includes(finalMessage.stopReason));
+ 				return finalMessage;
+ 			}
+ 		}
+@@ -366,6 +383,7 @@ async function streamAssistantResponse(
+ 		await emit({ type: "message_start", message: { ...finalMessage } });
+ 	}
+ 	await emit({ type: "message_end", message: finalMessage });
++	confirmTextContext?.complete(!signal?.aborted && ["stop", "toolUse"].includes(finalMessage.stopReason));
+ 	return finalMessage;
+ }
+ 
+@@ -456,14 +474,13 @@ async function executeToolCallsSequential(
  				isError: preparation.isError,
  			};
  		} else {
@@ -43,7 +82,7 @@ index 193e3fa..29a3779 100644
  			);
  		}
  
-@@ -527,14 +533,13 @@ async function executeToolCallsParallel(
+@@ -527,14 +544,13 @@ async function executeToolCallsParallel(
  				await emitToolExecutionEnd(finalized, emit);
  				return finalized;
  			}
@@ -60,7 +99,7 @@ index 193e3fa..29a3779 100644
  			);
  			await emitToolExecutionEnd(finalized, emit);
  			return finalized;
-@@ -565,6 +570,7 @@ type PreparedToolCall = {
+@@ -565,6 +581,7 @@ type PreparedToolCall = {
  	toolCall: AgentToolCall;
  	tool: AgentTool<any>;
  	args: unknown;
@@ -68,7 +107,7 @@ index 193e3fa..29a3779 100644
  };
  
  type ImmediateToolCallOutcome = {
-@@ -611,7 +617,8 @@ async function prepareToolCall(
+@@ -611,7 +628,8 @@ async function prepareToolCall(
  	config: AgentLoopConfig,
  	signal: AbortSignal | undefined,
  ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
@@ -78,7 +117,7 @@ index 193e3fa..29a3779 100644
  	if (!tool) {
  		return {
  			kind: "immediate",
-@@ -659,11 +666,21 @@ async function prepareToolCall(
+@@ -659,11 +677,21 @@ async function prepareToolCall(
  				isError: true,
  			};
  		}
@@ -101,7 +140,7 @@ index 193e3fa..29a3779 100644
  		};
  	} catch (error) {
  		return {
-@@ -674,6 +691,333 @@ async function prepareToolCall(
+@@ -674,6 +702,346 @@ async function prepareToolCall(
  	}
  }
  
@@ -151,6 +190,10 @@ index 193e3fa..29a3779 100644
 +		parentToolCallId: prepared.toolCall.id,
 +		signal: gatewaySignal,
 +		scope: owningScope,
++		getTextContext() {
++			assertParent();
++			return state?.getTextContext?.();
++		},
 +		openScope(options?: AgentToolScopeOptions) {
 +			assertParent();
 +			if (
@@ -180,6 +223,15 @@ index 193e3fa..29a3779 100644
 +					return {
 +						invoke: native.invocation.invoke,
 +						close: native.close,
++						notify: state.notify
++							? (text: string) =>
++									state.notify!(
++										text,
++										{ toolName: prepared.tool.name, toolCallId: prepared.toolCall.id },
++										resource,
++										state.signal,
++									)
++							: undefined,
 +						publishEvidence: state.publishEvidence
 +							? (evidence: AgentToolEvidence) => state.publishEvidence!(evidence, resource, state.signal)
 +							: undefined,
@@ -435,7 +487,7 @@ index 193e3fa..29a3779 100644
  async function executePreparedToolCall(
  	prepared: PreparedToolCall,
  	signal: AbortSignal | undefined,
-@@ -759,7 +1103,7 @@ async function finalizeExecutedToolCall(
+@@ -759,7 +1127,7 @@ async function finalizeExecutedToolCall(
  
  	return {
  		toolCall: prepared.toolCall,
@@ -445,18 +497,19 @@ index 193e3fa..29a3779 100644
  	};
  }
 diff --git a/packages/agent/src/agent.ts b/packages/agent/src/agent.ts
-index 0de7edd..526ce19 100644
+index 0de7edd..1ca1873 100644
 --- a/packages/agent/src/agent.ts
 +++ b/packages/agent/src/agent.ts
-@@ -9,6 +9,7 @@ import type {
+@@ -9,6 +9,8 @@ import type {
  } from "@earendil-works/pi-ai";
  import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
  import { getDefaultStreamFn } from "./stream-fn.ts";
++import { ToolContextSnapshot } from "./tool-context.ts";
 +import { ToolScopeRegistry } from "./tool-scopes.ts";
  import type {
  	AfterToolCallContext,
  	AfterToolCallResult,
-@@ -19,6 +20,9 @@ import type {
+@@ -19,6 +21,9 @@ import type {
  	AgentMessage,
  	AgentState,
  	AgentTool,
@@ -466,7 +519,7 @@ index 0de7edd..526ce19 100644
  	BeforeToolCallContext,
  	BeforeToolCallResult,
  	PrepareNextTurnContext,
-@@ -66,26 +70,38 @@ type MutableAgentState = Omit<AgentState, "isStreaming" | "streamingMessage" | "
+@@ -66,26 +71,38 @@ type MutableAgentState = Omit<AgentState, "isStreaming" | "streamingMessage" | "
  };
  
  function createMutableAgentState(
@@ -507,13 +560,14 @@ index 0de7edd..526ce19 100644
  		},
  		isStreaming: false,
  		streamingMessage: undefined,
-@@ -172,10 +188,33 @@ type ActiveRun = {
+@@ -172,10 +189,41 @@ type ActiveRun = {
   */
  export class Agent {
  	private _state: MutableAgentState;
 +	private invocationRevision = 0;
 +	private invocationController = new AbortController();
 +	private readonly toolScopes = new ToolScopeRegistry();
++	private readonly toolTextContext = new ToolContextSnapshot();
 +	private readonly scopedToolCalls = new Set<string>();
 +	private invocationSuspensions = 0;
  	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
@@ -538,10 +592,17 @@ index 0de7edd..526ce19 100644
 +		scope: AgentToolResourceScope,
 +		contextSignal: AbortSignal,
 +	) => Promise<void>;
++	/** Native host queue; never a new idle run or a provider replacement. */
++	public notifyToolOutput?: (
++		text: string,
++		origin: { toolName: string; toolCallId: string },
++		scope: AgentToolResourceScope,
++		contextSignal: AbortSignal,
++	) => Promise<boolean>;
  	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
  	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
  	public streamFunction: StreamFn;
-@@ -216,7 +255,7 @@ export class Agent {
+@@ -216,7 +264,7 @@ export class Agent {
  	constructor(options: AgentOptions) {
  		// Older compiled consumers may omit options or streamFn even though the current API requires them.
  		const runtimeOptions: Partial<AgentOptions> = options ?? {};
@@ -550,12 +611,13 @@ index 0de7edd..526ce19 100644
  		this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
  		this.transformContext = runtimeOptions.transformContext;
  		this.streamFunction = runtimeOptions.streamFn ?? getDefaultStreamFn();
-@@ -315,8 +354,30 @@ export class Agent {
+@@ -315,8 +363,31 @@ export class Agent {
  		return this.activeRun?.abortController.signal;
  	}
  
 +	/** Host lifecycle boundary: revoke every issued nested invocation. */
 +	invalidateToolInvocations(): void {
++		this.toolTextContext.clear();
 +		this.invocationRevision++;
 +		this.invocationController.abort();
 +		this.invocationController = new AbortController();
@@ -581,7 +643,7 @@ index 0de7edd..526ce19 100644
  		this.activeRun?.abortController.abort();
  	}
  
-@@ -338,7 +399,8 @@ export class Agent {
+@@ -338,7 +409,8 @@ export class Agent {
  		this._state.messages = [];
  		this._state.isStreaming = false;
  		this._state.streamingMessage = undefined;
@@ -591,7 +653,14 @@ index 0de7edd..526ce19 100644
  		this._state.errorMessage = undefined;
  		this.clearFollowUpQueue();
  		this.clearSteeringQueue();
-@@ -455,8 +517,25 @@ export class Agent {
+@@ -450,13 +522,34 @@ export class Agent {
+ 			reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
+ 			sessionId: this.sessionId,
+ 			onPayload: this.onPayload,
++			captureToolTextContext: (messages, api) =>
++				this.toolTextContext.begin(messages, this.invocationController.signal, api),
+ 			onResponse: this.onResponse,
+ 			transport: this.transport,
  			thinkingBudgets: this.thinkingBudgets,
  			maxRetryDelayMs: this.maxRetryDelayMs,
  			toolExecution: this.toolExecution,
@@ -605,7 +674,9 @@ index 0de7edd..526ce19 100644
 +				signal: this.invocationController.signal,
 +				scopes: this.toolScopes,
 +				publishEvidence: this.publishToolEvidence,
++				notify: this.notifyToolOutput,
 +				getContext: () => this.createContextSnapshot(),
++				getTextContext: () => this.toolTextContext.read(this.invocationController.signal),
 +				emitScopeEvent: async (event, scope) => {
 +					const scopeSignal = this.toolScopes.eventSignal(scope);
 +					if (
@@ -619,7 +690,7 @@ index 0de7edd..526ce19 100644
  			shouldStopAfterTurn: shouldStopAfterTurn
  				? async (context) => await shouldStopAfterTurn(context, this.signal)
  				: undefined,
-@@ -529,7 +608,7 @@ export class Agent {
+@@ -529,7 +622,7 @@ export class Agent {
  	private finishRun(): void {
  		this._state.isStreaming = false;
  		this._state.streamingMessage = undefined;
@@ -628,7 +699,7 @@ index 0de7edd..526ce19 100644
  		this.activeRun?.resolve();
  		this.activeRun = undefined;
  	}
-@@ -541,7 +620,7 @@ export class Agent {
+@@ -541,7 +634,7 @@ export class Agent {
  	 * considered idle later, after all awaited listeners for `agent_end` finish
  	 * and `finishRun()` clears runtime-owned state.
  	 */
@@ -637,7 +708,7 @@ index 0de7edd..526ce19 100644
  		switch (event.type) {
  			case "message_start":
  				this._state.streamingMessage = event.message;
-@@ -557,6 +636,7 @@ export class Agent {
+@@ -557,6 +650,7 @@ export class Agent {
  				break;
  
  			case "tool_execution_start": {
@@ -645,7 +716,7 @@ index 0de7edd..526ce19 100644
  				const pendingToolCalls = new Set(this._state.pendingToolCalls);
  				pendingToolCalls.add(event.toolCallId);
  				this._state.pendingToolCalls = pendingToolCalls;
-@@ -564,6 +644,7 @@ export class Agent {
+@@ -564,6 +658,7 @@ export class Agent {
  			}
  
  			case "tool_execution_end": {
@@ -653,7 +724,7 @@ index 0de7edd..526ce19 100644
  				const pendingToolCalls = new Set(this._state.pendingToolCalls);
  				pendingToolCalls.delete(event.toolCallId);
  				this._state.pendingToolCalls = pendingToolCalls;
-@@ -581,7 +662,7 @@ export class Agent {
+@@ -581,7 +676,7 @@ export class Agent {
  				break;
  		}
  
@@ -755,12 +826,142 @@ index 0000000..bdd1da5
 +		return false;
 +	}
 +}
+diff --git a/packages/agent/src/tool-context.ts b/packages/agent/src/tool-context.ts
+new file mode 100644
+index 0000000..bb94544
+--- /dev/null
++++ b/packages/agent/src/tool-context.ts
+@@ -0,0 +1,124 @@
++import type { AgentMessage, AgentToolTextContext, AgentToolTextContextCapture } from "./types.ts";
++
++/** Bounded literal context, never raw session ancestry. Matching serialized Responses
++ * request text is a consistency check, not authority: only a native invocation
++ * can read this view. Native transport/cache handling still owns dispatch.
++ */
++export class ToolContextSnapshot {
++	private current?: {
++		signal: AbortSignal;
++		context: AgentToolTextContext;
++		approved: boolean;
++		finished: boolean;
++		ready: boolean;
++	};
++
++	begin(messages: AgentMessage[], signal: AbortSignal, api: string): AgentToolTextContextCapture | undefined {
++		this.current = undefined;
++		if (signal.aborted || !["openai-responses", "openai-codex-responses"].includes(api)) return;
++		try {
++			const lower = Math.max(0, messages.length - 512);
++			let first = -1,
++				last = -1;
++			for (let i = messages.length - 1; i >= lower; i--) {
++				if (messages[i].role !== "user") continue;
++				if (last < 0) first = last = i;
++				else {
++					first = i;
++					break;
++				}
++			}
++			if (lower > 0 && first === last) return;
++			let bytes = 0,
++				blockCount = 0;
++			const context: Array<AgentToolTextContext[number]> = [];
++			for (let i = first; i >= 0 && i <= last; i++) {
++				const m = messages[i];
++				if (m.role !== "user" && m.role !== "assistant") continue;
++				const blocks = typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content;
++				if (!Array.isArray(blocks)) return;
++				blockCount += blocks.length;
++				if (blockCount > 128) return;
++				const content: Array<{ readonly type: "text"; readonly text: string }> = [];
++				for (const block of blocks) {
++					if (block.type !== "text") continue;
++					if (typeof block.text !== "string" || block.text.length > 65536) return;
++					bytes += new TextEncoder().encode(block.text).byteLength;
++					if (bytes > 65536) return;
++					content.push(Object.freeze({ type: "text", text: block.text }));
++				}
++				context.push(Object.freeze({ role: m.role, content: Object.freeze(content) }));
++			}
++			const record = { signal, context: Object.freeze(context), approved: false, finished: false, ready: false };
++			this.current = record;
++			return {
++				confirm: (body) => {
++					if (this.current !== record || signal.aborted || record.finished) return;
++					record.approved = false;
++					try {
++						// Inspect bytes the native provider serialized once, never a payload
++						// object whose getters/toJSON could disclose different wire text.
++						if (
++							typeof body !== "string" ||
++							body.length > 2 * 1024 * 1024 ||
++							new TextEncoder().encode(body).byteLength > 2 * 1024 * 1024
++						)
++							return;
++						record.approved = matchesPayload(record.context, JSON.parse(body));
++					} catch {
++						/* unavailable, never a raw-history fallback */
++					}
++				},
++				complete: (success) => {
++					if (this.current !== record || signal.aborted || record.finished) return;
++					record.finished = true;
++					record.ready = success && record.approved;
++				},
++			};
++		} catch {
++			return;
++		}
++	}
++
++	clear(): void {
++		this.current = undefined;
++	}
++
++	read(signal: AbortSignal): AgentToolTextContext | undefined {
++		const record = this.current;
++		return record?.signal === signal && !signal.aborted && record.ready ? record.context : undefined;
++	}
++}
++
++function matchesPayload(context: AgentToolTextContext, value: unknown): boolean {
++	if (!value || typeof value !== "object") return false;
++	const input = (value as { input?: unknown }).input;
++	if (!Array.isArray(input) || input.length > 4096) return false;
++	const expected = context.flatMap((m) =>
++		m.role === "assistant"
++			? m.content.map((b) => ({ role: m.role, text: [b.text] }))
++			: [{ role: m.role, text: m.content.map((b) => b.text) }],
++	);
++	let cursor = 0;
++	for (const item of input) {
++		if (cursor === expected.length) break;
++		if (
++			!item ||
++			typeof item !== "object" ||
++			(item.type !== undefined && item.type !== "message") ||
++			item.role !== expected[cursor].role
++		)
++			continue;
++		const blocks = typeof item.content === "string" ? [{ type: "input_text", text: item.content }] : item.content;
++		if (!Array.isArray(blocks) || blocks.length > 128) return false;
++		const text: string[] = [];
++		for (const b of blocks) {
++			if (!b || typeof b !== "object" || !["input_text", "output_text"].includes(b.type)) continue;
++			if (typeof b.text !== "string") return false;
++			text.push(b.text);
++		}
++		if (text.length === expected[cursor].text.length && text.every((t, i) => t === expected[cursor].text[i]))
++			cursor++;
++	}
++	return cursor === expected.length;
++}
 diff --git a/packages/agent/src/tool-scopes.ts b/packages/agent/src/tool-scopes.ts
 new file mode 100644
-index 0000000..5927ed4
+index 0000000..7b25160
 --- /dev/null
 +++ b/packages/agent/src/tool-scopes.ts
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,355 @@
 +import { uuidv7 } from "@earendil-works/pi-ai";
 +import type {
 +	AgentScopedResult,
@@ -775,6 +976,7 @@ index 0000000..5927ed4
 +	invoke: AgentToolInvocation["invoke"];
 +	close(): Promise<void>;
 +	publishEvidence?: (evidence: AgentToolEvidence) => Promise<void>;
++	notify?: (text: string) => Promise<boolean>;
 +};
 +type Resource = { close: () => Promise<void> };
 +type RecordState = {
@@ -958,6 +1160,50 @@ index 0000000..5927ed4
 +				}
 +			},
 +			close,
++			canNotify() {
++				assertCurrent();
++				return Boolean(record.onResult && record.backend?.notify);
++			},
++			async notify(text: string) {
++				assertCurrent();
++				if (!record.onResult || !record.backend?.notify) throw new Error("Protected notifications are unavailable");
++				if (typeof text !== "string" || text.length > 65536 || new TextEncoder().encode(text).byteLength > 65536)
++					throw new Error("Invalid or excessive notification text");
++				if (record.publicationCalls >= 64 || record.publicationPending >= 4)
++					throw new Error("Protected publication budget exceeded");
++				let task: Promise<boolean>;
++				let dispatched = false;
++				const release = ownResource(async () => {
++					try {
++						await task;
++					} catch (error) {
++						if (dispatched) throw error;
++					}
++				});
++				record.publicationCalls++;
++				record.publicationPending++;
++				task = Promise.resolve().then(async () => {
++					assertCurrent();
++					dispatched = true;
++					const accepted = await record.backend!.notify!(text);
++					if (typeof accepted !== "boolean") throw new Error("Unconfirmed notification acceptance");
++					return accepted;
++				});
++				let confirmed = false;
++				try {
++					const accepted = await task;
++					confirmed = true;
++					assertCurrent();
++					return accepted;
++				} catch {
++					throw new Error("Protected notification failed");
++				} finally {
++					record.publicationPending--;
++					// Definite pre-dispatch cancellation and idle refusal release safely.
++					// A dispatched publisher with a thrown/invalid receipt remains unconfirmed.
++					if (confirmed || !dispatched) release();
++				}
++			},
 +			async publishEvidence(evidence: AgentToolEvidence) {
 +				assertCurrent();
 +				if (!record.onResult || !record.backend?.publishEvidence)
@@ -1072,7 +1318,7 @@ index 0000000..5927ed4
 +	}
 +}
 diff --git a/packages/agent/src/types.ts b/packages/agent/src/types.ts
-index eebb5dc..3ffb9d3 100644
+index eebb5dc..9f97b85 100644
 --- a/packages/agent/src/types.ts
 +++ b/packages/agent/src/types.ts
 @@ -14,6 +14,7 @@ import type {
@@ -1083,10 +1329,12 @@ index eebb5dc..3ffb9d3 100644
  
  /**
   * Stream function used by the agent loop. `Models.streamSimple` satisfies
-@@ -148,6 +149,21 @@ export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
+@@ -148,6 +149,30 @@ export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
  
  export interface AgentLoopConfig extends SimpleStreamOptions {
  	model: Model<any>;
++	/** Native context observer, after transformContext and before conversion. */
++	captureToolTextContext?: (messages: AgentMessage[], api: string) => AgentToolTextContextCapture | undefined;
 +	/** Live host registry/lifecycle. Required to provision nested invocation capabilities. */
 +	getToolExecutionState?: () => {
 +		tools: readonly AgentTool[];
@@ -1095,17 +1343,24 @@ index eebb5dc..3ffb9d3 100644
 +		/** Native Agent services; absent on unidentified/low-level hosts. */
 +		scopes?: ToolScopeRegistry;
 +		getContext?: () => AgentContext;
++		getTextContext?: () => AgentToolTextContext | undefined;
 +		emitScopeEvent?: (event: AgentEvent, scope: AgentToolResourceScope) => Promise<void>;
 +		publishEvidence?: (
 +			evidence: AgentToolEvidence,
 +			scope: AgentToolResourceScope,
 +			contextSignal: AbortSignal,
 +		) => Promise<void>;
++		notify?: (
++			text: string,
++			origin: { toolName: string; toolCallId: string },
++			scope: AgentToolResourceScope,
++			contextSignal: AbortSignal,
++		) => Promise<boolean>;
 +	};
  
  	/**
  	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
-@@ -383,10 +399,87 @@ export interface AgentToolResult<T> {
+@@ -383,10 +408,109 @@ export interface AgentToolResult<T> {
   */
  export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
  
@@ -1152,10 +1407,32 @@ index eebb5dc..3ffb9d3 100644
 +	invoke: AgentToolInvocation["invoke"];
 +	/** Genuine host persistence/presentation service, absent on unprotected scopes. */
 +	publishEvidence(evidence: AgentToolEvidence): Promise<void>;
++	/** Native active-turn queue acceptance, not model consumption or a tool-end event.
++	 * False means confirmed idle refusal without publication; failure remains unconfirmed.
++	 * The native backend binds the original call identity, never the caller.
++	 */
++	notify?(text: string): Promise<boolean>;
++	canNotify?(): boolean;
 +	close(): Promise<void>;
 +}
 +
++export interface AgentToolTextContextCapture {
++	confirm(serializedBody: unknown): void;
++	complete(success: boolean): void;
++}
++
++export type AgentToolTextContext = readonly {
++	readonly role: "user" | "assistant";
++	readonly content: readonly { readonly type: "text"; readonly text: string }[];
++}[];
++
 +export interface AgentToolInvocation {
++	/** Native, bounded recent text confirmed in the serialized Responses request after successful completion.
++	 * Undefined means unavailable; never substitute raw ancestry. No images,
++	 * custom/protected messages, reasoning, auth records or transport metadata.
++	 * Literal selected text is NOT a secret scrubber. The view is ephemeral.
++	 */
++	getTextContext?(): AgentToolTextContext | undefined;
 +	/** Host-derived ancestry, never a caller argument or an interpretation of call-ID text. */
 +	readonly origin: "direct" | "nested";
 +	/** Native Agent/context epoch identity and revocation only, not execution authority.
@@ -1193,7 +1470,7 @@ index eebb5dc..3ffb9d3 100644
  	/**
  	 * Optional compatibility shim for raw tool-call arguments before schema validation.
  	 * Must return an object that matches `TParameters`.
-@@ -428,7 +521,12 @@ export interface AgentContext {
+@@ -428,7 +552,12 @@ export interface AgentContext {
   * listeners for that event are still part of run settlement. The agent becomes
   * idle only after those listeners finish.
   */
@@ -1229,6 +1506,577 @@ index d3255df..1334304 100644
  	});
  
  	it("should prepare tool arguments for validation", async () => {
+diff --git a/packages/agent/test/notification-scopes.test.ts b/packages/agent/test/notification-scopes.test.ts
+new file mode 100644
+index 0000000..aa99b8c
+--- /dev/null
++++ b/packages/agent/test/notification-scopes.test.ts
+@@ -0,0 +1,186 @@
++import { describe, expect, it } from "vitest";
++import { ToolScopeRegistry } from "../src/tool-scopes.ts";
++
++const base = { invoke: async () => ({ result: { content: [], details: {} }, isError: false }), close: async () => {} };
++const protectedOptions = { onResult: async () => {} };
++
++describe("native notification publication ownership", () => {
++	it("requires a protected scope and a real backend", async () => {
++		for (const protection of [false, true]) {
++			const registry = new ToolScopeRegistry();
++			const scope = registry.open(
++				new AbortController().signal,
++				() => base,
++				protection ? protectedOptions : undefined,
++			);
++			expect(scope.canNotify!()).toBe(false);
++			await expect(scope.notify!("test")).rejects.toThrow(/unavailable/);
++			await scope.close();
++			expect(registry.size).toBe(0);
++		}
++	});
++	it("returns queue acceptance or confirmed idle refusal without leaking cleanup", async () => {
++		for (const accepted of [true, false]) {
++			const registry = new ToolScopeRegistry();
++			const seen: string[] = [];
++			const scope = registry.open(
++				new AbortController().signal,
++				() => ({
++					...base,
++					notify: async (text) => {
++						seen.push(text);
++						return accepted;
++					},
++				}),
++				protectedOptions,
++			);
++			expect(scope.canNotify!()).toBe(true);
++			expect(await scope.notify!("literal 😀\ntext")).toBe(accepted);
++			expect(seen).toEqual(["literal 😀\ntext"]);
++			await scope.close();
++			expect(registry.size).toBe(0);
++			await expect(scope.notify!("late")).rejects.toThrow(/revoked/);
++		}
++	});
++	it("refuses nonprimitive/oversized values before a backend effect", async () => {
++		const registry = new ToolScopeRegistry();
++		let effects = 0;
++		const scope = registry.open(
++			new AbortController().signal,
++			() => ({
++				...base,
++				notify: async () => {
++					effects++;
++					return true;
++				},
++			}),
++			protectedOptions,
++		);
++		for (const value of [null, undefined, {}, new String("wrapped"), "x".repeat(65537), "😀".repeat(16385)])
++			await expect(scope.notify!(value as string)).rejects.toThrow(/notification text/);
++		expect(effects).toBe(0);
++		await scope.close();
++	});
++	it("shares the existing 64-publication ceiling with evidence", async () => {
++		const registry = new ToolScopeRegistry();
++		let effects = 0;
++		const scope = registry.open(
++			new AbortController().signal,
++			() => ({
++				...base,
++				notify: async () => {
++					effects++;
++					return true;
++				},
++				publishEvidence: async () => {
++					effects++;
++				},
++			}),
++			protectedOptions,
++		);
++		for (let i = 0; i < 32; i++) {
++			await scope.notify!("n");
++			await scope.publishEvidence({ content: [] });
++		}
++		await expect(scope.notify!("overflow")).rejects.toThrow(/budget/);
++		await expect(scope.publishEvidence({ content: [] })).rejects.toThrow(/budget/);
++		expect(effects).toBe(64);
++		await scope.close();
++	});
++	it("shares the four-pending-publication ceiling and waits for confirmed drain", async () => {
++		const registry = new ToolScopeRegistry();
++		let finish!: () => void;
++		const gate = new Promise<void>((resolve) => {
++			finish = resolve;
++		});
++		const scope = registry.open(
++			new AbortController().signal,
++			() => ({
++				...base,
++				notify: async () => {
++					await gate;
++					return true;
++				},
++				publishEvidence: async () => {
++					await gate;
++				},
++			}),
++			protectedOptions,
++		);
++		const pending = [
++			scope.notify!("1"),
++			scope.publishEvidence({ content: [] }),
++			scope.notify!("2"),
++			scope.notify!("3"),
++		];
++		await expect(scope.notify!("overflow")).rejects.toThrow(/budget/);
++		const outcomes = Promise.allSettled(pending);
++		const closing = scope.close();
++		expect(registry.status).toEqual({ active: 0, draining: 1 });
++		finish();
++		await outcomes;
++		await closing;
++		expect(registry.size).toBe(0);
++	});
++	for (const failure of ["throw", "invalid"])
++		it(`keeps unconfirmed ${failure} publication draining without replay`, async () => {
++			const registry = new ToolScopeRegistry();
++			let effects = 0;
++			const scope = registry.open(
++				new AbortController().signal,
++				() => ({
++					...base,
++					notify: async () => {
++						effects++;
++						if (failure === "throw") throw Error("failed after possible publication");
++						return undefined as unknown as boolean;
++					},
++				}),
++				protectedOptions,
++			);
++			await expect(scope.notify!("uncertain")).rejects.toThrow(/failed/);
++			await expect(scope.close()).rejects.toThrow();
++			expect(registry.status).toEqual({ active: 0, draining: 1 });
++			expect(() => registry.open(new AbortController().signal, () => base)).toThrow(/cleanup/);
++			expect(effects).toBe(1);
++		});
++});
++
++it("notification cancellation before backend dispatch has confirmed zero effects", async () => {
++	const registry = new ToolScopeRegistry();
++	let effects = 0;
++	const scope = registry.open(
++		new AbortController().signal,
++		() => ({
++			...base,
++			notify: async () => {
++				effects++;
++				return true;
++			},
++		}),
++		protectedOptions,
++	);
++	const pending = scope.notify!("not dispatched");
++	const rejected = expect(pending).rejects.toThrow(/failed/);
++	const closed = scope.close();
++	await rejected;
++	await closed;
++	expect(effects).toBe(0);
++	expect(registry.size).toBe(0);
++});
++
++it("notification backend alone cannot authorize an unprotected scope", async () => {
++	const registry = new ToolScopeRegistry();
++	let effects = 0;
++	const scope = registry.open(new AbortController().signal, () => ({
++		...base,
++		notify: async () => {
++			effects++;
++			return true;
++		},
++	}));
++	expect(scope.canNotify!()).toBe(false);
++	await expect(scope.notify!("unprotected")).rejects.toThrow(/unavailable/);
++	expect(effects).toBe(0);
++	await scope.close();
++});
+diff --git a/packages/agent/test/tool-context-loop.test.ts b/packages/agent/test/tool-context-loop.test.ts
+new file mode 100644
+index 0000000..2bd1281
+--- /dev/null
++++ b/packages/agent/test/tool-context-loop.test.ts
+@@ -0,0 +1,154 @@
++import {
++	type AssistantMessage,
++	type AssistantMessageEvent,
++	EventStream,
++	type Message,
++	type Model,
++} from "@earendil-works/pi-ai";
++import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
++import { Type } from "typebox";
++import { expect, it } from "vitest";
++import { Agent, type AgentTool, type AgentToolInvocation } from "../src/index.ts";
++import type { AgentToolTextContext } from "../src/types.ts";
++
++// Actual native Agent and Responses serializer, synthetic stream only. This is
++// not an HTTP/provider/artifact acceptance test and imports no real auth.
++for (const api of ["openai-responses", "openai-codex-responses"] as const) {
++	for (const mode of [
++		"approved",
++		"convert-redaction",
++		"payload-redaction",
++		"payload-mutation",
++		"payload-toJSON",
++		"payload-getter",
++		"payload-null",
++		"missing-receipt",
++	]) {
++		it(`${api} native context honors final hooks: ${mode}`, async () => {
++			const model: Model<typeof api> = {
++				id: "synthetic-context-fixture",
++				name: "Synthetic",
++				provider: "openai",
++				api,
++				baseUrl: "https://fixture.invalid",
++				reasoning: false,
++				input: ["text"],
++				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++				contextWindow: 4096,
++				maxTokens: 128,
++			};
++			let serializedHooks = 0;
++			let calls = 0,
++				invocation: AgentToolInvocation | undefined,
++				view: AgentToolTextContext | undefined;
++			const order: string[] = [];
++			const tool: AgentTool = {
++				name: "context_probe",
++				label: "Context",
++				description: "Native bounded context fixture",
++				parameters: Type.Object({}),
++				execute: async () => {
++					throw Error("Native invocation required");
++				},
++				withInvocation: (native) => ({
++					...tool,
++					execute: async () => {
++						invocation = native;
++						view = native.getTextContext!();
++						return { content: [{ type: "text", text: "read" }], details: {} };
++					},
++				}),
++			};
++			const agent = new Agent({
++				initialState: {
++					model,
++					tools: [tool],
++					messages: [{ role: "user", content: "raw older ancestry", timestamp: 1 }],
++				},
++				transformContext: async (messages) => {
++					order.push("transform");
++					return messages
++						.filter((m) => m.role !== "user" || m.content !== "raw older ancestry")
++						.map((m) => (m.role === "user" ? { ...m, content: "hook-approved text" } : m));
++				},
++				convertToLlm: (messages) => {
++					order.push("convert");
++					return (messages as Message[]).map((m) =>
++						mode === "convert-redaction" && m.role === "user" ? { ...m, content: "conversion-redacted" } : m,
++					);
++				},
++				onPayload: (payload) => {
++					order.push("payload");
++					if (mode === "payload-redaction") return { input: [{ role: "user", content: "payload-redacted" }] };
++					if (mode === "payload-mutation") (payload as { input: unknown }).input = [];
++					if (mode === "payload-toJSON")
++						return {
++							...(payload as object),
++							toJSON() {
++								serializedHooks++;
++								return { input: [] };
++							},
++						};
++					if (mode === "payload-getter")
++						return {
++							get input() {
++								serializedHooks++;
++								return [];
++							},
++						};
++					if (mode === "payload-null") return null;
++					return undefined;
++				},
++				streamFn: async (requestModel, context, options) => {
++					const payload = {
++						input: convertResponsesMessages(requestModel, context, new Set(["openai", "openai-codex"])),
++					};
++					const replacement = await options?.onPayload?.(payload, requestModel);
++					const serialized = JSON.stringify(replacement === undefined ? payload : replacement);
++					if (mode !== "missing-receipt") options?.onSerializedRequest?.(serialized);
++					const first = calls++ === 0;
++					const message: AssistantMessage = {
++						role: "assistant",
++						api,
++						provider: model.provider,
++						model: model.id,
++						timestamp: 1,
++						content: first
++							? [{ type: "toolCall", id: "native-context-probe", name: "context_probe", arguments: {} }]
++							: [{ type: "text", text: "done" }],
++						stopReason: first ? "toolUse" : "stop",
++						usage: {
++							input: 0,
++							output: 0,
++							cacheRead: 0,
++							cacheWrite: 0,
++							totalTokens: 0,
++							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++						},
++					};
++					const stream = new EventStream<AssistantMessageEvent, AssistantMessage>(
++						(e) => e.type === "done",
++						() => message,
++					);
++					queueMicrotask(() => stream.push({ type: "done", reason: first ? "toolUse" : "stop", message }));
++					return stream;
++				},
++			});
++			try {
++				await agent.prompt("raw current text");
++				expect(calls).toBe(2);
++				expect(invocation).toBeDefined();
++				if (mode === "approved")
++					expect(view).toEqual([{ role: "user", content: [{ type: "text", text: "hook-approved text" }] }]);
++				else expect(view).toBeUndefined();
++				expect(() => invocation!.getTextContext!()).toThrow(/expired/);
++				expect(order.slice(0, 3)).toEqual(["transform", "convert", "payload"]);
++				if (mode === "payload-toJSON" || mode === "payload-getter") expect(serializedHooks).toBe(2);
++			} finally {
++				agent.invalidateToolInvocations();
++				agent.abort();
++				await agent.waitForIdle();
++			}
++		});
++	}
++}
+diff --git a/packages/agent/test/tool-context.test.ts b/packages/agent/test/tool-context.test.ts
+new file mode 100644
+index 0000000..4e9084f
+--- /dev/null
++++ b/packages/agent/test/tool-context.test.ts
+@@ -0,0 +1,213 @@
++import { describe, expect, it } from "vitest";
++import { ToolContextSnapshot } from "../src/tool-context.ts";
++import type { AgentMessage, AgentToolTextContextCapture } from "../src/types.ts";
++
++const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 1 });
++const assistant = (...text: string[]): AgentMessage =>
++	({ role: "assistant", content: text.map((text) => ({ type: "text", text })) }) as AgentMessage;
++const wire = (role: string, ...text: string[]) => ({
++	role,
++	content: text.map((text) => ({ type: role === "user" ? "input_text" : "output_text", text })),
++});
++function confirm(capture: AgentToolTextContextCapture, payload: unknown) {
++	capture.confirm(JSON.stringify(payload));
++}
++function fixture(messages: AgentMessage[]) {
++	const snapshot = new ToolContextSnapshot(),
++		epoch = new AbortController();
++	const capture = snapshot.begin(messages, epoch.signal, "openai-responses");
++	return { snapshot, epoch, capture, read: () => snapshot.read(epoch.signal) };
++}
++
++describe("native payload-confirmed context consistency, not invocation authority", () => {
++	it("detaches only recent native user/assistant text and requires successful completion", () => {
++		const messages = [
++			user("old"),
++			user("first"),
++			assistant("a", "b"),
++			{
++				role: "custom",
++				get content() {
++					throw Error("must not read protected text");
++				},
++			} as unknown as AgentMessage,
++			user("last"),
++			assistant("later"),
++		];
++		const f = fixture(messages);
++		expect(f.read()).toBeUndefined();
++		confirm(f.capture!, {
++			input: [wire("user", "first"), wire("assistant", "a"), wire("assistant", "b"), wire("user", "last")],
++		});
++		expect(f.read()).toBeUndefined();
++		messages[1] = user("changed");
++		f.capture!.complete(true);
++		expect(f.read()).toEqual([
++			{ role: "user", content: [{ type: "text", text: "first" }] },
++			{
++				role: "assistant",
++				content: [
++					{ type: "text", text: "a" },
++					{ type: "text", text: "b" },
++				],
++			},
++			{ role: "user", content: [{ type: "text", text: "last" }] },
++		]);
++		expect(Object.isFrozen(f.read())).toBe(true);
++		expect(Object.isFrozen(f.read()![1].content[0])).toBe(true);
++	});
++	for (const payload of [
++		null,
++		{},
++		{ input: "original" },
++		{ input: [] },
++		{ input: [wire("user", "redacted")] },
++		{ input: [wire("assistant", "original")] },
++	])
++		it("refuses missing/changed/opaque finalized input without a raw-context fallback", () => {
++			const f = fixture([user("original")]);
++			confirm(f.capture!, payload);
++			f.capture!.complete(true);
++			expect(f.read()).toBeUndefined();
++		});
++	it("does not reuse one payload occurrence to approve two native turns", () => {
++		const f = fixture([user("same"), user("same")]);
++		confirm(f.capture!, { input: [wire("user", "same")] });
++		f.capture!.complete(true);
++		expect(f.read()).toBeUndefined();
++	});
++	it("failed completion and late payload callbacks cannot publish context", () => {
++		const f = fixture([user("x")]);
++		confirm(f.capture!, { input: [wire("user", "x")] });
++		f.capture!.complete(false);
++		f.capture!.complete(true);
++		confirm(f.capture!, { input: [wire("user", "x")] });
++		expect(f.read()).toBeUndefined();
++	});
++	it("a newer request, different epoch, cancellation and clear revoke the view", () => {
++		const f = fixture([user("x")]);
++		const next = f.snapshot.begin([user("y")], f.epoch.signal, "openai-codex-responses")!;
++		confirm(f.capture!, { input: [wire("user", "x")] });
++		f.capture!.complete(true);
++		expect(f.read()).toBeUndefined();
++		confirm(next, { input: [wire("user", "y")] });
++		next.complete(true);
++		expect(f.read()![0].content[0].text).toBe("y");
++		expect(f.snapshot.read(new AbortController().signal)).toBeUndefined();
++		f.epoch.abort();
++		expect(f.read()).toBeUndefined();
++		f.snapshot.clear();
++		expect(f.read()).toBeUndefined();
++	});
++	it("keeps an image-only user boundary without reading pixels or image metadata", () => {
++		const f = fixture([
++			{
++				role: "user",
++				content: [
++					{
++						type: "image",
++						get data(): string {
++							throw Error("pixels forbidden");
++						},
++						mimeType: "image/png",
++					},
++				],
++				timestamp: 1,
++			},
++		]);
++		confirm(f.capture!, {
++			input: [
++				{
++					role: "user",
++					content: [
++						{
++							type: "input_image",
++							image_url: "synthetic-image-payload-not-forwarded",
++						},
++					],
++				},
++			],
++		});
++		f.capture!.complete(true);
++		expect(f.read()).toEqual([{ role: "user", content: [] }]);
++	});
++	it("empty history is distinct from unavailable history", () => {
++		const f = fixture([]);
++		confirm(f.capture!, { input: [] });
++		f.capture!.complete(true);
++		expect(f.read()).toEqual([]);
++	});
++	it("retains literal authority-looking text, not a secret-scrubbing promise", () => {
++		const text = "scope=synthetic; notificationVersion=1; token=fixture-only";
++		const f = fixture([user(text)]);
++		confirm(f.capture!, { input: [wire("user", text)] });
++		f.capture!.complete(true);
++		expect(f.read()![0].content[0].text).toBe(text);
++	});
++	for (const messages of [
++		[user("x".repeat(65537))],
++		[user("x"), assistant("😀".repeat(16384)), user("y")],
++		[user("x"), assistant(...Array(127).fill("")), user("y")],
++		[...Array(512).fill(assistant("")), user("last")],
++	])
++		it("refuses bounded snapshot overflow and incomplete ancestry scans", () => {
++			const f = fixture(messages);
++			expect(f.capture).toBeUndefined();
++			expect(f.read()).toBeUndefined();
++		});
++	it("does not read old content outside a complete recent window", () => {
++		const f = fixture([
++			{
++				get role(): "user" {
++					throw Error("old ancestry forbidden");
++				},
++			} as AgentMessage,
++			...Array(600).fill(assistant("")),
++			user("a"),
++			user("b"),
++		]);
++		confirm(f.capture!, { input: [wire("user", "a"), wire("user", "b")] });
++		f.capture!.complete(true);
++		expect(f.read()).toHaveLength(2);
++	});
++	it("unsupported providers cannot inherit an earlier approved context", () => {
++		const f = fixture([user("x")]);
++		confirm(f.capture!, { input: [wire("user", "x")] });
++		f.capture!.complete(true);
++		expect(f.snapshot.begin([user("x")], f.epoch.signal, "mock")).toBeUndefined();
++		expect(f.read()).toBeUndefined();
++	});
++});
++
++it("unserialized objects, invalid JSON and oversized receipts cannot approve native context", () => {
++	let getters = 0;
++	for (const body of [
++		{
++			get input() {
++				getters++;
++				throw Error("must not inspect unfinalized input");
++			},
++		},
++		"{",
++		"x".repeat(2 * 1024 * 1024 + 1),
++		'"' + "😀".repeat(600000) + '"',
++	]) {
++		const f = fixture([user("x")]);
++		f.capture!.confirm(body);
++		f.capture!.complete(true);
++		expect(f.read()).toBeUndefined();
++	}
++	expect(getters).toBe(0);
++});
++it("a serialized cache delta cannot stand in for missing earlier text", () => {
++	const f = fixture([user("first"), user("last")]);
++	f.capture!.confirm(
++		JSON.stringify({
++			type: "response.create",
++			previous_response_id: "synthetic-native-cache-id",
++			input: [wire("user", "last")],
++		}),
++	);
++	f.capture!.complete(true);
++	expect(f.read()).toBeUndefined();
++});
 diff --git a/packages/agent/test/tool-invocation.test.ts b/packages/agent/test/tool-invocation.test.ts
 new file mode 100644
 index 0000000..1c53cff
@@ -2596,8 +3444,319 @@ index 379c3c7..c9df7de 100644
  	ssr: { resolve: { conditions: ["source"] } },
 -});
 +}));
+diff --git a/packages/ai/src/api/openai-codex-responses.ts b/packages/ai/src/api/openai-codex-responses.ts
+index d7e3749..760ccce 100644
+--- a/packages/ai/src/api/openai-codex-responses.ts
++++ b/packages/ai/src/api/openai-codex-responses.ts
+@@ -36,7 +36,7 @@ import { uuidv7 } from "../utils/uuid.ts";
+ import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
+ import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
+ import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
+-import { buildBaseOptions } from "./simple-options.ts";
++import { buildBaseOptions, observeSerializedRequest } from "./simple-options.ts";
+ 
+ // ============================================================================
+ // Configuration
+@@ -368,6 +368,7 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
+ 			// Compress the request body once for the SSE path. The Codex backend
+ 			// decodes Content-Encoding: zstd; the WebSocket transport above sends the
+ 			// uncompressed JSON frame, matching the official Codex client.
++			observeSerializedRequest(options, bodyJson);
+ 			const compressedBody = compressRequestBodyZstd(bodyJson);
+ 			if (compressedBody) {
+ 				sseHeaders.set("content-encoding", "zstd");
+@@ -1505,7 +1506,9 @@ async function processWebSocketStream(
+ 		}
+ 	}
+ 	try {
+-		socket.send(JSON.stringify({ type: "response.create", ...requestBody }));
++		const serializedRequest = JSON.stringify({ type: "response.create", ...requestBody });
++		observeSerializedRequest(options, serializedRequest);
++		socket.send(serializedRequest);
+ 		await processResponsesStream(
+ 			startWebSocketOutputOnFirstEvent(
+ 				mapCodexEvents(parseWebSocket(socket, options?.signal, idleTimeoutMs), output),
+diff --git a/packages/ai/src/api/openai-responses.ts b/packages/ai/src/api/openai-responses.ts
+index 6855891..f2b2210 100644
+--- a/packages/ai/src/api/openai-responses.ts
++++ b/packages/ai/src/api/openai-responses.ts
+@@ -26,7 +26,7 @@ import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
+ import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
+ import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
+ import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
+-import { buildBaseOptions } from "./simple-options.ts";
++import { buildBaseOptions, observeSerializedRequest } from "./simple-options.ts";
+ 
+ const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
+ // OpenAI Responses rejects max_output_tokens below 16: https://github.com/earendil-works/pi/issues/6265
+@@ -150,7 +150,15 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions>
+ 				context.tools,
+ 				compat.supportsOpenAIGrammarTools,
+ 			);
+-			const client = createClient(model, context, apiKey, options?.headers, options?.fetch, cacheSessionId);
++			const client = createClient(
++				model,
++				context,
++				apiKey,
++				options?.headers,
++				options?.fetch,
++				cacheSessionId,
++				options?.onSerializedRequest,
++			);
+ 			let params = buildParams(model, context, options, compat, grammarToolInputProperties);
+ 			const nextParams = await options?.onPayload?.(params, model);
+ 			if (nextParams !== undefined) {
+@@ -235,6 +243,7 @@ function createClient(
+ 	optionsHeaders?: ProviderHeaders,
+ 	fetch?: typeof globalThis.fetch,
+ 	sessionId?: string,
++	onSerializedRequest?: OpenAIResponsesOptions["onSerializedRequest"],
+ ) {
+ 	const compat = getCompat(model);
+ 	const headers: ProviderHeaders = { "User-Agent": getPiUserAgent(), ...model.headers };
+@@ -263,13 +272,24 @@ function createClient(
+ 		Object.assign(headers, optionsHeaders);
+ 	}
+ 
+-	return new OpenAI({
++	const client = new OpenAI({
+ 		apiKey,
+ 		baseURL: model.baseUrl,
+ 		dangerouslyAllowBrowser: true,
+ 		fetch,
+ 		defaultHeaders: headers,
+ 	});
++	if (onSerializedRequest) {
++		// Per-client public SDK dispatch method: keep its selected fetch, timeout,
++		// auth and request handling. Observe the JSON the SDK already serialized,
++		// never serialize payload hooks/getters a second time or replace a provider.
++		const dispatch = client.fetchWithTimeout.bind(client);
++		client.fetchWithTimeout = (...args: Parameters<OpenAI["fetchWithTimeout"]>) => {
++			observeSerializedRequest({ onSerializedRequest }, args[1]?.body);
++			return dispatch(...args);
++		};
++	}
++	return client;
+ }
+ 
+ function buildParams(
+diff --git a/packages/ai/src/api/simple-options.ts b/packages/ai/src/api/simple-options.ts
+index 2a30265..f39bf09 100644
+--- a/packages/ai/src/api/simple-options.ts
++++ b/packages/ai/src/api/simple-options.ts
+@@ -41,6 +41,7 @@ export function buildBaseOptions(
+ 		sessionId: options?.sessionId,
+ 		headers: options?.headers,
+ 		onPayload: options?.onPayload,
++		onSerializedRequest: options?.onSerializedRequest,
+ 		onResponse: options?.onResponse,
+ 		timeoutMs: options?.timeoutMs,
+ 		websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs,
+@@ -93,3 +94,18 @@ export function adjustMaxTokensForThinking(
+ 
+ 	return { maxTokens, thinkingBudget };
+ }
++
++/** Observe only serialized native request bytes; no data transformation or retry. */
++export function observeSerializedRequest(
++	options: Pick<StreamOptions, "onSerializedRequest"> | undefined,
++	body: unknown,
++): void {
++	try {
++		const observed: unknown = options?.onSerializedRequest?.(typeof body === "string" ? body : undefined);
++		// Do not await observer work or turn a rejected observer into an
++		// unhandled rejection that can interrupt the native request.
++		if (observed !== undefined) void Promise.resolve(observed).catch(() => {});
++	} catch {
++		/* An observation failure is not permission to change native transport. */
++	}
++}
+diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
+index fe318fe..1b94a47 100644
+--- a/packages/ai/src/types.ts
++++ b/packages/ai/src/types.ts
+@@ -143,6 +143,13 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
+ 	 * Return undefined to keep the payload unchanged.
+ 	 */
+ 	onPayload?: (payload: unknown, model: TModel) => unknown | undefined | Promise<unknown | undefined>;
++	/** Read-only native Responses request observer, after serialization and before
++	 * native HTTP/WebSocket dispatch. Undefined means bytes are unavailable.
++	 * No headers/auth are supplied. Observers are not awaited; synchronous
++	 * exceptions and asynchronous rejections are ignored, never retried.
++	 * WebSocket cache deltas remain deltas; this does not recreate cached input.
++	 */
++	onSerializedRequest?: (body: string | undefined) => void;
+ 	/**
+ 	 * Optional callback invoked after an HTTP response is received.
+ 	 */
+@@ -451,6 +458,11 @@ export interface AssistantMessage {
+ 
+ export interface ToolResultMessage<TDetails = any> {
+ 	role: "toolResult";
++	/** Additional native output, not another tool completion/usage event.
++	 * Issued through the native message channel, never copied from tool-return
++	 * fields or promoted from custom-message metadata. History is not live authority.
++	 */
++	notification?: true;
+ 	toolCallId: string;
+ 	toolName: string;
+ 	content: (TextContent | ImageContent)[]; // Supports text and images
+diff --git a/packages/ai/test/openai-codex-stream.test.ts b/packages/ai/test/openai-codex-stream.test.ts
+index 6729488..262a367 100644
+--- a/packages/ai/test/openai-codex-stream.test.ts
++++ b/packages/ai/test/openai-codex-stream.test.ts
+@@ -2001,6 +2001,7 @@ describe("openai-codex streaming", () => {
+ 	it("sends only response input deltas in websocket-cached mode", async () => {
+ 		const token = mockToken();
+ 		const sentBodies: unknown[] = [];
++		const observedBodies: unknown[] = [];
+ 
+ 		class MockWebSocket {
+ 			static OPEN = 1;
+@@ -2121,6 +2122,7 @@ describe("openai-codex streaming", () => {
+ 			apiKey: token,
+ 			sessionId: "session-1",
+ 			transport: "websocket-cached",
++			onSerializedRequest: (body) => observedBodies.push(JSON.parse(body!)),
+ 		}).result();
+ 
+ 		const secondContext: Context = {
+@@ -2143,9 +2145,11 @@ describe("openai-codex streaming", () => {
+ 			apiKey: token,
+ 			sessionId: "session-1",
+ 			transport: "websocket-cached",
++			onSerializedRequest: (body) => observedBodies.push(JSON.parse(body!)),
+ 		}).result();
+ 
+ 		expect(sentBodies).toHaveLength(2);
++		expect(observedBodies).toEqual(sentBodies);
+ 		const firstBody = sentBodies[0] as { input: unknown[]; previous_response_id?: string; store?: boolean };
+ 		const secondBody = sentBodies[1] as { input: unknown[]; previous_response_id?: string; store?: boolean };
+ 		expect(firstBody.store).toBe(false);
+diff --git a/packages/ai/test/serialized-request.test.ts b/packages/ai/test/serialized-request.test.ts
+new file mode 100644
+index 0000000..7b59f3a
+--- /dev/null
++++ b/packages/ai/test/serialized-request.test.ts
+@@ -0,0 +1,116 @@
++import { zstdDecompressSync } from "node:zlib";
++import { expect, it } from "vitest";
++import { closeOpenAICodexWebSocketSessions, streamSimple as codex } from "../src/api/openai-codex-responses.ts";
++import { streamSimple as responses } from "../src/api/openai-responses.ts";
++import type { Context, Model, SimpleStreamOptions } from "../src/types.ts";
++
++const events = [
++	{
++		type: "response.output_item.added",
++		item: { type: "message", id: "msg_fixture", role: "assistant", status: "in_progress", content: [] },
++	},
++	{ type: "response.content_part.added", part: { type: "output_text", text: "" } },
++	{ type: "response.output_text.delta", delta: "done" },
++	{
++		type: "response.output_item.done",
++		item: {
++			type: "message",
++			id: "msg_fixture",
++			role: "assistant",
++			status: "completed",
++			content: [{ type: "output_text", text: "done" }],
++		},
++	},
++	{
++		type: "response.completed",
++		response: {
++			id: "resp_fixture",
++			status: "completed",
++			usage: { input_tokens: 5, output_tokens: 1, total_tokens: 6, input_tokens_details: { cached_tokens: 0 } },
++		},
++	},
++]
++	.map((event) => `data: ${JSON.stringify(event)}\n\n`)
++	.join("");
++const token = `fixture.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "synthetic_account" } })).toString("base64url")}.fixture`;
++const context: Context = { messages: [{ role: "user", content: "original", timestamp: 1 }] };
++for (const route of ["responses", "codex"] as const)
++	for (const mode of ["unchanged", "toJSON", "getter", "observer-error", "observer-rejection", "observer-pending"]) {
++		it(`native ${route} observes serialized HTTP input exactly once without replacing transport: ${mode}`, async () => {
++			const model: Model<"openai-codex-responses" | "openai-responses"> = {
++				id: "gpt-5.4",
++				name: "Synthetic",
++				provider: route === "codex" ? "openai-codex" : "openai",
++				api: route === "codex" ? "openai-codex-responses" : "openai-responses",
++				baseUrl: route === "codex" ? "https://chatgpt.com/backend-api" : "https://api.openai.com/v1",
++				reasoning: false,
++				input: ["text"],
++				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++				contextWindow: 4096,
++				maxTokens: 128,
++			};
++			let requests = 0,
++				conversions = 0;
++			const observed: string[] = [],
++				sent: string[] = [];
++			const redacted = [{ role: "user", content: [{ type: "input_text", text: "redacted" }] }];
++			try {
++				const options: SimpleStreamOptions = {
++					apiKey: token,
++					transport: "sse",
++					maxRetries: 0,
++					signal: AbortSignal.timeout(5000),
++					onPayload: (payload) => {
++						if (mode === "toJSON")
++							return {
++								...(payload as object),
++								toJSON() {
++									conversions++;
++									return { ...(payload as object), input: redacted };
++								},
++							};
++						if (mode === "getter")
++							return {
++								...(payload as object),
++								get input() {
++									conversions++;
++									return redacted;
++								},
++							};
++						return undefined;
++					},
++					onSerializedRequest: (body) => {
++						expect(typeof body).toBe("string");
++						observed.push(body!);
++						if (mode === "observer-error") throw Error("Read-only observation failure");
++						if (mode === "observer-rejection") return Promise.reject(Error("Read-only asynchronous failure"));
++						if (mode === "observer-pending") return new Promise<void>(() => {});
++					},
++					fetch: async (_url, init) => {
++						requests++;
++						const body =
++							typeof init?.body === "string"
++								? init.body
++								: Buffer.from(zstdDecompressSync(init!.body as Uint8Array)).toString("utf8");
++						sent.push(body);
++						return new Response(events, { status: 200, headers: { "content-type": "text/event-stream" } });
++					},
++				};
++				const output =
++					route === "codex"
++						? codex({ ...model, api: "openai-codex-responses" }, context, options)
++						: responses({ ...model, api: "openai-responses" }, context, options);
++				const result = await output.result();
++				expect(result.stopReason).toBe("stop");
++				expect(requests).toBe(1);
++				expect(observed).toEqual(sent);
++				expect(conversions).toBe(mode === "toJSON" || mode === "getter" ? 1 : 0);
++				expect(observed[0]).not.toContain(token);
++				expect(JSON.parse(observed[0]).input[0].content[0].text).toBe(
++					mode === "toJSON" || mode === "getter" ? "redacted" : "original",
++				);
++			} finally {
++				closeOpenAICodexWebSocketSessions();
++			}
++		});
++	}
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index ac2bd4b..64db2e5 100644
+index ac2bd4b..c380ff9 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -22,6 +22,8 @@ import type {
@@ -2609,32 +3768,69 @@ index ac2bd4b..64db2e5 100644
  	PrepareNextTurnContext,
  	ThinkingLevel,
  } from "@earendil-works/pi-agent-core";
-@@ -329,6 +331,14 @@ export class AgentSession {
+@@ -33,6 +35,7 @@ import type {
+ 	Model,
+ 	ProviderHeaders,
+ 	TextContent,
++	ToolResultMessage,
+ 	Usage,
+ } from "@earendil-works/pi-ai/compat";
+ import {
+@@ -329,6 +332,14 @@ export class AgentSession {
  	private _pendingNextTurnMessages: CustomMessage[] = [];
  	/** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
  	private _pendingCustomMessages: CustomMessage[] = [];
 +	private _pendingProtectedMessages: {
-+		message: CustomMessage;
++		message: CustomMessage | ToolResultMessage;
 +		signal: AbortSignal;
 +		bytes: number;
 +		failed?: boolean;
 +	}[] = [];
-+	private _protectedForContext: { message: CustomMessage; signal: AbortSignal }[] = [];
++	private _protectedForContext: { message: CustomMessage | ToolResultMessage; signal: AbortSignal }[] = [];
 +	private _protectedContextBytes = 0;
  
  	// Compaction state
  	private _compactionAbortController: AbortController | undefined = undefined;
-@@ -401,6 +411,9 @@ export class AgentSession {
+@@ -401,6 +412,38 @@ export class AgentSession {
  		// (session persistence, extensions, auto-compaction, retry logic)
  		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
  		this._installAgentToolHooks();
-+		if (this.agent.publishToolEvidence) this.agent.invalidateToolInvocations();
++		if (this.agent.publishToolEvidence || this.agent.notifyToolOutput) this.agent.invalidateToolInvocations();
 +		this.agent.publishToolEvidence = (evidence, scope, contextSignal) =>
 +			this._publishToolEvidence(evidence, scope, contextSignal);
++		this.agent.notifyToolOutput = async (text, origin, scope, contextSignal) => {
++			scope.signal.throwIfAborted();
++			contextSignal.throwIfAborted();
++			if (
++				typeof text !== "string" ||
++				Buffer.byteLength(text) > 65536 ||
++				typeof origin.toolName !== "string" ||
++				!origin.toolName ||
++				origin.toolName.length > 256 ||
++				typeof origin.toolCallId !== "string" ||
++				!origin.toolCallId ||
++				origin.toolCallId.length > 2048
++			)
++				throw new Error("Invalid native notification");
++			if (!text.trim()) return true;
++			// No await between active-run admission and the synchronous journal/queue write.
++			// False is a confirmed no-effect refusal, not permission to start an idle run.
++			if (!this.isStreaming) return false;
++			await this._publishToolEvidence(
++				{
++					content: [{ type: "text", text }],
++					details: { notificationVersion: 1, toolName: origin.toolName, toolCallId: origin.toolCallId },
++				},
++				scope,
++				contextSignal,
++				origin,
++			);
++			return true;
++		};
  		this._installAgentNextTurnRefresh();
  
  		this._buildRuntime({
-@@ -568,11 +581,20 @@ export class AgentSession {
+@@ -568,11 +611,20 @@ export class AgentSession {
  			const context = await this._compactBeforeNextAssistantResponse(turn.context);
  			const previousSnapshot = await previousPrepareNextTurnWithContext?.({ ...turn, context }, signal);
  			const nextContext = previousSnapshot?.context ?? context;
@@ -2655,7 +3851,7 @@ index ac2bd4b..64db2e5 100644
  					systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
  					tools: this.agent.state.tools.slice(),
  				},
-@@ -879,6 +901,7 @@ export class AgentSession {
+@@ -879,6 +931,7 @@ export class AgentSession {
  	 * Call this when completely done with the session.
  	 */
  	dispose(): void {
@@ -2663,10 +3859,16 @@ index ac2bd4b..64db2e5 100644
  		try {
  			this.abortRetry();
  			this.abortCompaction();
-@@ -1513,14 +1536,74 @@ export class AgentSession {
+@@ -1509,18 +1562,89 @@ export class AgentSession {
+ 			// describe messages the session tree does not contain.
+ 			this._pendingCustomMessages.push(appMessage);
+ 		} else {
+-			this._appendCustomMessage(appMessage);
++			this._appendQueuedMessage(appMessage);
  		}
  	}
  
+-	private _appendCustomMessage(appMessage: CustomMessage): void {
 +	/** Native protected scope service: synchronous Pi journal receipt, then safe context delivery.
 +	 * Never calls a provider or starts another Agent turn. A failed write retains native ownership.
 +	 */
@@ -2674,6 +3876,7 @@ index ac2bd4b..64db2e5 100644
 +		evidence: AgentToolEvidence,
 +		scope: AgentToolResourceScope,
 +		contextSignal: AbortSignal,
++		notification?: { toolName: string; toolCallId: string },
 +	): Promise<void> {
 +		scope.signal.throwIfAborted();
 +		contextSignal.throwIfAborted();
@@ -2701,19 +3904,27 @@ index ac2bd4b..64db2e5 100644
 +		const journalId = this.sessionManager.appendCustomEntry("code-mode-protected-evidence", {
 +			scopeId: scope.id,
 +			...copy,
++			...(notification ? { notification: { ...notification } } : {}),
 +		});
-+		const message: CustomMessage = {
-+			role: "custom",
-+			customType: "code-mode-evidence",
++		const common = {
 +			content: copy.content,
 +			details: { ...copy.details, journalId, scopeId: scope.id },
-+			display: true,
 +			timestamp: Date.now(),
 +		};
++		const message: CustomMessage | ToolResultMessage = notification
++			? {
++					...common,
++					role: "toolResult",
++					notification: true,
++					toolName: notification.toolName,
++					toolCallId: notification.toolCallId,
++					isError: false,
++				}
++			: { ...common, role: "custom", customType: "code-mode-evidence", display: true };
 +		if (this.isStreaming) this._pendingProtectedMessages.push({ message, signal: contextSignal, bytes });
 +		else {
 +			try {
-+				this._appendCustomMessage(message);
++				this._appendQueuedMessage(message);
 +			} catch {
 +				this.agent.publishToolEvidence = undefined;
 +				this.agent.invalidateToolInvocations();
@@ -2725,21 +3936,28 @@ index ac2bd4b..64db2e5 100644
 +		committed = true;
 +		release();
 +	}
- 	private _appendCustomMessage(appMessage: CustomMessage): void {
--		this.agent.state.messages.push(appMessage);
-+		// Persist first: a failed journal/message write must not inject an image
-+		// into the continuing model context that has no accepted session receipt.
- 		this.sessionManager.appendCustomMessageEntry(
- 			appMessage.customType,
- 			appMessage.content,
- 			appMessage.display,
- 			appMessage.details,
- 		);
-+		this.agent.state.messages.push(appMessage);
++	private _appendQueuedMessage(appMessage: CustomMessage | ToolResultMessage): void {
++		// Persist first; these native additional results never go through a
++		// custom-message metadata promotion or another tool-completion event.
++		if (appMessage.role === "toolResult") this.sessionManager.appendMessage(appMessage);
++		else
++			this.sessionManager.appendCustomMessageEntry(
++				appMessage.customType,
++				appMessage.content,
++				appMessage.display,
++				appMessage.details,
++			);
+ 		this.agent.state.messages.push(appMessage);
+-		this.sessionManager.appendCustomMessageEntry(
+-			appMessage.customType,
+-			appMessage.content,
+-			appMessage.display,
+-			appMessage.details,
+-		);
  		this._emit({ type: "message_start", message: appMessage });
  		this._emit({ type: "message_end", message: appMessage });
  	}
-@@ -1530,13 +1613,32 @@ export class AgentSession {
+@@ -1530,12 +1654,31 @@ export class AgentSession {
  	 * Called once the current turn's tool results are in agent state and session history.
  	 */
  	private _flushPendingCustomMessages(): void {
@@ -2749,8 +3967,9 @@ index ac2bd4b..64db2e5 100644
  		const pending = this._pendingCustomMessages;
  		this._pendingCustomMessages = [];
  		for (const appMessage of pending) {
- 			this._appendCustomMessage(appMessage);
- 		}
+-			this._appendCustomMessage(appMessage);
++			this._appendQueuedMessage(appMessage);
++		}
 +		while (this._pendingProtectedMessages.length) {
 +			const entry = this._pendingProtectedMessages[0];
 +			if (entry.failed) throw new Error("Protected evidence delivery remains unconfirmed");
@@ -2759,7 +3978,7 @@ index ac2bd4b..64db2e5 100644
 +				continue;
 +			} // preserve journal, quarantine context
 +			try {
-+				this._appendCustomMessage(entry.message);
++				this._appendQueuedMessage(entry.message);
 +			} catch {
 +				entry.failed = true; // no implicit retry of ambiguous persistence effects
 +				this.agent.publishToolEvidence = undefined;
@@ -2769,11 +3988,10 @@ index ac2bd4b..64db2e5 100644
 +			this._pendingProtectedMessages.shift();
 +			this._protectedForContext.push({ message: entry.message, signal: entry.signal });
 +			this._protectedContextBytes += entry.bytes;
-+		}
+ 		}
  	}
  
- 	/**
-@@ -2637,6 +2739,7 @@ export class AgentSession {
+@@ -2637,6 +2780,7 @@ export class AgentSession {
  					this._extensionShutdownHandler?.();
  				},
  				getContextUsage: () => this.getContextUsage(),
@@ -2781,7 +3999,7 @@ index ac2bd4b..64db2e5 100644
  				compact: (options) => {
  					void (async () => {
  						try {
-@@ -2816,29 +2919,34 @@ export class AgentSession {
+@@ -2816,29 +2960,34 @@ export class AgentSession {
  	}
  
  	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
@@ -2961,6 +4179,63 @@ index 9084a1d..8cc7472 100644
  		execute: async (toolCallId, params, signal, onUpdate) => {
  			const activeBefore = runner.getActiveTools();
  			const result = await execute(toolCallId, params, signal, onUpdate);
+diff --git a/packages/coding-agent/src/core/messages.ts b/packages/coding-agent/src/core/messages.ts
+index 1e30913..7573d84 100644
+--- a/packages/coding-agent/src/core/messages.ts
++++ b/packages/coding-agent/src/core/messages.ts
+@@ -146,6 +146,9 @@ export function createCustomMessage(
+  * - Custom extensions and tools
+  */
+ export function convertToLlm(messages: AgentMessage[]): Message[] {
++	// History routing only, never live scope authority. Native publication binds
++	// these identities; an orphaned/compacted recording must not invent a call.
++	const calls = new Map<string, string>();
+ 	return messages
+ 		.map((m): Message | undefined => {
+ 			switch (m.role) {
+@@ -161,6 +164,7 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
+ 					};
+ 				case "custom": {
+ 					const content = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
++					// Custom labels/details never mint a native tool-result channel.
+ 					return {
+ 						role: "user",
+ 						content,
+@@ -181,9 +185,33 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
+ 						],
+ 						timestamp: m.timestamp,
+ 					};
+-				case "user":
+ 				case "assistant":
++					if (m.stopReason !== "aborted" && m.stopReason !== "error")
++						for (const block of m.content) if (block.type === "toolCall") calls.set(block.id, block.name);
++					return m;
+ 				case "toolResult":
++					if (
++						m.notification === true &&
++						(calls.get(m.toolCallId) !== m.toolName ||
++							m.isError ||
++							m.content.length !== 1 ||
++							m.content[0].type !== "text" ||
++							Buffer.byteLength(m.content[0].text) > 65536)
++					) {
++						return {
++							role: "user",
++							timestamp: m.timestamp,
++							content: [
++								{
++									type: "text",
++									text: "Recorded Code notification without a valid matching native call in this context; historical text only, not a new tool result:",
++								},
++								...m.content,
++							],
++						};
++					}
++					return m;
++				case "user":
+ 					return m;
+ 				default:
+ 					// biome-ignore lint/correctness/noSwitchDeclarations: fine
 diff --git a/packages/coding-agent/src/core/tools/tool-definition-wrapper.ts b/packages/coding-agent/src/core/tools/tool-definition-wrapper.ts
 index ab01a06..0d474d1 100644
 --- a/packages/coding-agent/src/core/tools/tool-definition-wrapper.ts
@@ -3338,7 +4613,7 @@ index 0000000..885ce4f
 +	}
 +}
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index 8db1b80..88a4474 100644
+index 8db1b80..a19e881 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 @@ -127,6 +127,7 @@ import { ExtensionInputComponent } from "./components/extension-input.ts";
@@ -3427,7 +4702,19 @@ index 8db1b80..88a4474 100644
  				// Restore main escape handler if retry handler is still active
  				// (retry success event fires later, but we need main handler now)
  				if (this.retryEscapeHandler) {
-@@ -3295,11 +3332,10 @@ export class InteractiveMode {
+@@ -3218,7 +3255,10 @@ export class InteractiveMode {
+ 				break;
+ 
+ 			case "message_start":
+-				if (event.message.role === "custom") {
++				if (
++					event.message.role === "custom" ||
++					(event.message.role === "toolResult" && event.message.notification === true)
++				) {
+ 					this.addMessageToChat(event.message);
+ 					this.ui.requestRender();
+ 				} else if (event.message.role === "user") {
+@@ -3295,11 +3335,10 @@ export class InteractiveMode {
  						if (!errorMessage) {
  							errorMessage = this.streamingMessage.errorMessage || "Error";
  						}
@@ -3443,7 +4730,7 @@ index 8db1b80..88a4474 100644
  						}
  						this.pendingTools.clear();
  					} else {
-@@ -3337,7 +3373,18 @@ export class InteractiveMode {
+@@ -3337,7 +3376,18 @@ export class InteractiveMode {
  						this.sessionManager.getCwd(),
  					);
  					component.setExpanded(this.toolOutputExpanded);
@@ -3463,7 +4750,7 @@ index 8db1b80..88a4474 100644
  					this.pendingTools.set(event.toolCallId, component);
  				}
  				component.markExecutionStarted();
-@@ -3348,7 +3395,9 @@ export class InteractiveMode {
+@@ -3348,7 +3398,9 @@ export class InteractiveMode {
  			case "tool_execution_update": {
  				const component = this.pendingTools.get(event.toolCallId);
  				if (component) {
@@ -3474,7 +4761,7 @@ index 8db1b80..88a4474 100644
  					this.ui.requestRender();
  				}
  				break;
-@@ -3357,7 +3406,9 @@ export class InteractiveMode {
+@@ -3357,7 +3409,9 @@ export class InteractiveMode {
  			case "tool_execution_end": {
  				const component = this.pendingTools.get(event.toolCallId);
  				if (component) {
@@ -3485,7 +4772,7 @@ index 8db1b80..88a4474 100644
  					this.pendingTools.delete(event.toolCallId);
  					this.ui.requestRender();
  				}
-@@ -3374,7 +3425,7 @@ export class InteractiveMode {
+@@ -3374,7 +3428,7 @@ export class InteractiveMode {
  					this.streamingComponent = undefined;
  					this.streamingMessage = undefined;
  				}
@@ -3494,7 +4781,7 @@ index 8db1b80..88a4474 100644
  
  				this.ui.requestRender();
  				break;
-@@ -3602,7 +3653,9 @@ export class InteractiveMode {
+@@ -3602,7 +3656,9 @@ export class InteractiveMode {
  						this.outputPad,
  					);
  					component.setExpanded(this.toolOutputExpanded);
@@ -3505,7 +4792,35 @@ index 8db1b80..88a4474 100644
  				}
  				break;
  			}
-@@ -3688,6 +3741,7 @@ export class InteractiveMode {
+@@ -3674,7 +3730,26 @@ export class InteractiveMode {
+ 				break;
+ 			}
+ 			case "toolResult": {
+-				// Tool results are rendered inline with tool calls, handled separately
++				if (message.notification === true) {
++					// Display additional native output separately. Never overwrite the
++					// original exec result or emit another completion/accounting event.
++					const component = new CustomMessageComponent(
++						{
++							role: "custom",
++							customType: `code-mode-notification ${JSON.stringify({ tool: message.toolName, call: message.toolCallId })}`,
++							content: message.content,
++							details: message.details,
++							display: true,
++							timestamp: message.timestamp,
++						},
++						undefined,
++						this.getMarkdownThemeWithSettings(),
++						this.outputPad,
++					);
++					component.setExpanded(this.toolOutputExpanded);
++					this.chatContainer.addChild(component);
++				}
++				// Ordinary tool results remain inline with their original tool calls.
+ 				break;
+ 			}
+ 			default: {
+@@ -3688,6 +3763,7 @@ export class InteractiveMode {
  		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
  	): void {
  		this.pendingTools.clear();
@@ -3513,7 +4828,18 @@ index 8db1b80..88a4474 100644
  		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
  		// Cache-miss notices are not persisted; re-derive them from the full entry
  		// list and re-inject them after the assistant messages that paid for them.
-@@ -4609,7 +4663,7 @@ export class InteractiveMode {
+@@ -3755,6 +3831,10 @@ export class InteractiveMode {
+ 					if (miss) this.addCacheMissNotice(miss);
+ 				}
+ 			} else if (message.role === "toolResult") {
++				if (message.notification === true) {
++					this.addMessageToChat(message, options);
++					continue;
++				}
+ 				// Match tool results to pending tool components
+ 				const component = renderedPendingTools.get(message.toolCallId);
+ 				if (component) {
+@@ -4609,7 +4689,7 @@ export class InteractiveMode {
  					onShowImagesChange: (enabled) => {
  						this.settingsManager.setShowImages(enabled);
  						for (const child of this.chatContainer.children) {
@@ -3522,7 +4848,7 @@ index 8db1b80..88a4474 100644
  								child.setShowImages(enabled);
  							}
  						}
-@@ -4617,7 +4671,7 @@ export class InteractiveMode {
+@@ -4617,7 +4697,7 @@ export class InteractiveMode {
  					onImageWidthCellsChange: (width) => {
  						this.settingsManager.setImageWidthCells(width);
  						for (const child of this.chatContainer.children) {
@@ -3599,6 +4925,113 @@ index 0000000..16e5eb3
 +		this.updatedStarts = new WeakSet();
 +	}
 +}
+diff --git a/packages/coding-agent/test/suite/tool-context.test.ts b/packages/coding-agent/test/suite/tool-context.test.ts
+new file mode 100644
+index 0000000..950e886
+--- /dev/null
++++ b/packages/coding-agent/test/suite/tool-context.test.ts
+@@ -0,0 +1,101 @@
++import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
++import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
++import { Type } from "typebox";
++import { expect, it } from "vitest";
++import { createHarness } from "./harness.ts";
++
++// Native compaction entries/navigation and extension hooks, with a real Responses
++// serializer and synthetic stream. No model service or installed-artifact claim.
++for (const mode of ["compaction", "context-hook", "payload-hook"])
++	it(`native text context after ${mode}`, async () => {
++		let captured: unknown;
++		const h = await createHarness({
++			tools: [],
++			extensionFactories: [
++				(pi) => {
++					pi.registerTool({
++						name: "context_probe",
++						label: "Context",
++						description: "Native context fixture",
++						parameters: Type.Object({}),
++						execute: async (_id, _args, _signal, _update, ctx) => {
++							captured = ctx.tools!.getTextContext!();
++							return { content: [{ type: "text", text: "read" }], details: {} };
++						},
++					});
++					pi.on("context", (event) =>
++						mode === "context-hook"
++							? {
++									messages: event.messages.map((m) =>
++										m.role === "user"
++											? {
++													...m,
++													content: `hook ${
++														typeof m.content === "string"
++															? m.content
++															: m.content
++																	.filter((b) => b.type === "text")
++																	.map((b) => b.text)
++																	.join("\n")
++													}`,
++												}
++											: m,
++									),
++								}
++							: undefined,
++					);
++				},
++			],
++		});
++		const model = h.session.agent.state.model;
++		const stream = h.session.agent.streamFunction;
++		const onPayload = h.session.agent.onPayload;
++		const fetch = globalThis.fetch;
++		let externalAttempts = 0;
++		globalThis.fetch = async () => {
++			externalAttempts++;
++			throw Error("Unexpected network in native context fixture");
++		};
++		try {
++			h.sessionManager.appendMessage({ role: "user", content: "discarded raw ancestry", timestamp: 1 });
++			h.sessionManager.appendMessage(fauxAssistantMessage("discarded answer"));
++			const kept = h.sessionManager.appendMessage({ role: "user", content: "kept", timestamp: 2 });
++			const compacted = h.sessionManager.appendCompaction("native summary remains model-only", kept, 20);
++			h.sessionManager.appendMessage(fauxAssistantMessage("other branch commentary"));
++			expect(await h.session.navigateTree(compacted, { summarize: false })).toMatchObject({ cancelled: false });
++			expect(JSON.stringify(h.sessionManager.getBranch())).toContain("discarded raw ancestry");
++			expect(JSON.stringify(h.session.messages)).not.toContain("discarded raw ancestry");
++			h.session.agent.state.model = { ...model, api: "openai-responses" };
++			h.session.agent.onPayload = async (payload, requestModel) => {
++				const replacement = await onPayload?.(payload, requestModel);
++				return mode === "payload-hook" ? { input: [{ role: "user", content: "redacted" }] } : replacement;
++			};
++			h.session.agent.streamFunction = async (requestModel, context, options) => {
++				const payload = {
++					input: convertResponsesMessages(requestModel, context, new Set(["openai", "openai-codex"])),
++				};
++				const replacement = await options?.onPayload?.(payload, requestModel);
++				options?.onSerializedRequest?.(JSON.stringify(replacement === undefined ? payload : replacement));
++				return stream(model, context, { ...options, onPayload: undefined, onSerializedRequest: undefined });
++			};
++			h.setResponses([
++				fauxAssistantMessage([fauxToolCall("context_probe", {})], { stopReason: "toolUse" }),
++				fauxAssistantMessage("done"),
++			]);
++			await h.session.prompt("latest");
++			if (mode === "payload-hook") expect(captured).toBeUndefined();
++			else
++				expect(captured).toEqual([
++					{ role: "user", content: [{ type: "text", text: mode === "context-hook" ? "hook kept" : "kept" }] },
++					{ role: "user", content: [{ type: "text", text: mode === "context-hook" ? "hook latest" : "latest" }] },
++				]);
++			expect(externalAttempts).toBe(0);
++			expect(h.settingsManager.getCompactionSettings().enabled).toBe(true);
++		} finally {
++			globalThis.fetch = fetch;
++			h.session.agent.onPayload = onPayload;
++			h.session.agent.streamFunction = stream;
++			h.session.agent.state.model = model;
++			h.cleanup();
++		}
++	});
 diff --git a/packages/coding-agent/test/suite/tool-invocation.test.ts b/packages/coding-agent/test/suite/tool-invocation.test.ts
 new file mode 100644
 index 0000000..f1af827
@@ -4619,6 +6052,309 @@ index 0000000..f1af827
 +		expect(f.frame()).toContain("error");
 +		expect(f.view.pendingTools.size).toBe(0);
 +	});
++});
+diff --git a/packages/coding-agent/test/suite/tool-notifications.test.ts b/packages/coding-agent/test/suite/tool-notifications.test.ts
+new file mode 100644
+index 0000000..c29edd4
+--- /dev/null
++++ b/packages/coding-agent/test/suite/tool-notifications.test.ts
+@@ -0,0 +1,297 @@
++import type { AgentToolScope } from "@earendil-works/pi-agent-core";
++import type { Message } from "@earendil-works/pi-ai";
++import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
++import { Container, Text } from "@earendil-works/pi-tui";
++import { Type } from "typebox";
++import { describe, expect, it } from "vitest";
++import { convertToLlm, createCustomMessage } from "../../src/core/messages.ts";
++import { InteractiveMode } from "../../src/modes/interactive/interactive-mode.ts";
++import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
++import { createHarness } from "./harness.ts";
++
++const result = { content: [{ type: "text" as const, text: "initial result" }], details: {} };
++
++describe("native active-turn notifications", () => {
++	it("journals first, delivers after the original result and preserves the originating call across waits", async () => {
++		let scope!: AgentToolScope;
++		let origin = "";
++		const converted: Message[][] = [];
++		const h = await createHarness({
++			tools: [],
++			extensionFactories: [
++				(pi) => {
++					pi.registerTool({
++						name: "exec",
++						label: "Exec",
++						description: "synthetic native notification owner",
++						parameters: Type.Object({}),
++						execute: async (id, _args, _signal, _update, ctx) => {
++							origin = id;
++							scope = ctx.tools!.openScope({ onResult: async () => {} });
++							expect(await scope.notify!("first notification")).toBe(true);
++							return result;
++						},
++					});
++					pi.registerTool({
++						name: "wait",
++						label: "Wait",
++						description: "synthetic collector",
++						parameters: Type.Object({}),
++						execute: async (_id, _args, _signal, _update, ctx) => {
++							expect(ctx.tools!.adoptScope(scope)).toBe(scope);
++							expect(await scope.notify!("second notification")).toBe(true);
++							return result;
++						},
++					});
++				},
++			],
++		});
++		const original = h.session.agent.convertToLlm;
++		h.session.agent.convertToLlm = async (messages) => {
++			const value = await original(messages);
++			converted.push(structuredClone(value));
++			return value;
++		};
++		try {
++			h.setResponses([
++				fauxAssistantMessage([fauxToolCall("exec", {})], { stopReason: "toolUse" }),
++				fauxAssistantMessage([fauxToolCall("wait", {})], { stopReason: "toolUse" }),
++				fauxAssistantMessage("done"),
++			]);
++			await h.session.prompt("synthetic notification fixture");
++			const messages = h.session.messages;
++			const notes = messages.filter((m) => m.role === "toolResult" && m.notification === true);
++			expect(notes).toHaveLength(2);
++			const ends = h.eventsOfType("tool_execution_end");
++			expect(ends.map((e) => e.toolName)).toEqual(["exec", "wait"]);
++			expect(h.session.getSessionStats()).toMatchObject({ toolCalls: 2, toolResults: 4 });
++			expect(notes.every((note) => note.role === "toolResult" && note.usage === undefined)).toBe(true);
++			const firstResult = messages.findIndex((m) => m.role === "toolResult" && m.toolCallId === origin);
++			expect(messages.indexOf(notes[0])).toBeGreaterThan(firstResult);
++			for (const note of notes) {
++				expect(note.role === "toolResult" && note.details).toMatchObject({
++					notificationVersion: 1,
++					toolCallId: origin,
++					toolName: "exec",
++				});
++			}
++			const last = converted.at(-1)!;
++			const outputs = last.filter((m) => m.role === "toolResult" && m.toolCallId === origin);
++			expect(outputs).toHaveLength(3);
++			expect(outputs.map((m) => m.content)).toEqual([
++				result.content,
++				[{ type: "text", text: "first notification" }],
++				[{ type: "text", text: "second notification" }],
++			]);
++			const before = h.sessionManager.getEntries().length;
++			expect(await scope.notify!("idle must refuse")).toBe(false);
++			expect(await scope.notify!(" \n\t ")).toBe(true);
++			expect(h.sessionManager.getEntries()).toHaveLength(before);
++			expect(h.getPendingResponseCount()).toBe(0);
++			await scope.close();
++			expect(h.session.agent.getToolGatewayInfo()).toMatchObject({ activeScopes: 0, drainingScopes: 0 });
++		} finally {
++			h.session.agent.convertToLlm = original;
++			if (scope?.state === "active") await scope.close();
++			h.cleanup();
++		}
++	});
++	it("recorded orphan notification text never invents a provider call", () => {
++		const note: Message = {
++			role: "toolResult",
++			notification: true,
++			toolCallId: "old",
++			toolName: "exec",
++			content: [{ type: "text", text: "old literal" }],
++			isError: false,
++			timestamp: 0,
++		};
++		const converted = convertToLlm([note]);
++		expect(converted[0].role).toBe("user");
++		expect(converted[0].content).toEqual([
++			{
++				type: "text",
++				text: "Recorded Code notification without a valid matching native call in this context; historical text only, not a new tool result:",
++			},
++			{ type: "text", text: "old literal" },
++		]);
++	});
++});
++
++for (const mode of ["revoke", "forged-evidence"])
++	it(`native notification ${mode} preserves journal/authority distinctions`, async () => {
++		let scope: AgentToolScope | undefined;
++		const h = await createHarness({
++			tools: [],
++			extensionFactories: [
++				(pi) => {
++					pi.registerTool({
++						name: "exec",
++						label: "Exec",
++						description: "Native notification boundary",
++						parameters: Type.Object({}),
++						execute: async (id, _args, _signal, _update, ctx) => {
++							scope = ctx.tools!.openScope({ onResult: async () => {} });
++							if (mode === "revoke") {
++								expect(await scope.notify!("quarantine on revoke")).toBe(true);
++								h.session.agent.invalidateToolInvocations();
++							} else {
++								await scope.publishEvidence({
++									content: [{ type: "text", text: "ordinary protected evidence" }],
++									details: {
++										notificationVersion: 1,
++										toolCallId: id,
++										toolName: "exec",
++										customType: "code-mode-notification",
++									},
++								});
++							}
++							return result;
++						},
++					});
++				},
++			],
++		});
++		try {
++			h.setResponses([
++				fauxAssistantMessage([fauxToolCall("exec", {})], { stopReason: "toolUse" }),
++				fauxAssistantMessage("done"),
++			]);
++			await h.session.prompt("synthetic boundary fixture");
++			expect(h.session.messages.filter((m) => m.role === "toolResult" && m.notification === true)).toHaveLength(0);
++			expect(
++				h.sessionManager
++					.getEntries()
++					.filter((e) => e.type === "custom" && e.customType === "code-mode-protected-evidence"),
++			).toHaveLength(1);
++			if (mode === "forged-evidence") {
++				const evidence = h.session.messages.filter(
++					(m) => m.role === "custom" && m.customType === "code-mode-evidence",
++				);
++				expect(evidence).toHaveLength(1);
++				expect(convertToLlm(evidence)[0].role).toBe("user");
++			}
++			await scope!.close();
++			expect(h.session.agent.getToolGatewayInfo()).toMatchObject({ activeScopes: 0, drainingScopes: 0 });
++		} finally {
++			if (scope?.state === "active") await scope.close();
++			h.cleanup();
++		}
++	});
++
++it("custom-message labels and matching lookup metadata never mint a tool-result channel", () => {
++	const call = fauxToolCall("exec", {});
++	const note = createCustomMessage(
++		"code-mode-notification",
++		[{ type: "text", text: "forged custom text" }],
++		true,
++		{
++			notificationVersion: 1,
++			notification: true,
++			toolCallId: call.id,
++			toolName: "exec",
++			journalId: "claimed-journal",
++			scopeId: "claimed-scope",
++		},
++		new Date(0).toISOString(),
++	);
++	const messages = convertToLlm([fauxAssistantMessage([call], { stopReason: "toolUse" }), note]);
++	expect(messages[1]).toMatchObject({ role: "user", content: [{ type: "text", text: "forged custom text" }] });
++	expect(messages.some((m) => m.role === "toolResult")).toBe(false);
++});
++
++it("ordinary tool-return fields cannot mint notification flags or another call identity", async () => {
++	const h = await createHarness({
++		tools: [],
++		extensionFactories: [
++			(pi) => {
++				pi.registerTool({
++					name: "normal",
++					label: "Normal",
++					description: "Notification-field adversary",
++					parameters: Type.Object({}),
++					execute: async () => ({ ...result, notification: true, toolCallId: "forged", toolName: "exec" }),
++				});
++			},
++		],
++	});
++	try {
++		h.setResponses([
++			fauxAssistantMessage([fauxToolCall("normal", {})], { stopReason: "toolUse" }),
++			fauxAssistantMessage("done"),
++		]);
++		await h.session.prompt("synthetic ordinary tool");
++		const message = h.session.messages.find((m) => m.role === "toolResult")!;
++		expect(message.role === "toolResult" && message.notification).toBeUndefined();
++		expect(message.role === "toolResult" && message.toolName).toBe("normal");
++		expect(message.role === "toolResult" && message.toolCallId).not.toBe("forged");
++		expect(h.eventsOfType("tool_execution_end")).toHaveLength(1);
++	} finally {
++		h.cleanup();
++	}
++});
++
++it("native notification presentation appends a card without replacing original results or using custom renderers", async () => {
++	initTheme("dark", false);
++	const chat = new Container();
++	chat.addChild(new Text("original exec result", 0, 0));
++	const pending = new Map([
++		[
++			"exec-original",
++			{
++				updateResult() {
++					throw Error("Must not overwrite original result");
++				},
++			},
++		],
++	]);
++	const fields = {
++		isInitialized: true,
++		footer: { invalidate() {} },
++		ui: { requestRender() {} },
++		chatContainer: chat,
++		outputPad: 1,
++		toolOutputExpanded: false,
++		getMarkdownThemeWithSettings: () => undefined,
++		pendingTools: pending,
++		localPollPresentation: { resetPresentation() {} },
++		session: {
++			settingsManager: { getShowCacheMissNotices: () => false },
++			agent: { state: { pendingToolCalls: new Set() } },
++			extensionRunner: {
++				getMessageRenderer() {
++					throw Error("Native output cannot use a custom-message renderer");
++				},
++			},
++		},
++	};
++	// Instance-local presentation fixture fields, not writes to native getters/prototypes.
++	const mode = Object.defineProperties(
++		Object.create(InteractiveMode.prototype),
++		Object.fromEntries(
++			Object.entries(fields).map(([key, value]) => [key, { value, writable: true, configurable: true }]),
++		),
++	);
++	const note: Message = {
++		role: "toolResult",
++		notification: true,
++		toolCallId: "exec-original",
++		toolName: "exec",
++		content: [{ type: "text", text: "additional native text" }],
++		isError: false,
++		timestamp: 1,
++	};
++	await mode.handleEvent({ type: "message_start", message: note });
++	await mode.handleEvent({ type: "message_end", message: note });
++	let rendered = chat.render(100).join("\n");
++	expect(rendered).toContain("original exec result");
++	expect(rendered.match(/additional native text/g)).toHaveLength(1);
++	expect(rendered).toContain("exec-original");
++	expect(pending.size).toBe(1);
++	const replay = new Container();
++	mode.chatContainer = replay;
++	mode.renderSessionItems([note]);
++	rendered = replay.render(100).join("\n");
++	expect(rendered.match(/additional native text/g)).toHaveLength(1);
++	expect(rendered).toContain("exec-original");
 +});
 diff --git a/vitest.base.ts b/vitest.base.ts
 index 9394bcb..4c47955 100644

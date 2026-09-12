@@ -3,6 +3,7 @@ import { imageInput } from "./image-input.mjs";
 export const CELL_LIMITS = Object.freeze({ wallMs: 360_000, outputCount: 64, operations: 64, keys: 32, keyBytes: 128, valueBytes: 16 * 1024, storageBytes: 256 * 1024, timers: 16, timerMs: 60_000, completed: 8 });
 export const cellTools = value => Array.isArray(value) && (!value.length || validTools(value));
 export function validOperation(value) {
+  if (exact(value, ["kind", "text"]) && value.kind === "notify") return typeof value.text === "string" && value.text.length <= RPC_LIMITS.argumentBytes && Buffer.byteLength(value.text) <= RPC_LIMITS.argumentBytes;
   if (value?.kind === "generated-image" || value?.kind === "generated-image-inline") {
     const fields=value.kind === "generated-image" ? ["kind","ref"] : ["kind","data","mimeType"];
     if (!exact(value,fields) && !exact(value,[...fields,"output_hint"])) return false;

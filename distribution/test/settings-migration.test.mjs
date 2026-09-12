@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {readFileSync} from "node:fs";
-import {validateSettingsFrameMigration} from "../settings-frame-migration.mjs";
-import {validateWaitSettings} from "../settings-scenarios.mjs";
+import {validateContextSettingsFrameMigration,validateSettingsFrameMigration} from "../settings-frame-migration.mjs";
+import {validateContextSettings,validateWaitSettings} from "../settings-scenarios.mjs";
 const affected=[[7,"fast-before"],[8,"fast-applying"],[9,"fast-saved"],[10,"capabilities-before"],[11,"unified-search-stays-open"],[12,"code-enabled"],[13,"web-enabled"],[15,"capabilities-restored"],[16,"fast-after-exclusions"],[17,"capabilities-excluded"]];
 function frames(){
  const previous=Array.from({length:36},(_,i)=>({name:`synthetic-${i}`,text:"unchanged synthetic contract"}));
@@ -17,6 +17,14 @@ test("frame migration permits only the exact observed layout change without modi
  assert.deepEqual(validateSettingsFrameMigration(previous,current),{historicalFrames:36,currentFrames:36,unchangedFrames:26,settingsFramesChanged:10,delta:"settings-value-column-plus-five-and-row-count-nine-to-ten"});assert.equal(JSON.stringify(previous),saved);
  for(const mutate of [r=>r.pop(),r=>r.reverse(),r=>r[0].text+="changed",r=>r[7].text=r[7].text.replace("on","off"),r=>r[7].text=r[7].text.replace("Description unchanged","lost warning"),r=>r[7].text=r[7].text.replace("/10)","/11)"),r=>r[7].text=r[7].text.replace("                on","               on"),r=>r[11].name="wrong"]){const r=structuredClone(current);mutate(r);assert.throws(()=>validateSettingsFrameMigration(previous,r));}
  assert.throws(()=>validateSettingsFrameMigration(previous,previous));
+});
+function contextReceipt(){return {explicitDisclosure:true,reloadRequired:true,contextFreeRestored:true,exclusionsPreserved:true,frames:['before','saved','effective','restored','excluded-saved'].map((n,i)=>({name:'context-profile-'+n,text:[1,2,4].includes(i)?'experimental-context; not secret-scrubbed; Reload extensions or restart Pi; effective: experimental-context':'experimental'}))};}
+test('C appends five disclosure views and cannot alter any of fifty historical frames',()=>{
+ const previous={frames:Array.from({length:36},(_,i)=>({name:'original-'+i,text:'exact original '+i})),waitSettings:{frames:receipt().frames},webSettings:webReceipt()},current={...structuredClone(previous),contextSettings:contextReceipt()};
+ assert.equal(validateContextSettings(current.contextSettings),true);assert.deepEqual(validateContextSettingsFrameMigration(previous,current),{historicalFrames:50,unchangedHistoricalFrames:50,newContextFrames:5,delta:'five-explicit-context-profile-views-no-historical-frame-changes'});
+ for(const select of [r=>r.frames,r=>r.waitSettings.frames,r=>r.webSettings.frames])for(let i=0;i<select(current).length;i++){const changed=structuredClone(current);select(changed)[i].text+=' ';assert.throws(()=>validateContextSettingsFrameMigration(previous,changed));}
+ for(const key of Object.keys(contextReceipt())){const changed=structuredClone(current);delete changed.contextSettings[key];assert.throws(()=>validateContextSettingsFrameMigration(previous,changed));}
+ for(const i of [1,2,4]){const changed=contextReceipt();changed.frames[i].text='experimental-context';assert.throws(()=>validateContextSettings(changed));}
 });
 function receipt(){return {savedCeiling:true,restoredCeiling:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,frames:[
  {name:"wait-before",text:"→ Background wait ceiling 300000"},{name:"wait-saved",text:"→ Background wait ceiling 5000\nBackground wait ceiling: 5000 ms"},
@@ -31,7 +39,7 @@ test("wait-settings receipt requires every observed control, restoration and fai
 test("installed settings remain fixed to the actual bundle, with shared scenarios and CLI restart/rollback requirements",()=>{
  const entry=readFileSync(new URL("../accept-settings.mjs",import.meta.url),"utf8"),profile=readFileSync(new URL("../accept-profile.mjs",import.meta.url),"utf8");
  assert.match(entry,/process\.argv\.length===3/);assert.match(entry,/verifyBundle\(bundle\)/);assert.match(entry,/exerciseSettings\(sdk,bundle,profile,cwd,join\(bundle,"extensions\/openai-compatibility\/index.ts"\)\)/);
- assert.match(profile,/validateWaitSettings\(settingsMenu.waitSettings\)/);assert.match(profile,/savedUnifiedWaitPreference:true/);assert.match(profile,/Rollback preserves the wait ceiling/);
+ assert.match(profile,/validateWaitSettings\(settingsMenu.waitSettings\)/);assert.match(profile,/savedUnifiedWaitPreference:true/);assert.match(profile,/validateContextSettings\(settingsMenu.contextSettings\)/);assert.match(profile,/savedContextProfile:true/);assert.match(profile,/Rollback preserves the wait ceiling/);
 });
 
 import{validateWebProfileFrameMigration}from'../settings-frame-migration.mjs';

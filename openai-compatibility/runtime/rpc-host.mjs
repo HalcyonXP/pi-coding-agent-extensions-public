@@ -131,6 +131,12 @@ export class AsyncRuntimeProbe {
             // Flush the completed sleep reply before acknowledging cancellation.
             await Promise.resolve();
             value = {cancelled: true};
+          } else if (frame.operation.kind === "notify") {
+            if (typeof gateway.notify !== "function" || typeof gateway.canNotify !== "function" || gateway.canNotify() !== true) value = null;
+            else {
+              value = await gateway.notify(frame.operation.text);
+              if (typeof value !== "boolean") throw new Error("PROTOCOL_ERROR");
+            }
           } else if (["image", "image-inline", "generated-image", "generated-image-inline", "evidence"].includes(frame.operation.kind)) {
             if (!cell.evidence) throw new Error("TOOL_LIMIT");
             value = await cell.evidence.apply(frame.operation, gateway);
@@ -140,7 +146,7 @@ export class AsyncRuntimeProbe {
           resultBytes += Buffer.byteLength(json);
           if (resultBytes > RPC_LIMITS.totalResultBytes) return stop("TOOL_RESULT_LIMIT");
           send({type: "reply", id: frame.id, value: JSON.parse(json)});
-        }).catch(() => { if (!stopped && !done && !closed) stop("TOOL_LIMIT"); }).finally(() => tasks.delete(task));
+        }).catch(() => { if (!stopped && !done && !closed) stop(frame.operation.kind === "notify" ? "GATEWAY_FAILED" : "TOOL_LIMIT"); }).finally(() => tasks.delete(task));
         tasks.add(task); return;
       }
       if (!exact(frame, ["type", "id", "name", "args"]) || frame.type !== "call"

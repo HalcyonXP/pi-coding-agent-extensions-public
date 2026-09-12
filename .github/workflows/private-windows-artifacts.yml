@@ -66,6 +66,12 @@ jobs:
       - name: Actual installed Web profile reload and experimental workflows
         timeout-minutes: 5
         run: node distribution/accept-web-media.mjs '.pi/extracted artifact' web-profile
+      - name: Actual installed opt-in native serialized Web context
+        timeout-minutes: 5
+        run: node distribution/accept-native-context.mjs '.pi/extracted artifact' context
+      - name: Actual installed native exec notifications across waits
+        timeout-minutes: 5
+        run: node distribution/accept-native-context.mjs '.pi/extracted artifact' notifications
       # No deployment, publishing, credentials or executable artifact upload.
       - name: Retain only sanitized reproduction receipts
         uses: actions/upload-artifact@v4

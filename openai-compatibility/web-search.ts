@@ -4,6 +4,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import type { CapabilityLease } from "./capability-policy.ts";
 import { readBoundedJson, withAbort } from "./http.ts";
+import { webHistoryInput } from "./web-history.ts";
 import { sealWebResult, WEB_TEXT_PREFIX, WEB_SOURCES_PREFIX } from "./runtime/web-result.mjs";
 
 export const WEB_SEARCH_ENDPOINT = "https://chatgpt.com/backend-api/codex/alpha/search";
@@ -155,11 +156,16 @@ export class WebSearchAdapter {
 		model: string;
 		lease: CapabilityLease;
 		getAuth: () => Promise<{ token: string; accountId: string }>;
+		/** Trusted native snapshot only; never a model argument or raw session reader. */
+		history?: readonly { role: string; content?: unknown }[];
 	}): Promise<SearchEvidence> {
 		options.lease.assertCurrent();
 		const commands = validateSearchCommands(options.commands);
 		if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(options.model)) throw new WebSearchError("arguments", "Invalid Web search model identifier.");
-		const body = JSON.stringify({ id: this.sessionId, model: options.model, commands, settings: { search_context_size: "low" }, max_output_tokens: 4096 });
+		const input = options.history === undefined ? undefined : webHistoryInput(options.history);
+		const body = JSON.stringify({ id: this.sessionId, model: options.model, commands, settings: { search_context_size: "low" }, max_output_tokens: 4096,
+			...(input?.length ? { input } : {}),
+		});
 		if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) throw new WebSearchError("arguments", "Web search request exceeds 16 KiB.");
 		if (this.active) throw new WebSearchError("busy", "A Web search is already in progress for this session.");
 		const operation = new AbortController(); this.active = operation;

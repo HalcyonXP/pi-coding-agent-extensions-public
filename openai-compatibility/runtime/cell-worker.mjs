@@ -49,8 +49,8 @@ try {
       output: text => channel.send({type: "output", text}),
       yield: () => channel.send({type: "yield", id: next()}),
       operation: value => {
-        if (!validOperation(value) || value.kind !== "sleep") throw new Error("TOOL_LIMIT");
-        return request({type: "operation", operation: value}, "timer");
+        if (!validOperation(value) || !["sleep", "notify"].includes(value.kind)) throw new Error("TOOL_LIMIT");
+        return request({type: "operation", operation: value}, value.kind === "sleep" ? "timer" : "notification");
       },
       syncOperation: value => request({type: "operation", operation: value}, "storage", true),
       pump,

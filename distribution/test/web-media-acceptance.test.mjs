@@ -17,7 +17,11 @@ function assertCohortWorkflow(source){
   assert.ok(index>0,`Missing exact ${name} cohort command`);
   assert.equal(lines[index-1],'        timeout-minutes: 5',`Missing separate ${name} budget`);
  }
- assert.equal(lines.filter(line=>line==='        timeout-minutes: 5').length,4);
+ for(const name of ['context','notifications']){
+  const index=lines.indexOf(`        run: node distribution/accept-native-context.mjs '.pi/extracted artifact' ${name}`);
+  assert.ok(index>0,`Missing exact ${name} cohort command`);assert.equal(lines[index-1],'        timeout-minutes: 5');
+ }
+ assert.equal(lines.filter(line=>line==='        timeout-minutes: 5').length,6);
  assert.match(source,/timeout-minutes: 20/);assert.match(source,/persist-credentials: false/);assert.doesNotMatch(source,/actions\/deploy|gh release/);
 }
 for(const ending of['\n','\r\n'])test(`hosted artifact workflow requires separate bounded cohorts with ${JSON.stringify(ending)} checkout lines`,()=>{
@@ -25,8 +29,8 @@ for(const ending of['\n','\r\n'])test(`hosted artifact workflow requires separat
 });
 test('workflow line-ending compatibility cannot hide missing, changed or unbounded cohorts',()=>{
  const source=read('../../.github/workflows/private-windows-artifacts.yml');
- for(const name of['web','media','imagegen','web-profile']){
-  const command=`        run: node distribution/accept-web-media.mjs '.pi/extracted artifact' ${name}`;
+ for(const [entry,name] of [...['web','media','imagegen','web-profile'].map(name=>['accept-web-media',name]),...['context','notifications'].map(name=>['accept-native-context',name])]){
+  const command=`        run: node distribution/${entry}.mjs '.pi/extracted artifact' ${name}`;
   assert.throws(()=>assertCohortWorkflow(source.replace(command,command+' extra')));
   const lines=source.split(/\r?\n/),index=lines.indexOf(command);assert.ok(index>0);lines[index-1]='        timeout-minutes: 6';
   assert.throws(()=>assertCohortWorkflow(lines.join('\r\n')));

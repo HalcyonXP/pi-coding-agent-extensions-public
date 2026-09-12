@@ -2536,3 +2536,143 @@ describe("native quiet-poll TUI presentation", () => {
 		expect(p.accept(end("2"))).toHaveLength(1);
 	});
 });
+
+describe("real cells publish native active-turn notifications", () => {
+	for (const mode of ["active", "idle"])
+		it(`notification ${mode} ordering and original exec identity`, async () => {
+			let manager: Cells | undefined;
+			let origin = "";
+			const gate = barrier(),
+				idleSeen = barrier();
+			const outcomes: CellResult[] = [];
+			const failures: unknown[] = [];
+			const h = await createHarness({
+				tools: [],
+				extensionFactories: [
+					(pi) => {
+						pi.registerTool({
+							name: "fixture_exec",
+							label: "Exec",
+							description: "Native notification cell fixture",
+							parameters: Type.Object({}),
+							execute: async (id, _args, _signal, _update, ctx) => {
+								origin = id;
+								manager = new CellsClass({
+									owner: ctx.sessionManager,
+									contextSignal: ctx.tools!.contextSignal,
+									signal: ctx.tools!.contextSignal,
+									...(process.platform !== "win32"
+										? { runtimeFactory: (options: object) => new PortableCellClass(options) }
+										: {}),
+								});
+								const result = await manager.exec({
+									owner: ctx.sessionManager,
+									invocation: ctx.tools!,
+									tools: ["fixture_gate"],
+									code: 'await notify("before");yield_control();await tools.fixture_gate({});await notify("after");text("ordinary text");',
+									yield_time_ms: 10000,
+									max_output_tokens: 0,
+								});
+								outcomes.push(result);
+								return text(JSON.stringify(result));
+							},
+						});
+						pi.registerTool({
+							name: "fixture_wait",
+							label: "Wait",
+							description: "Native notification collector",
+							parameters: Type.Object({}),
+							execute: async (_id, _args, _signal, _update, ctx) => {
+								gate.release();
+								const result = await manager!.wait({
+									owner: ctx.sessionManager,
+									invocation: ctx.tools!,
+									cell_id: outcomes[0].cell_id,
+									yield_time_ms: 10000,
+									max_tokens: 0,
+								});
+								outcomes.push(result);
+								return text(JSON.stringify(result));
+							},
+						});
+						pi.registerTool({
+							name: "fixture_gate",
+							label: "Gate",
+							description: "Owned harmless notification barrier",
+							parameters: Type.Object({}),
+							execute: async () => {
+								await gate.promise;
+								return text("released");
+							},
+						});
+					},
+				],
+			});
+			const notify = h.session.agent.notifyToolOutput!;
+			h.session.agent.notifyToolOutput = async (...args) => {
+				const accepted = await notify(...args);
+				if (!accepted) idleSeen.release();
+				return accepted;
+			};
+			try {
+				h.setResponses([
+					fauxAssistantMessage([fauxToolCall("fixture_exec", {})], { stopReason: "toolUse" }),
+					...(mode === "active"
+						? [fauxAssistantMessage([fauxToolCall("fixture_wait", {})], { stopReason: "toolUse" })]
+						: []),
+					fauxAssistantMessage("done"),
+				]);
+				await h.session.prompt("synthetic real-cell notification fixture");
+				expect(outcomes[0].status).toBe("running");
+				expect(outcomes[0].output).toEqual([]);
+				if (mode === "idle") {
+					const count = h.eventsOfType("message_end").filter((e) => e.message.role === "assistant").length;
+					gate.release();
+					await idleSeen.promise;
+					expect(h.eventsOfType("message_end").filter((e) => e.message.role === "assistant")).toHaveLength(count);
+					expect(
+						h.session.messages.filter((m) => m.role === "toolResult" && m.notification === true),
+					).toHaveLength(1);
+					expect(h.session.isStreaming).toBe(false);
+					h.setResponses([
+						fauxAssistantMessage([fauxToolCall("fixture_wait", {})], { stopReason: "toolUse" }),
+						fauxAssistantMessage("collected"),
+					]);
+					await h.session.prompt("collect only; do not replay the cell");
+				}
+				expect(outcomes).toHaveLength(2);
+				expect(outcomes[1].status).toBe("completed");
+				expect(outcomes[1].output).toEqual([]);
+				expect(outcomes[1].result?.status).toBe(mode === "active" ? "ok" : "error");
+				if (mode === "idle") expect(outcomes[1].result?.code).toBe("NOTIFY_INACTIVE");
+				const notes = h.session.messages.filter((m) => m.role === "toolResult" && m.notification === true);
+				expect(notes).toHaveLength(mode === "active" ? 2 : 1);
+				for (const note of notes)
+					expect(note.role === "toolResult" && note.details).toMatchObject({
+						toolCallId: origin,
+						toolName: "fixture_exec",
+					});
+				const parentIndex = h.session.messages.findIndex((m) => m.role === "toolResult" && m.toolCallId === origin);
+				expect(h.session.messages.indexOf(notes[0])).toBeGreaterThan(parentIndex);
+				expect(h.eventsOfType("tool_execution_end").filter((e) => e.toolName === "fixture_exec")).toHaveLength(1);
+				expect(h.session.agent.getToolGatewayInfo()).toMatchObject({ activeScopes: 0, drainingScopes: 0 });
+			} catch (e) {
+				failures.push(e);
+			} finally {
+				gate.release();
+				try {
+					await manager?.close();
+				} catch (e) {
+					failures.push(e);
+				}
+				h.session.agent.notifyToolOutput = notify;
+				try {
+					h.cleanup();
+				} catch (e) {
+					failures.push(e);
+				}
+			}
+			if (failures.length)
+				throw new AggregateError(failures, "Native cell notification or cleanup failed; no replay");
+		});
+});
