@@ -18,6 +18,8 @@ const suites = Object.freeze({
   "web-media": tests(...["web-search*", "verified-search", "web-preferences", "imagegen-*"].map(n => `${extension}${n}.test.ts`)),
   context: tests(`${extension}web-history.test.ts`, `${extension}web-context.test.ts`, `${runtime}notifications.test.mjs`, `${extension}helper-feedback.test.ts`, "distribution/test/helper-feedback.test.mjs"),
   "profile-receipts": tests("distribution/test/profile-receipt.test.mjs"),
+  "notice-coverage": tests("distribution/test/supplemental-notices.test.mjs", "distribution/test/inventory.test.mjs", "distribution/test/patch-license.test.mjs"),
+  "patch-licenses": tests("distribution/test/patch-license.test.mjs"),
   "context-receipts": tests("distribution/test/native-context.test.mjs", "distribution/test/code-output.test.mjs", "distribution/test/notification-ack.test.mjs"),
   lifecycle: tests(...["cell-manager", "draining-wait", "evidence"].map(n => `${runtime}${n}.test.mjs`)),
   extension: tests("openai-compatibility/index.test.mjs", `${extension}*.test.ts`),

@@ -6,6 +6,7 @@ import {readFile} from "node:fs/promises";
 import {isAbsolute,join,posix,resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {safePath,verifyBundle} from "./lib.mjs";
+import {verifySupplementalNotices} from "./supplemental-notices.mjs";
 const packageFile=/(?:^|\/)node_modules\/(?:@[^/]+\/)?[^/]+\/package\.json$/;
 const namedNotice=/(?:^|\/)(?:licen[cs]e[^/]*|copying[^/]*|notice[^/]*|third[-_]party[^/]*|copyright[^/]*)$/i;
 const executable=/\.(?:exe|dll|node|wasm|so|a|lib|dylib)$/i;
@@ -43,7 +44,12 @@ export async function inventoryFiles(files,read){
 export async function auditBundle(bundle){
  assert.ok(isAbsolute(bundle),"Absolute verified bundle path required");
  const {manifest,digest}=await verifyBundle(bundle);
- return {sourceCommit:manifest.sourceCommit,manifestSha256:digest,release:manifest.release,...await inventoryFiles(manifest.files,path=>readFile(join(bundle,path)))};
+ let supplementalNotices={status:"not-supplied"};
+ if(manifest.supplementalNotices!==undefined){
+  supplementalNotices=await verifySupplementalNotices(bundle,await readFile(join(bundle,"distribution/supplemental-notices.json")));
+  assert.deepEqual(supplementalNotices,manifest.supplementalNotices,"Supplemental notice record differs");
+ }
+ return {sourceCommit:manifest.sourceCommit,manifestSha256:digest,release:manifest.release,...await inventoryFiles(manifest.files,path=>readFile(join(bundle,path))),supplementalNotices};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
  try{assert.equal(process.argv.length,3);console.log(JSON.stringify(await auditBundle(process.argv[2]),null,2));}

@@ -9,6 +9,7 @@ import {fileURLToPath} from "node:url";
 import {randomUUID} from "node:crypto";
 import {sha256,run,npm,writeManifest,verifyBundle,archive} from "./lib.mjs";
 import {curatePayload,retainedSuffix,verifyCuration} from "./curate-payload.mjs";
+import {parseSupplementalNotices,verifySupplementalNotices} from "./supplemental-notices.mjs";
 import {verifyHostArtifacts} from "../.github/scripts/pi-host-provenance.mjs";
 import {artifactPaths,verifiedExecutable} from "../openai-compatibility/runtime/native/artifact.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
@@ -49,14 +50,20 @@ const selected=git(["ls-files","-z","--","openai-compatibility"]).split("\0").fi
 for(const path of selected)await copySource(path,join(out,"extensions",path));
 const nativeDestination=join(out,"extensions","openai-compatibility","runtime","native","bin",native.directory.split(/[\\/]/).filter(Boolean).at(-1));await mkdir(nativeDestination,{recursive:true});
 await copyFile(native.executable,join(nativeDestination,"WindowsRuntime.exe"));await copyFile(native.manifest,join(nativeDestination,"manifest.json"));
-for(const path of ["distribution/lib.mjs","distribution/launch.mjs","distribution/install.mjs","distribution/README.md","distribution/LICENSE","distribution/NOTICE","distribution/payload-policy.json","docs/openai-integration/LICENSE","docs/openai-integration/NOTICE","host-patches/pi-0.85.1/LICENSE.pi","host-patches/pi-0.85.1/provenance.json","host-patches/pi-0.85.1/parent-bound-invocation.patch"])await copySource(path,join(out,path));
+for(const path of ["distribution/lib.mjs","distribution/launch.mjs","distribution/install.mjs","distribution/README.md","distribution/LICENSE","distribution/NOTICE","distribution/payload-policy.json","docs/openai-integration/LICENSE","docs/openai-integration/NOTICE","host-patches/LICENSE","host-patches/NOTICE","host-patches/pi-0.85.1/LICENSE.pi","host-patches/pi-0.85.1/provenance.json","host-patches/pi-0.85.1/parent-bound-invocation.patch"])await copySource(path,join(out,path));
 // Include canonical offline installation/acceptance/contracts, not just links to
 // repository-only guides. No generated concept images or local receipts/auth.
 const documents=git(["ls-files","-z","--","docs/openai-integration/*.md"]).split("\0").filter(Boolean);
 assert.ok(documents.includes("docs/openai-integration/PRIVATE-RELEASE.md"),"Release guide must be committed");
 for(const path of documents)await copySource(path,join(out,path));
-const metadata={release:"0.3.0-private.1",platform:"win32-x64",nodeMajors:[24,25],sourceCommit,host:provenance,native:nativeManifest,curation};
+// Copy reviewed supplemental grants without modifying installed upstream packages.
+const supplementalBytes=run("git",["show",`${sourceCommit}:distribution/supplemental-notices.json`],{cwd:root,encoding:null});
+const supplementalPolicy=parseSupplementalNotices(supplementalBytes);
+for(const path of new Set(["distribution/supplemental-notices.json","distribution/supplemental-notices.mjs",...supplementalPolicy.entries.map(e=>e.noticePath)]))await copySource(path,join(out,path));
+const supplementalNotices=await verifySupplementalNotices(out,supplementalBytes);
+const metadata={release:"0.3.0-private.1",platform:"win32-x64",nodeMajors:[24,25],sourceCommit,host:provenance,native:nativeManifest,curation,supplementalNotices};
 const manifest=await writeManifest(out,metadata);await verifyBundle(out);await verifyCuration(out,manifest,policyBytes);
+assert.deepEqual(await verifySupplementalNotices(out,supplementalBytes),manifest.supplementalNotices);
 const digest=await archive(out,out+".tar.gz");
 await writeFile(out+".tar.gz.sha256",`${digest}  ${out.split(/[\\/]/).at(-1)}.tar.gz\n`,{flag:"wx"});
 console.log(JSON.stringify({archive:out+".tar.gz",sha256:digest,files:manifest.files.length,uncompressedBytes:manifest.files.reduce((n,f)=>n+f.bytes,0),sourceCommit}));

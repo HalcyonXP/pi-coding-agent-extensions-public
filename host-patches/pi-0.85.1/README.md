@@ -6,6 +6,10 @@ The patch extends the genuine native invocation/approval/validation/lifecycle pi
 
 Working-source C additionally provides current-invocation text snapshots and active-turn notifications. Text capture follows native context hooks, excludes custom/protected roles before conversion, and requires the native serialized Responses request plus successful completion. Read-only observation preserves native transport/auth/cache/retries; incomplete cached deltas refuse rather than reconstructing history. Notifications are native additional tool-result records bound to the original call, not metadata-promoted custom messages or another tool completion. Their separate native TUI cards retain the original result and call identity. Matched pi-ai, pi-agent-core and pi-coding-agent artifacts must ship together. Updated package pins alone do not establish full C artifact acceptance.
 
+## Licensing
+
+Original first-party patch additions are MIT-licensed under [../LICENSE](../LICENSE), including their applied or compiled form; [../NOTICE](../NOTICE) defines the scope. Upstream Pi code and patch context retain [LICENSE.pi](LICENSE.pi). Distribute both grants and the scope notice with the modified host. Existing Apache-2.0 components and other third-party terms are unchanged. This does not establish complete embedded-dependency coverage or binary release clearance.
+
 The term “private host” in stable identifiers/metadata means this non-upstream patched variant, not a repository visibility guarantee. Upstream package version labels remain 0.85.1; distribution provenance identifies the patch explicitly.
 
 Use node .github/scripts/prepare-pi-host.mjs --rpc from a fresh source checkout after locked dependency installation. Preparation verifies pins and refuses an existing destination. Install its lock without lifecycle scripts, run check:model-data/full checks, then the selected offline tests. [Full commands and constraints](../../docs/openai-integration/VALIDATION.md).
