@@ -31,6 +31,17 @@ export function validateSettingsFrameMigration(previous, current) {
     delta:"settings-value-column-plus-five-and-row-count-nine-to-ten"};
 }
 
+/** C adds explicit disclosure/reload views without changing PR33's fifty frames. */
+export function validateContextSettingsFrameMigration(previous,current){
+ for(const [before,after,count] of [[previous.frames,current.frames,36],[previous.waitSettings.frames,current.waitSettings.frames,7],[previous.webSettings.frames,current.webSettings.frames,7]]){
+  assert.equal(before.length,count);assert.equal(after.length,count);assert.deepEqual(after,before,'C must preserve every prior native frame exactly');
+ }
+ const added=current.contextSettings;for(const key of ['explicitDisclosure','reloadRequired','contextFreeRestored','exclusionsPreserved'])assert.equal(added[key],true);
+ assert.deepEqual(added.frames.map(f=>f.name),['context-profile-before','context-profile-saved','context-profile-effective','context-profile-restored','context-profile-excluded-saved']);
+ for(const f of added.frames)assert.ok(typeof f.text==='string'&&f.text.trim());
+ return{historicalFrames:50,unchangedHistoricalFrames:50,newContextFrames:5,delta:'five-explicit-context-profile-views-no-historical-frame-changes'};
+}
+
 const webCountFrames=new Map([[7,'fast-before'],[8,'fast-applying'],[9,'fast-saved'],[10,'capabilities-before'],[15,'capabilities-restored'],[16,'fast-after-exclusions'],[17,'capabilities-excluded']]);
 const webGuidanceFrames=new Map([[7,'fast-before'],[10,'capabilities-before'],[14,'jobs-inside-openai'],[15,'capabilities-restored'],[16,'fast-after-exclusions'],[17,'capabilities-excluded'],[18,'jobs-after-exclusions']]);
 const waitGuidanceFrames=new Map([[0,'wait-before'],[2,'wait-restored'],[4,'wait-invalid'],[5,'wait-excluded']]);

@@ -27,6 +27,21 @@ export const CELL_BOOTSTRAP = `(operation, control, namesJSON, metadataJSON = nu
     if (value === null || typeof value === "number" || typeof value === "boolean") return emit(stringify(value));
     reject("TEXT_VALUE_UNSUPPORTED", "text requires a primitive; serialize objects explicitly");
   }});
+  define(globalThis, "notify", {value: (...values) => {
+    if(values.length!==1) reject("NOTIFY_VALUE_UNSUPPORTED", "notify requires exactly one primitive");
+    const value=values[0];
+    let text;
+    if(typeof value==="string") text=value;
+    else if(value===undefined) text="undefined";
+    else if(value===null||typeof value==="number"||typeof value==="boolean") text=stringify(value);
+    else reject("NOTIFY_VALUE_UNSUPPORTED", "notify requires a primitive; serialize objects explicitly");
+    const payload=create(null);payload.kind="notify";payload.text=text;
+    return then(operation(stringify(payload)), accepted => {
+      if(accepted===true) return;
+      if(accepted===false) reject("NOTIFY_INACTIVE", "notify requires an active native turn");
+      reject("NOTIFY_UNAVAILABLE", "notify requires a compatible native notification host");
+    });
+  }});
   define(globalThis, "store", {value: (key, value) => { parse(operation(stringify({kind:"store",key,value}))); }});
   define(globalThis, "load", {value: key => { const v=parse(operation(stringify({kind:"load",key}))); return v.found ? v.value : undefined; }});
   define(globalThis, "image", {value: (value, ...extra) => {

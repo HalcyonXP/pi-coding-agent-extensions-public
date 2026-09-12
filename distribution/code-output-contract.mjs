@@ -9,8 +9,12 @@ const helperHints = {
  IMAGE_REFERENCE_REQUIRED:'image() requires a native image reference or bounded canonical PNG/JPEG/GIF/WebP inline data. No paths, network URLs or detail hints; byte/canvas limits apply.',
  GENERATED_IMAGE_INPUT_REQUIRED:'generatedImage() requires {image_url: ownedRefOrDataUrl, output_hint?: string}. Image limits apply; hints are at most4096 UTF-8 bytes and not save receipts.',
  TIMER_CALLBACK_REQUIRED:'setTimeout() requires a function callback, not a command string.',
+ NOTIFY_VALUE_UNSUPPORTED:'notify() requires exactly one primitive. Serialize arrays/objects explicitly and await native queue acceptance.',
+ NOTIFY_INACTIVE:'notify() requires an active native turn. No idle turn was started; do not replay completed work to send a notification.',
+ NOTIFY_UNAVAILABLE:'notify() requires the compatible native notification host. No text-output fallback or idle turn was created.',
 };
 export function readCodeOutcome(message) {
+ assert.notEqual(message?.notification,true,'Additional native notification is not a Code completion');
  assert.ok(message&&['exec','wait'].includes(message.toolName));assert.equal(message.isError,false);
  const d=message.details;assert.ok(d&&typeof d==='object');assert.ok(typeof d.cell_id==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(d.cell_id));assert.ok(['running','draining','completed','terminated'].includes(d.status));assert.ok(Array.isArray(d.output)&&d.output.every(t=>typeof t==='string'));
  const m=d.code_result;assert.ok(m);assert.deepEqual(Object.keys(m).sort(),['version','wall_time_ms']);assert.equal(m.version,1);assert.ok(Number.isSafeInteger(m.wall_time_ms)&&m.wall_time_ms>=0);
@@ -22,7 +26,7 @@ export function readCodeOutcome(message) {
  const expected=`${status}\nWall time ${(Math.round(m.wall_time_ms/100)/10).toFixed(1)} seconds\nOutput:\n${lines.join('\n')}`;assert.equal(message.content[0].text,expected,'Actual model output and structured native details disagree');return d;
 }
 export function validateCodeOutputAcceptance(messages) {
- const code=messages.filter(m=>['exec','wait'].includes(m.toolName)&&!m.isError),rows=code.map(m=>({name:m.toolName,value:readCodeOutcome(m)}));
+ const code=messages.filter(m=>['exec','wait'].includes(m.toolName)&&m.notification!==true&&!m.isError),rows=code.map(m=>({name:m.toolName,value:readCodeOutcome(m)}));
  for(const name of ['exec','wait'])assert.ok(rows.some(r=>r.name===name));for(const status of ['running','completed','terminated'])assert.ok(rows.some(r=>r.value.status===status));
  assert.ok(rows.some(r=>r.value.result?.status==='error'&&r.value.output.length===0&&r.value.result.diagnostics));assert.ok(rows.some(r=>r.value.omitted_output_bytes>0&&r.value.output.length===0));assert.ok(rows.some(r=>r.value.output.length>0));
  return {nativeExec:true,nativeWait:true,plainModelOutput:true,measuredPerCallWallTime:true,structuredDetailsRetained:true,failureAndLossVisible:true,legacyJsonEnvelopeNotReturned:true,nestedProjectionCovered:false};

@@ -237,6 +237,7 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
           const value = JSON.parse(json);
           if (!validOperation(value)) throw new Error("TOOL_LIMIT");
           if (value.kind === "sleep") return defer(() => cell.operation(value), "timer", value.timer);
+          if (value.kind === "notify") return defer(() => cell.operation(value), "notification");
           const idleStart = performance.now();
           let answer;
           try { answer = cell.syncOperation(value); }
@@ -303,7 +304,7 @@ export async function evaluate(code, { invoke, allowedTools = [], toolMetadata, 
         if (root.type !== "pending") {
           if (root.type === "rejected") root.error.dispose();
           else if (!root.notAPromise) root.value.dispose();
-          if ([...pendingTools.values()].some(entry => entry.kind === "tool")) return fail("DETACHED_TOOL");
+          if ([...pendingTools.values()].some(entry => entry.kind !== "timer")) return fail("DETACHED_TOOL");
           break;
         }
       }

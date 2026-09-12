@@ -10,7 +10,7 @@ export interface WebPreferenceStore {
  write(profile: WebSearchProfile): void;
 }
 export function webProfile(value: unknown): WebSearchProfile {
- if(value!=="verified-v1"&&value!=="experimental")throw new Error("Web admission profile must be verified-v1 or experimental.");
+ if(value!=="verified-v1"&&value!=="experimental"&&value!=="experimental-context")throw new Error("Web admission profile must be verified-v1, experimental or experimental-context.");
  return value;
 }
 const failure=()=>new Error("Web admission preferences are unreadable or invalid; preserve the profile file, repair it and reload. No alternate profile is activated.");

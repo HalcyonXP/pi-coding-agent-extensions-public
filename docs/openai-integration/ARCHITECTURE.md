@@ -10,7 +10,7 @@ Policy persists beyond individual handler leases. Saved preferences are restored
 
 ## Genuine native gateway
 
-The twenty-path patch runs delegated calls through Pi's actual preparation, approval, post-approval normalization/validation, before/result hooks, image normalization and lifecycle—not copied handlers. Trusted ownership fields follow caller parameters. Current registry identity is checked before execution.
+The thirty-three-path patch runs delegated calls through Pi's actual preparation, approval, post-approval normalization/validation, before/result hooks, image normalization and lifecycle—not copied handlers. Trusted ownership fields follow caller parameters. Current registry identity is checked before execution.
 
 Native ancestry supplies direct/nested origin; guest IDs cannot impersonate a parent. Recursion and orchestration tool nesting are denied. A normal invocation expires with its handler. A separately issued branded native scope can own durable resources after that return, using native context identity. contextSignal reports context lifetime, not execution authority.
 

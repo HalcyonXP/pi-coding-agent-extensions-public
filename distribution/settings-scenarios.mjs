@@ -22,14 +22,21 @@ export function validateWebSettings(result){
  for(const [i,value]of [[0,"verified-v1"],[1,"experimental"],[2,"experimental"],[3,"experimental"],[4,"unavailable"],[5,"experimental"],[6,"verified-v1"]])assert.match(result.frames[i].text,new RegExp(`→ Web admission profile\\s+${value}\\b`));
  assert.match(result.frames[1].text,/Reload extensions or restart Pi/);assert.match(result.frames[3].text,/Change failed:/);return true;
 }
+export function validateContextSettings(result){
+ for(const key of ['explicitDisclosure','reloadRequired','contextFreeRestored','exclusionsPreserved'])assert.equal(result[key],true);
+ assert.deepEqual(result.frames.map(f=>f.name),['context-profile-before','context-profile-saved','context-profile-effective','context-profile-restored','context-profile-excluded-saved']);
+ for(const i of [1,2,4]){assert.match(result.frames[i].text,/experimental-context/);assert.match(result.frames[i].text,/not secret-scrubbed/);}
+ assert.match(result.frames[1].text,/Reload extensions or restart Pi/);assert.match(result.frames[2].text,/effective: experimental-context/);assert.doesNotMatch(result.frames[3].text,/explicitly forwards/);return true;
+}
 export async function exerciseSettings(sdk,bundle,profile,cwd,extensionPath){
-const failures=[],waitFrames=[],webFrames=[];let completed=false;
+const failures=[],waitFrames=[],webFrames=[],contextFrames=[];let completed=false;
 const frames=[],codeFrames=[],unifiedFrames=[],capabilities=["imagegen","web_search","exec","wait","exec_command","write_stdin"];
 const clean=s=>s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,"");
 const capture=(name,panel)=>{const lines=panel.render(80).map(clean);assert.ok(lines.every(line=>line.length<160));frames.push({name,text:lines.join("\n")});return lines.join("\n");};
 const until=async predicate=>{const end=performance.now()+10000;while(performance.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,10));}throw Error("Settings interaction did not settle");};
 const waitFile=join(profile,"openai-compatibility-unified.json"),webFile=join(profile,"openai-compatibility-web.json");
 const captureWeb=(name,panel)=>{const text=panel.render(80).map(clean).join("\n");webFrames.push({name,text});return text;};
+const captureContext=(name,panel)=>{const text=panel.render(80).map(clean).join('\n');contextFrames.push({name,text});return text;};
 const captureWait=(name,panel)=>{const text=panel.render(80).map(clean).join("\n");waitFrames.push({name,text});return text;};
 try{
 sdk.initTheme("dark",false);
@@ -116,12 +123,19 @@ sdk.initTheme("dark",false);
     for(const char of "Web admission")panel.handleInput(char);
     assert.match(captureWeb(excluded?"web-profile-excluded":"web-profile-before",panel),new RegExp(`→ Web admission profile\\s+${excluded?"experimental":"verified-v1"}`));
     panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));
+    if(excluded){captureContext('context-profile-excluded-saved',panel);assert.equal(JSON.parse(await readFile(webFile,'utf8')).profile,'experimental-context');assert.ok(capabilities.every(name=>!session.getActiveToolNames().includes(name)));panel.handleInput('\r');await until(()=>!panel.render(80).join('\n').includes('applying…'));}
     captureWeb(excluded?"web-profile-excluded-saved":"web-profile-saved",panel);assert.equal(JSON.parse(await readFile(webFile,"utf8")).profile,excluded?"verified-v1":"experimental");assert.deepEqual(webSchema(),originalWebSchema);
    };
    await session.prompt("/openai-tools");
    if(excluded)assert.ok(capabilities.every(name=>!session.getActiveToolNames().includes(name)));
    else{
     const saved=await readFile(webFile);await session.reload();assert.ok(Object.hasOwn(webSchema().properties,"weather"));
+    const broad=structuredClone(webSchema()),description=()=>session.getAllTools().find(t=>t.name==='web_search')?.description;
+    drive=async panel=>{for(const char of 'Web admission')panel.handleInput(char);captureContext('context-profile-before',panel);panel.handleInput('\r');await until(()=>!panel.render(80).join('\n').includes('applying…'));captureContext('context-profile-saved',panel);assert.equal(JSON.parse(await readFile(webFile,'utf8')).profile,'experimental-context');assert.deepEqual(webSchema(),broad);assert.doesNotMatch(description(),/Explicitly enabled context disclosure/);};
+    await session.prompt('/openai-tools');await session.reload();assert.match(description(),/Explicitly enabled context disclosure/);
+    drive=async panel=>{for(const char of 'Web admission')panel.handleInput(char);captureContext('context-profile-effective',panel);for(let i=0;i<2;i++){panel.handleInput('\r');await until(()=>!panel.render(80).join('\n').includes('applying…'));}assert.equal(JSON.parse(await readFile(webFile,'utf8')).profile,'experimental');assert.match(description(),/Explicitly enabled context disclosure/);};
+    await session.prompt('/openai-tools');await session.reload();assert.deepEqual(webSchema(),broad);assert.doesNotMatch(description(),/Explicitly enabled context disclosure/);
+    drive=async panel=>{for(const char of 'Web admission')panel.handleInput(char);captureContext('context-profile-restored',panel);};await session.prompt('/openai-tools');
     drive=async panel=>{
      for(const char of "Web admission")panel.handleInput(char);captureWeb("web-profile-restored",panel);
      await writeFile(webFile,"invalid preserved Web fixture");panel.handleInput("\r");await until(()=>!panel.render(80).join("\n").includes("applying…"));captureWeb("web-profile-save-failed",panel);assert.equal(await readFile(webFile,"utf8"),"invalid preserved Web fixture");
@@ -139,9 +153,10 @@ sdk.initTheme("dark",false);
  }
  frames.push(...codeFrames,...unifiedFrames);validateAllOutputFrames(frames);
  const waitSettings={savedCeiling:true,restoredCeiling:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,frames:waitFrames};validateWaitSettings(waitSettings);
- const webSettings={savedProfile:true,reloadRequired:true,restoredSchema:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,preferencesIndependent:true,frames:webFrames};validateWebSettings(webSettings);completed=true;
- return {status:"passed",waitSettings,webSettings,nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,compactLocalJobPresentation:true,readableCodePresentation:true,nativeUnifiedOutputPresentation:true,frames};
+ const webSettings={savedProfile:true,reloadRequired:true,restoredSchema:true,failedSaveUnchanged:true,invalidFilePreserved:true,exclusionsPreserved:true,preferencesIndependent:true,frames:webFrames};validateWebSettings(webSettings);
+ const contextSettings={explicitDisclosure:true,reloadRequired:true,contextFreeRestored:true,exclusionsPreserved:true,frames:contextFrames};validateContextSettings(contextSettings);completed=true;
+ return {status:"passed",waitSettings,webSettings,contextSettings,nativeSettingsList:true,syntheticTerminalInput:true,nativeTheme:"dark",normalAndExcludedContexts:true,savedFastPreference:true,savedCapabilityPreferences:true,restoredJobs:false,consolidatedJobs:true,noNotificationSpam:true,quietPollingPresentation:true,compactLocalJobPresentation:true,readableCodePresentation:true,nativeUnifiedOutputPresentation:true,frames};
 }catch(error){if(!failures.includes(error))failures.push(error);throw error;}finally{
- try{await writeFile(join(profile,"settings-observations.json"),JSON.stringify({completed,frames,waitFrames,webFrames,failures:failures.map(e=>({name:e.name,message:e.message,stack:e.stack}))},null,2)+"\n",{flag:"wx"});}catch(error){throw new AggregateError([...failures,error],"Settings scenario/evidence capture failed");}
+ try{await writeFile(join(profile,"settings-observations.json"),JSON.stringify({completed,frames,waitFrames,webFrames,contextFrames,failures:failures.map(e=>({name:e.name,message:e.message,stack:e.stack}))},null,2)+"\n",{flag:"wx"});}catch(error){throw new AggregateError([...failures,error],"Settings scenario/evidence capture failed");}
 }
 }

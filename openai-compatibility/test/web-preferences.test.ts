@@ -22,7 +22,7 @@ const lookup={weather:[{location:"Example City",start:"2026-09-12",duration:1}]}
 test("Web admission preference is passive, exact and independent of other saved choices",t=>{
  const dir=directory(t),store=webPreferenceStore(dir);assert.equal(store.read(),"verified-v1");assert.deepEqual(readdirSync(dir),[]);
  const other=join(dir,"openai-compatibility-unified.json");writeFileSync(other,'{"version":1,"maxBackgroundWaitMs":60000}\n');const bytes=readFileSync(other);
- for(const v of ["experimental","verified-v1"] as const){store.write(v);assert.equal(webPreferenceStore(dir).read(),v);assert.deepEqual(JSON.parse(readFileSync(file(dir),"utf8")),{version:1,profile:v});}
+ for(const v of ["experimental-context","experimental","verified-v1"] as const){store.write(v);assert.equal(webPreferenceStore(dir).read(),v);assert.deepEqual(JSON.parse(readFileSync(file(dir),"utf8")),{version:1,profile:v});}
  assert.deepEqual(readFileSync(other),bytes);assert.equal(webPreferenceStore(join(dir,"other")).read(),"verified-v1");assert.equal(readdirSync(dir).filter(p=>p.endsWith(".tmp")).length,0);
  let coerced=0;for(const v of [undefined,null,false,{},"Experimental","verified",{toString(){coerced++;return "experimental";}}])assert.throws(()=>webProfile(v));assert.equal(coerced,0);
 });
@@ -61,4 +61,28 @@ test("Web preference status/invalid commands, cancellation and failed save do no
 });
 test("native settings exposes pending Web profile without closing or hot-changing the schema",async t=>{
  const dir=directory(t),h=fixture(dir);let panel:OpenAISettingsPanel|undefined,closed=0;try{await h.emit("session_start");panel=new OpenAISettingsPanel(await h.settings.read(h.ctx),{read:()=>h.settings.read(h.ctx),isCurrent:()=>true,onBoundary:h.settings.onBoundary,async change(id,value,s){await h.settings.change(id,value,h.ctx,s);return "Saved; reload required, current schema unchanged.";}},{fg:(_tone:string,v:string)=>v} as ExtensionContext["ui"]["theme"],()=>{},()=>closed++,"web_profile");assert.match(panel.render(100).join("\n"),/Web admission profile\s+verified-v1/);panel.handleInput("\r");const end=performance.now()+10000;while(panel.render(100).join("\n").includes("applying…")&&performance.now()<end)await new Promise(r=>setTimeout(r,10));assert.equal(webPreferenceStore(dir).read(),"experimental");assert.match(panel.render(100).join("\n"),/current schema unchanged/);assert.equal(Value.Check(h.tools.get("web_search")!.parameters,lookup),false);assert.equal(closed,0);assert.equal(h.authCalls(),0);}finally{panel?.dispose();await h.emit("session_shutdown");}
+});
+
+test("context disclosure is a distinct passive opt-in and requires reload", async t => {
+ const dir=directory(t),h=fixture(dir);
+ try {
+  await h.emit("session_start");
+  const row=(await h.settings.read(h.ctx)).find(r=>r.id==="web_profile")!;
+  assert.deepEqual(row.values,["verified-v1","experimental","experimental-context"]);
+  await h.commands.get("openai-tools").handler("web-profile experimental-context",h.ctx);
+  assert.equal(webPreferenceStore(dir).read(),"experimental-context");
+  const disclosure=(await h.settings.read(h.ctx)).find(row=>row.id==="web_profile")!.description;
+  assert.ok(disclosure.length<=300);assert.match(disclosure,/bounded recent native user\/assistant text to subscription Web; not secret-scrubbed/);assert.match(disclosure,/Reload extensions or restart Pi/);
+  assert.match(h.notices.at(-1)!,/explicitly forwards bounded recent native user\/assistant text/);
+  assert.match(h.notices.at(-1)!,/effective: verified-v1/);
+  assert.doesNotMatch(h.tools.get("web_search")!.description,/Explicitly enabled context disclosure/);
+  assert.equal(h.authCalls(),0);
+ } finally { await h.emit("session_shutdown"); }
+ const reloaded=fixture(dir);
+ try {
+  await reloaded.emit("session_start");
+  assert.match(reloaded.tools.get("web_search")!.description,/Explicitly enabled context disclosure/);
+  assert.ok(!reloaded.active().includes("web_search"));
+  assert.equal(reloaded.authCalls(),0);
+ } finally { await reloaded.emit("session_shutdown"); }
 });
