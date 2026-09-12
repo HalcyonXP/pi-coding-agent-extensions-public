@@ -1,0 +1,192 @@
+{
+  "version": 2,
+  "scope": "supplemental-notice-presence-only",
+  "entries": [
+    {
+      "packagePath": "node_modules/standardwebhooks",
+      "name": "standardwebhooks",
+      "version": "1.1.1",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "686397f0f0202e0b693cfd3f6241d7a8da3df326f9642867a484fbbd295690b6",
+      "npmIntegrity": "sha512-bCbX9ZEyFkWPsRz7Bl3NuQUJohmwGSev/yhr7vhaGPlc4AfIrspIRa6cPTBuI1ItmrTDJ4d/S2hCsfe4+vQGnQ==",
+      "noticePath": "distribution/notices/LICENSE.standardwebhooks",
+      "noticeBytes": 1088,
+      "noticeSha256": "5ec8c7b26b64d881a6706617bed25c049f97f2f35de034c756de8546fd6dbe27",
+      "upstream": {
+        "repository": "standard-webhooks/standard-webhooks",
+        "commit": "b4d2c14fc5b4ccff3ff271e3b087dff812254c59",
+        "path": "libraries/LICENSE",
+        "gitBlob": "55b14b3a3ce649a2f1b05428dcc9c6db95b37c04"
+      },
+      "coverage": {
+        "kind": "package"
+      }
+    },
+    {
+      "packagePath": "node_modules/@mariozechner/clipboard",
+      "name": "@mariozechner/clipboard",
+      "version": "0.3.9",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "780f1b41356ce9e5bb0d31d3ce111af941d141e9a96ac8e1b8ca0a298add4547",
+      "npmIntegrity": "sha512-ABnA53mdfkGZwOFUdZNv2S0CWGO/EIuPj8Vv9xmBFmSYg/qFc7ihO6q5FcQjvoE67kZpWkEc4AhD6B/os04yuA==",
+      "noticePath": "distribution/notices/LICENSE.clipboard-rs",
+      "noticeBytes": 1066,
+      "noticeSha256": "3467db29f1ec98b2e1e4d27562ca14f10f4500ba35ac352fe640f8774e0f663e",
+      "upstream": {
+        "repository": "ChurchTao/clipboard-rs",
+        "commit": "e6f5b4e683fec943c24e9f838da9151a95114574",
+        "path": "LICENSE",
+        "gitBlob": "b1c8a1fdb57d8c74c8b89a0a804c0158eab8ae09"
+      },
+      "coverage": {
+        "kind": "vendored-source",
+        "registry": "crates.io",
+        "name": "clipboard-rs",
+        "version": "0.3.1",
+        "registryArchiveSha256": "915fa0d77c59e330333562661159b14205f76a41a6e6eb59957724f938cb8203",
+        "sourceFiles": [
+          {
+            "path": "node_modules/@mariozechner/clipboard/src/clipboard_rs/common.rs",
+            "bytes": 8231,
+            "sha256": "f58ccbdedd7a480ea606a3a2a14c2fb80252878bdd9fd0b9495b2ef4dc549ab1"
+          },
+          {
+            "path": "node_modules/@mariozechner/clipboard/src/clipboard_rs/mod.rs",
+            "bytes": 3370,
+            "sha256": "4b49dbce062eea6a0b60260492532d1e818f415464e691a1e971cab87f2841cc"
+          },
+          {
+            "path": "node_modules/@mariozechner/clipboard/src/clipboard_rs/platform/ios.rs",
+            "bytes": 8715,
+            "sha256": "9883ee9089c9f26362a3a58845cec0786a62c8d3b5b84f5c3c943484576a3d36"
+          },
+          {
+            "path": "node_modules/@mariozechner/clipboard/src/clipboard_rs/platform/macos.rs",
+            "bytes": 15657,
+            "sha256": "8c9654e99fc18802818efc9aa2294bfae5fb747815a19e4e14929198f7f6257d"
+          },
+          {
+            "path": "node_modules/@mariozechner/clipboard/src/clipboard_rs/platform/mod.rs",
+            "bytes": 6245,
+            "sha256": "03cf9c5be48f68c84e6efe8c3b425a58940e19f1802952f2bb8e6d942e13d119"
+          },
+          {
+            "path": "node_modules/@mariozechner/clipboard/src/clipboard_rs/platform/win.rs",
+            "bytes": 24038,
+            "sha256": "7f0af0cb62303091e9af0dd4f36d1e3962419eb1764bd6b04eba96413c65e4c3"
+          },
+          {
+            "path": "node_modules/@mariozechner/clipboard/src/clipboard_rs/platform/x11.rs",
+            "bytes": 25143,
+            "sha256": "5e44069a1a9e5b04f2ea82805965efb1a48dc900f8fbddb47665f915f1575cb8"
+          }
+        ],
+        "declaredNativeConsumers": [
+          {
+            "path": "node_modules/@mariozechner/clipboard-win32-x64-msvc/clipboard.win32-x64-msvc.node",
+            "bytes": 1351680,
+            "sha256": "2b75a71676a9054323a223c7853570fa44bf73a701d6c3160219ec0971052fd5"
+          }
+        ]
+      }
+    },
+    {
+      "packagePath": "node_modules/@silvia-odwyer/photon-node",
+      "name": "@silvia-odwyer/photon-node",
+      "version": "0.3.4",
+      "declaredLicense": "Apache-2.0",
+      "packageJsonSha256": "a1362f6a9e9d942d6b77555f1e40b19a6b3e2cc04bfb8af95e452a6f769fe7db",
+      "npmIntegrity": "sha512-bnly4BKB3KDTFxrUIcgCLbaeVVS8lrAkri1pEzskpmxu9MdfGQTy8b8EgcD83ywD3RPMsIulY8xJH5Awa+t9fA==",
+      "noticePath": "distribution/notices/LICENSE.photon-roboto",
+      "noticeBytes": 11388,
+      "noticeSha256": "3e8480e2679854dffdd0c4f162d9941fd5b9231be881859fcb419544cd7b6c99",
+      "upstream": {
+        "repository": "silvia-odwyer/photon",
+        "commit": "685f5b155b36c5611c08ca678bb78ddbab3edbac",
+        "path": "crate/fonts/Apache License.txt",
+        "gitBlob": "63d530249b06c18f851e35f73508b4826e568581"
+      },
+      "coverage": {
+        "kind": "embedded-file",
+        "name": "Roboto-Regular.ttf",
+        "registry": "crates.io",
+        "sourcePackage": "photon-rs",
+        "sourceVersion": "0.3.3",
+        "registryArchiveSha256": "06e9b6d764d6656aba14f5ae43fbf48ce98ff1b1a6beb4d2e801eb0729f88773",
+        "sourceFile": {
+          "path": "fonts/Roboto-Regular.ttf",
+          "bytes": 171676,
+          "sha256": "79e851404657dac2106b3d22ad256d47824a9a5765458edb72c9102a45816d95",
+          "gitBlob": "2c97eeadffe1a34bd67d3ff1c3887fd53e22c2ca"
+        },
+        "consumer": {
+          "path": "node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm",
+          "bytes": 1881634,
+          "sha256": "10468181565c56004c867f3a4af96f89a0ef5a63a72f2b5fb12c1f1992a3615c"
+        },
+        "offset": 1403285,
+        "attribution": "Copyright 2011 Google Inc. All Rights Reserved."
+      }
+    },
+    {
+      "packagePath": "node_modules/@aws-sdk/credential-provider-http",
+      "name": "@aws-sdk/credential-provider-http",
+      "version": "3.972.72",
+      "declaredLicense": "Apache-2.0",
+      "packageJsonSha256": "d5e45507d74cd842274ceb0df9ab77247be618f5d62f7703a30e9950d4f7286f",
+      "npmIntegrity": "sha512-X98zYOrVOeuosCX+6ktf29FC2N2GHPLia7qv6mzPzTc+RPAuHWCDS++Z6JK7eGYqb/v6uaW7bAXaOvDBfol+0w==",
+      "noticePath": "distribution/notices/LICENSE.aws-sdk",
+      "noticeBytes": 11352,
+      "noticeSha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+      "upstream": {
+        "repository": "aws/aws-sdk-js-v3",
+        "commit": "313813d9e1f25eb6896cf2880977f01ee7fb2556",
+        "path": "LICENSE",
+        "gitBlob": "0322cba2eac898acb5c8577a20657e7a74af55a4"
+      },
+      "coverage": {
+        "kind": "package"
+      }
+    },
+    {
+      "packagePath": "node_modules/@aws-sdk/credential-provider-login",
+      "name": "@aws-sdk/credential-provider-login",
+      "version": "3.972.77",
+      "declaredLicense": "Apache-2.0",
+      "packageJsonSha256": "9079c1be9a70783a76d67f8050ec6dde0e37a08fb555517d4269f3660f54d66d",
+      "npmIntegrity": "sha512-Jb59xfEISoN5mmbnA+HYqdtrSX3CgCtJoof+V5D8/TgUI56W63GEEd5Y58WijU3Ou6+WEgaLD1feVzaRXV5IDQ==",
+      "noticePath": "distribution/notices/LICENSE.aws-sdk",
+      "noticeBytes": 11352,
+      "noticeSha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+      "upstream": {
+        "repository": "aws/aws-sdk-js-v3",
+        "commit": "313813d9e1f25eb6896cf2880977f01ee7fb2556",
+        "path": "LICENSE",
+        "gitBlob": "0322cba2eac898acb5c8577a20657e7a74af55a4"
+      },
+      "coverage": {
+        "kind": "package"
+      }
+    },
+    {
+      "packagePath": "node_modules/@aws-sdk/nested-clients",
+      "name": "@aws-sdk/nested-clients",
+      "version": "3.997.44",
+      "declaredLicense": "Apache-2.0",
+      "packageJsonSha256": "0665ff67df4b870c8aab7d99e8a0f15c1acd9b7f82b9b08eed783a00c67ad78d",
+      "npmIntegrity": "sha512-NhEgryjlBF9w38ZXqGymQV28IhkYa1mKhlbYnqIis57AYwWGVYfUPgg/qC2rLRqOUfblxx++irvju10kVTa8Vw==",
+      "noticePath": "distribution/notices/LICENSE.aws-sdk",
+      "noticeBytes": 11352,
+      "noticeSha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+      "upstream": {
+        "repository": "aws/aws-sdk-js-v3",
+        "commit": "313813d9e1f25eb6896cf2880977f01ee7fb2556",
+        "path": "LICENSE",
+        "gitBlob": "0322cba2eac898acb5c8577a20657e7a74af55a4"
+      },
+      "coverage": {
+        "kind": "package"
+      }
+    }
+  ]
+}

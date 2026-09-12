@@ -1,0 +1,19 @@
+Pi native host patch contributions
+Copyright 2026 Project Maintainers
+
+Original first-party contributions to the .patch files under host-patches/,
+and those contributions in applied or compiled form, are licensed under the
+MIT License in the adjacent LICENSE file. This includes the selected
+pi-0.85.1 patch and the historical pi-0.85.0 patch fixture.
+
+This grant covers only contributions for which Project Maintainers hold the
+licensing rights. It does not relicense upstream code, patch context or other
+third-party material. Pi's upstream MIT license and attribution remain in each
+version directory's LICENSE.pi. Retain those notices together with this grant
+when distributing the modified host.
+
+The OpenAI compatibility layer, restricted runtime fixtures, distribution
+tooling and integration documentation retain their existing scoped
+Apache-2.0 licenses. Other components and third-party works retain their own
+terms. This is not a blanket license for otherwise unlicensed repository
+material, a claim of complete dependency notice coverage, or release approval.
