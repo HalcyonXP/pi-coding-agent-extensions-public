@@ -72,6 +72,9 @@ jobs:
       - name: Actual installed native exec notifications across waits
         timeout-minutes: 5
         run: node distribution/accept-native-context.mjs '.pi/extracted artifact' notifications
+      - name: Actual installed notification acknowledgement and quarantine
+        timeout-minutes: 5
+        run: node distribution/accept-notification-ack.mjs '.pi/extracted artifact'
       # No deployment, publishing, credentials or executable artifact upload.
       - name: Retain only sanitized reproduction receipts
         uses: actions/upload-artifact@v4

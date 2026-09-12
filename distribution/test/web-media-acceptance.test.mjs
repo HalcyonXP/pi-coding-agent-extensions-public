@@ -21,7 +21,8 @@ function assertCohortWorkflow(source){
   const index=lines.indexOf(`        run: node distribution/accept-native-context.mjs '.pi/extracted artifact' ${name}`);
   assert.ok(index>0,`Missing exact ${name} cohort command`);assert.equal(lines[index-1],'        timeout-minutes: 5');
  }
- assert.equal(lines.filter(line=>line==='        timeout-minutes: 5').length,6);
+ const ack=lines.indexOf("        run: node distribution/accept-notification-ack.mjs '.pi/extracted artifact'");assert.ok(ack>0,'Missing acknowledgement cohort');assert.equal(lines[ack-1],'        timeout-minutes: 5');
+ assert.equal(lines.filter(line=>line==='        timeout-minutes: 5').length,7);
  assert.match(source,/timeout-minutes: 20/);assert.match(source,/persist-credentials: false/);assert.doesNotMatch(source,/actions\/deploy|gh release/);
 }
 for(const ending of['\n','\r\n'])test(`hosted artifact workflow requires separate bounded cohorts with ${JSON.stringify(ending)} checkout lines`,()=>{
@@ -35,6 +36,7 @@ test('workflow line-ending compatibility cannot hide missing, changed or unbound
   const lines=source.split(/\r?\n/),index=lines.indexOf(command);assert.ok(index>0);lines[index-1]='        timeout-minutes: 6';
   assert.throws(()=>assertCohortWorkflow(lines.join('\r\n')));
  }
+ const ack="        run: node distribution/accept-notification-ack.mjs '.pi/extracted artifact'";assert.throws(()=>assertCohortWorkflow(source.replace(ack,ack+' extra')));assert.throws(()=>assertCohortWorkflow(source.replace('timeout-minutes: 5\n'+ack,'timeout-minutes: 6\n'+ack).replace('timeout-minutes: 5\r\n'+ack,'timeout-minutes: 6\r\n'+ack)));
 });
 test('current CLI source requires Web preferences and settings across restart/rollback',()=>{
  const s=read('../accept-profile.mjs');for(const pattern of [/savedWebAdmissionProfile:true/,/validateWebSettings\(settingsMenu.webSettings\)/,/effective: verified-v1/,/effective: experimental/,/Rollback preserves the Web admission profile/,/webPreferenceBefore/])assert.match(s,pattern);
