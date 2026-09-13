@@ -41,7 +41,7 @@ test("builder copies both native grants and their scope notice from canonical so
  const checked=spawnSync(process.execPath,["--check",fileURLToPath(new URL("../build.mjs",import.meta.url))],{windowsHide:true,encoding:"utf8",timeout:30000,maxBuffer:1024*1024});
  assert.equal(checked.status,0,checked.stderr);assert.equal(checked.error,undefined);
 });
-test("isolated CRLF Git checkout retains canonical patch grants and complete builder lines",async()=>{
+for(const inputEol of ["LF","CRLF"])test(`isolated ${inputEol}-origin CRLF Git checkout retains canonical patch grants and complete builder lines`,async()=>{
  const root=await mkdtemp(join(tmpdir(),"patch-grant-checkout-")),env=isolatedEnvironment(join(root,"home"));let passed=false;
  try{
   const git=(args,input)=>{const r=spawnSync("git",args,{cwd:root,env,input,windowsHide:true,encoding:null,timeout:30000,maxBuffer:2*1024*1024});assert.equal(r.status,0,Buffer.concat([r.stdout??Buffer.alloc(0),r.stderr??Buffer.alloc(0)]).toString("utf8"));assert.equal(r.error,undefined);return r.stdout.toString("utf8").trim();};
@@ -50,7 +50,18 @@ test("isolated CRLF Git checkout retains canonical patch grants and complete bui
   git(["init","--template="]);git(["config","--local","core.autocrlf","true"]);
   const supplemental=supplementalNoticeFiles(await readFile(new URL("../supplemental-notices.json",import.meta.url)));
   const paths=[".gitattributes","host-patches/LICENSE","host-patches/NOTICE","distribution/build.mjs",...supplemental],originals=new Map();
-  for(const path of paths){const bytes=await readFile(new URL(`../../${path}`,import.meta.url));originals.set(path,bytes);const oid=git(["hash-object","-w","--stdin"],bytes);git(["update-index","--add","--cacheinfo","100644",oid,path]);}
+  for(const path of paths){
+   const sourceBytes=await readFile(new URL(`../../${path}`,import.meta.url));
+   // Model both originating checkouts using new first-party fixture text only.
+   // Never normalize upstream grants/witnesses or any source file in place.
+   const bytes=[".gitattributes","distribution/build.mjs"].includes(path)
+    ?Buffer.from(sourceBytes.toString("utf8").replace(/\r\n/g,"\n").replace(/\n/g,inputEol==="CRLF"?"\r\n":"\n"))
+    :sourceBytes;
+   originals.set(path,bytes);
+   // --path applies the real clean rules (including indexed -text attributes).
+   // Raw --stdin alone would wrongly stage checkout CRs as canonical content.
+   const oid=git(["hash-object","-w",`--path=${path}`,"--stdin"],bytes);git(["update-index","--add","--cacheinfo","100644",oid,path]);
+  }
   git(["checkout-index","--all"]);
   for(const path of ["host-patches/LICENSE","host-patches/NOTICE"]){const bytes=await readFile(join(root,path));assert.equal(bytes.includes(13),false);assert.ok(bytes.equals(originals.get(path)));}
   for(const path of supplemental)assert.ok((await readFile(join(root,path))).equals(originals.get(path)),path);
