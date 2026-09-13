@@ -1,0 +1,12 @@
+/*
+ * Copyright 2023 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ *
+ * Declarations for internal-only JS library functions.
+ *
+ * All JS library functions must be declares in one header or anther in order
+ * for `tools/gen_sig_info.py` to work.   This file contains declarations for
+ * functions that are not declared in any other public or private header.
+ */

@@ -9,7 +9,7 @@ import {fileURLToPath} from "node:url";
 import {randomUUID} from "node:crypto";
 import {sha256,run,npm,writeManifest,verifyBundle,archive} from "./lib.mjs";
 import {curatePayload,retainedSuffix,verifyCuration} from "./curate-payload.mjs";
-import {parseSupplementalNotices,verifySupplementalNotices} from "./supplemental-notices.mjs";
+import {supplementalNoticeFiles,verifySupplementalNotices} from "./supplemental-notices.mjs";
 import {verifyHostArtifacts} from "../.github/scripts/pi-host-provenance.mjs";
 import {artifactPaths,verifiedExecutable} from "../openai-compatibility/runtime/native/artifact.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
@@ -58,8 +58,7 @@ assert.ok(documents.includes("docs/openai-integration/PRIVATE-RELEASE.md"),"Rele
 for(const path of documents)await copySource(path,join(out,path));
 // Copy reviewed supplemental grants without modifying installed upstream packages.
 const supplementalBytes=run("git",["show",`${sourceCommit}:distribution/supplemental-notices.json`],{cwd:root,encoding:null});
-const supplementalPolicy=parseSupplementalNotices(supplementalBytes);
-for(const path of new Set(["distribution/supplemental-notices.json","distribution/supplemental-notices.mjs",...supplementalPolicy.entries.map(e=>e.noticePath)]))await copySource(path,join(out,path));
+for(const path of new Set(["distribution/supplemental-notices.json","distribution/supplemental-notices.mjs",...supplementalNoticeFiles(supplementalBytes)]))await copySource(path,join(out,path));
 const supplementalNotices=await verifySupplementalNotices(out,supplementalBytes);
 const metadata={release:"0.3.0-private.1",platform:"win32-x64",nodeMajors:[24,25],sourceCommit,host:provenance,native:nativeManifest,curation,supplementalNotices};
 const manifest=await writeManifest(out,metadata);await verifyBundle(out);await verifyCuration(out,manifest,policyBytes);
