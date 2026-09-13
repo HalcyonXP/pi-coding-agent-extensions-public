@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "scope": "supplemental-notice-presence-only",
   "entries": [
     {
@@ -1920,6 +1920,298 @@
             "sha256": "3d348e264f2a443bf3fc7c1e6d99cee8048000eb1b602117a9afb0e012d202b7"
           },
           "offset": 0
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.emscripten-js-2010-shell",
+      "noticeBytes": 92,
+      "noticeSha256": "32fe9dd49a599b8096b7dbbb300cb8dcee240ec449d83d624502a7278e92d6c9",
+      "upstream": {
+        "repository": "emscripten-core/emscripten",
+        "commit": "8c5f43157a3f069ade75876e23061330521eabde",
+        "path": "src/shell.js",
+        "gitBlob": "c0d869bc1a29d040ab2c1f6eee38d46d22505038"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "emscripten-js-2010-shell",
+        "sourceRelease": "emscripten-5.0.1",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.mjs",
+            "bytes": 10208,
+            "sha256": "3b0757e4b1051a5f344322ad6a02c075dadff70cdb50d37b7df6c120d4af77e9"
+          }
+        ],
+        "noticeSource": {
+          "kind": "excerpt",
+          "sourceFile": {
+            "path": "distribution/notices/LICENSE.source-emscripten-js-2010-shell",
+            "bytes": 15902,
+            "sha256": "3b6a87815bb6138f6a47c3fbe3fcd260719607502d8a5c41781ae1193d70945d"
+          },
+          "offset": 0
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.emscripten-js-2015-memoryprofiler",
+      "noticeBytes": 92,
+      "noticeSha256": "6919beeeeefaa19cdc6ea5c436df2925cddcf330dd3d68c968386e828cee16bd",
+      "upstream": {
+        "repository": "emscripten-core/emscripten",
+        "commit": "8c5f43157a3f069ade75876e23061330521eabde",
+        "path": "src/memoryprofiler.js",
+        "gitBlob": "e55940b96ccb041d25785fb65da7df52ccf93f05"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "emscripten-js-2015-memoryprofiler",
+        "sourceRelease": "emscripten-5.0.1",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.mjs",
+            "bytes": 10208,
+            "sha256": "3b0757e4b1051a5f344322ad6a02c075dadff70cdb50d37b7df6c120d4af77e9"
+          }
+        ],
+        "noticeSource": {
+          "kind": "excerpt",
+          "sourceFile": {
+            "path": "distribution/notices/LICENSE.source-emscripten-js-2015-memoryprofiler",
+            "bytes": 28836,
+            "sha256": "5c73812316e5aff8df28dff7364583041437d0502585578d4900d7a24c879d8c"
+          },
+          "offset": 0
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.emscripten-js-2019-node-shell-read",
+      "noticeBytes": 92,
+      "noticeSha256": "6aa57be91140de1ec2da4e1be00e873cce250c7ae40d0054417f652118199cc9",
+      "upstream": {
+        "repository": "emscripten-core/emscripten",
+        "commit": "8c5f43157a3f069ade75876e23061330521eabde",
+        "path": "src/node_shell_read.js",
+        "gitBlob": "8fafd66b81f36b05e38e6f51e7e4f9b7c3bc3fe9"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "emscripten-js-2019-node-shell-read",
+        "sourceRelease": "emscripten-5.0.1",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.mjs",
+            "bytes": 10208,
+            "sha256": "3b0757e4b1051a5f344322ad6a02c075dadff70cdb50d37b7df6c120d4af77e9"
+          }
+        ],
+        "noticeSource": {
+          "kind": "excerpt",
+          "sourceFile": {
+            "path": "distribution/notices/LICENSE.source-emscripten-js-2019-node-shell-read",
+            "bytes": 688,
+            "sha256": "9f1c6c53453d3d2401d133b5e5fdcfc89965118ae235e1030af39365dfb866c2"
+          },
+          "offset": 0
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.emscripten-js-2020-runtime-debug",
+      "noticeBytes": 92,
+      "noticeSha256": "a15e0b45ca0f02b3ca52dd6a061d1d45163606ae19b373dd155f347b7c37d70e",
+      "upstream": {
+        "repository": "emscripten-core/emscripten",
+        "commit": "8c5f43157a3f069ade75876e23061330521eabde",
+        "path": "src/runtime_debug.js",
+        "gitBlob": "7c1170a3b301008a213985123c7443a92022f8cd"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "emscripten-js-2020-runtime-debug",
+        "sourceRelease": "emscripten-5.0.1",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.mjs",
+            "bytes": 10208,
+            "sha256": "3b0757e4b1051a5f344322ad6a02c075dadff70cdb50d37b7df6c120d4af77e9"
+          }
+        ],
+        "noticeSource": {
+          "kind": "excerpt",
+          "sourceFile": {
+            "path": "distribution/notices/LICENSE.source-emscripten-js-2020-runtime-debug",
+            "bytes": 8554,
+            "sha256": "fe62e537499b7b1ef4a3e770d43a0eec983de55fcf41c37e7cba180ae01d42a3"
+          },
+          "offset": 0
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.emscripten-js-2023-runtime-exceptions",
+      "noticeBytes": 92,
+      "noticeSha256": "f96e2c2f8b791a6f7dfa079908fdd58f8ca97428ed3f676fb7ea29e9ba165569",
+      "upstream": {
+        "repository": "emscripten-core/emscripten",
+        "commit": "8c5f43157a3f069ade75876e23061330521eabde",
+        "path": "src/runtime_exceptions.js",
+        "gitBlob": "1446b27dd20020b72ed63ccd96eddca95daf5842"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "emscripten-js-2023-runtime-exceptions",
+        "sourceRelease": "emscripten-5.0.1",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.mjs",
+            "bytes": 10208,
+            "sha256": "3b0757e4b1051a5f344322ad6a02c075dadff70cdb50d37b7df6c120d4af77e9"
+          }
+        ],
+        "noticeSource": {
+          "kind": "excerpt",
+          "sourceFile": {
+            "path": "distribution/notices/LICENSE.source-emscripten-js-2023-runtime-exceptions",
+            "bytes": 618,
+            "sha256": "1e3b36335d609d89f2b09106b7486fe79aa496ed81f43bc26fc7fd06e07cb17e"
+          },
+          "offset": 0
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.emscripten-js-2024-minimum-runtime-check",
+      "noticeBytes": 92,
+      "noticeSha256": "5af926b1a896f2ccb01dba80693735f4a3814c71f6426ebfae4f9aee2892082e",
+      "upstream": {
+        "repository": "emscripten-core/emscripten",
+        "commit": "8c5f43157a3f069ade75876e23061330521eabde",
+        "path": "src/minimum_runtime_check.js",
+        "gitBlob": "10a19cec0b366c3f858ce4b46798fec75758c56b"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "emscripten-js-2024-minimum-runtime-check",
+        "sourceRelease": "emscripten-5.0.1",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.mjs",
+            "bytes": 10208,
+            "sha256": "3b0757e4b1051a5f344322ad6a02c075dadff70cdb50d37b7df6c120d4af77e9"
+          }
+        ],
+        "noticeSource": {
+          "kind": "excerpt",
+          "sourceFile": {
+            "path": "distribution/notices/LICENSE.source-emscripten-js-2024-minimum-runtime-check",
+            "bytes": 3708,
+            "sha256": "f3556698ffa955c75e01167192b2b673ab3b7650bf9660d1f2af00737d996b88"
+          },
+          "offset": 0
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.unicode-data-v3",
+      "noticeBytes": 1995,
+      "noticeSha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+      "upstream": {
+        "kind": "published-file",
+        "url": "https://www.unicode.org/license.txt",
+        "bytes": 1995,
+        "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "unicode-data-v3",
+        "sourceRelease": "unicode-data-17.0.0",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.wasm",
+            "bytes": 503134,
+            "sha256": "105c3bed22d457e43e3d1c3c1c6959fda62a8fe06f0fc8a985303c3a2be72232"
+          }
+        ],
+        "noticeSource": {
+          "kind": "whole-file"
+        }
+      }
+    },
+    {
+      "packagePath": "node_modules/@jitl/quickjs-wasmfile-release-sync",
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "declaredLicense": "MIT",
+      "packageJsonSha256": "f1d8c02102ee441a6a85bf31522a9bc436e66600b31392ac9b0dddb15b33245d",
+      "npmIntegrity": "sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==",
+      "noticePath": "distribution/notices/LICENSE.unicode-data-17-attribution",
+      "noticeBytes": 740,
+      "noticeSha256": "9fe1a90bd32659d7953616283dc2bffaa165518aae9ace026040c42c559ba606",
+      "upstream": {
+        "kind": "published-file",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/ReadMe.txt",
+        "bytes": 740,
+        "sha256": "9fe1a90bd32659d7953616283dc2bffaa165518aae9ace026040c42c559ba606"
+      },
+      "coverage": {
+        "kind": "runtime-notice",
+        "name": "unicode-data-17-attribution",
+        "sourceRelease": "unicode-data-17.0.0",
+        "consumers": [
+          {
+            "path": "node_modules/@jitl/quickjs-wasmfile-release-sync/dist/emscripten-module.wasm",
+            "bytes": 503134,
+            "sha256": "105c3bed22d457e43e3d1c3c1c6959fda62a8fe06f0fc8a985303c3a2be72232"
+          }
+        ],
+        "noticeSource": {
+          "kind": "whole-file"
         }
       }
     }
