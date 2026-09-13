@@ -1,6 +1,6 @@
 # Code result projection and API migration
 
-**Unified migration accepted in PR #32; new Web projection is working-source development only:** cell `tools.NAME(args)` now projects recognized normal Unified results by default. `nativeTools.NAME(args)` preserves the original `{result,isError}` guest contract; `projectedTools` remains the identical object as `tools` for scripts using the earlier opt-in API. This deliberately supersedes PR #31's default-wrapper behavior. It does not rewrite old source, history or installed bundles, and does not establish full Codex API parity.
+**Unified migration accepted in PR #32; bounded Web/imagegen projections accepted in PR #33:** cell `tools.NAME(args)` now projects recognized normal Unified results by default. `nativeTools.NAME(args)` preserves the original `{result,isError}` guest contract; `projectedTools` remains the identical object as `tools` for scripts using the earlier opt-in API. This deliberately supersedes PR #31's default-wrapper behavior. It does not rewrite old source, history or installed bundles, and does not establish full Codex API parity.
 
 All three names expose the same eligible canonical tools/aliases and object/JSON-object-string argument rules, delegating through the same native controls. `ALL_TOOLS`/`TOOL_NAMES`, permissions, hooks, accounting and ownership are unchanged. Non-cell probes keep their original `tools.call` API and expose neither added namespace.
 
@@ -31,7 +31,7 @@ if (Object.hasOwn(r, "output")) {
 
 `text()` still accepts primitives only. The adapter does not inspect or coerce arbitrary guest error objects. It parses native result JSON using captured intrinsics; private timing is associated with that decoded reply, not accepted from guest properties. The raw wrapper is checked against the existing64KiB per-result and aggregate budgets **before** projection. Smaller guest views do not expand the shell's collection allowance or consume more unread output. No native patch, helper recompilation, alternate provider route or shell sandbox is introduced.
 
-## Web text projection — Batch B working source
+## Web text projection — accepted bounded Batch B subset
 
 The pinned Web `SearchOutput` uses the default `ToolOutput` conversion: text content becomes a string. Pi now recognizes normal canonical `web_search` replies only after native finalized-result capture, complete protected publication and the existing RPC admission. `tools.web_search` / `projectedTools.web_search` then returns a **string containing all literal text blocks**, separated by two newlines. Pi's untrusted-content warning and opaque source JSON remain in that string; this is not byte-identical upstream text or a native citation renderer.
 
@@ -41,9 +41,9 @@ The direct Web result adds `details.web_result: {version:1,sha256}`: a **consist
 
 **Native evidence references** (`ev_...`) identify already-published context-owned evidence. They are not Web service `ref_id` values, URLs or permission to open arbitrary resources. Opaque Web IDs/citation syntax are neither interpreted nor replayed; click/owned-reference continuation remains open. No encrypted continuation, conversation upload, media download or image forwarding is introduced.
 
-Focused worker tests cover normal/raw/alias views, post-publication admission, hook/digest/metadata/error fallback, captured intrinsics and original RPC limits. `distribution/web-projection-scenarios.mjs` exercises both real native Responses routes with synthetic transport and real contained cells. Development cohorts have covered text/raw/hook/oversized replies, then a separate search→public-URL-open sequence with zero guest output budget and intact native source publication. Those source-on-accepted-SDK probes are not new-artifact acceptance; full Batch B milestone gates remain pending.
+Focused worker tests cover normal/raw/alias views, post-publication admission, hook/digest/metadata/error fallback, captured intrinsics and original RPC limits. `distribution/web-projection-scenarios.mjs` exercises both real native Responses routes with synthetic transport and real contained cells. Development cohorts have covered text/raw/hook/oversized replies, then a separate search→public-URL-open sequence with zero guest output budget and intact native source publication. Those original source-on-SDK probes remain development evidence. PR33 subsequently passed separate source/master/copied-handoff gates for the bounded subset; see the [milestone index](MILESTONES.md). Neither boundary certifies later working changes or owned opaque-ID continuation.
 
-## Imagegen projection — Batch B working source
+## Imagegen projection — accepted bounded Batch B subset
 
 Normal canonical `imagegen` results now project to `{image_url,output_hint}` after finalized consistency validation, complete native image/text publication and the original guest RPC admission. `image_url` contains an owned **Pi image reference**, not upstream inline bytes or a URL to fetch; `generatedImage` accepts that reference. `output_hint` selects an actual successful destination or canonical path, but helper-provided hints remain unverified display data and never grant filesystem authority. This is explicit Pi adaptation, not byte-for-byte Codex parity.
 
@@ -51,7 +51,7 @@ Normal canonical `imagegen` results now project to `{image_url,output_hint}` aft
 
 ## Scope and verification
 
-The field names follow the pinned [Unified source-inspection contracts](CODEX-TOOL-CONTRACTS.md). Upstream execution, full default-API compatibility, identical timing/error/truncation behavior and projections for remaining tools remain unestablished. PR #32 made the bounded Unified projection the default; the separate Web working-source change does not certify a new installation. The explicit legacy namespace avoids losing raw access; callers still need the documented source change.
+The field names follow the pinned [Unified source-inspection contracts](CODEX-TOOL-CONTRACTS.md). Upstream execution, full default-API compatibility, identical timing/error/truncation behavior and projections for remaining tools remain unestablished. PR #32 made the bounded Unified projection the default; PR33 separately accepted bounded Web/imagegen projections. The milestone index names those exact source/master boundaries rather than implying acceptance of every later installation. The explicit legacy namespace avoids losing raw access; callers still need the documented source change.
 
 Runtime tests cover shape admission/fallback, private intrinsics, alias identity, ordinary wrappers, bounded workers and the contained Windows path. `distribution/accept-projected-tools.mjs` adds isolated installed-SDK checks on both native Responses routes: default nonzero completion, numeric-ID collection through the retained `projectedTools` alias, default hook-warning fallback and unchanged raw wrappers through `nativeTools`. It retains native events, payload/history observations, scopes and cleanup failures; uses synthetic auth/transport; keeps auto-compaction enabled; and makes16 synthetic requests/eight scenarios, with zero live calls. Development on an accepted predecessor SDK is not new-artifact acceptance. Exact source, hosted checks, resulting master and copied installation remain separate gates.
 

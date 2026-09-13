@@ -28,6 +28,7 @@ const suites = Object.freeze({
   types: ["openai-compatibility/node_modules/typescript/bin/tsc", "--noEmit", "-p", "openai-compatibility/tsconfig.json"],
   syntax: ["openai-compatibility/runtime/check.mjs"],
   workflow: tests(".github/test/development.test.mjs"),
+  documentation: tests(".github/test/compatibility-docs.test.mjs"),
   "native-wait": [".github/scripts/develop-native.mjs", "unified-wait"],
   "native-projection": [".github/scripts/develop-native.mjs", "projection"],
   "native-settings": [".github/scripts/develop-native.mjs", "settings"],

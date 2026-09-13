@@ -31,7 +31,7 @@ test("native development requires an explicit workspace SDK and cannot select an
   assert.equal(selected[0].args[2], resolve(root, ".pi/example-bundle"));
 });
 test("runtime and extension test suites serialize file-level adversarial tests", () => {
-  for (const suite of selectSuites(["coordinator", "unified", "settings", "web-media", "lifecycle", "extension", "runtime", "distribution", "workflow"])) {
+  for (const suite of selectSuites(["coordinator", "unified", "settings", "web-media", "lifecycle", "extension", "runtime", "distribution", "workflow", "documentation"])) {
     assert.deepEqual(suite.args.slice(0, 2), ["--test", "--test-concurrency=1"]);
     assert.ok(suite.args.slice(2).every(p => /\.test\.(?:mjs|ts)$/.test(p)));
     for (const path of suite.args.slice(2).filter(p => !p.includes("*"))) assert.ok(existsSync(join(root, path)), path);
