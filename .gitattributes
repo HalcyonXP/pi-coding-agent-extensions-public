@@ -15,6 +15,16 @@ host-patches/LICENSE text eol=lf
 host-patches/NOTICE text eol=lf
 # Supplemental grants retain reviewed upstream bytes, including original line endings.
 distribution/notices/LICENSE.* -text
+# Preserve the upstream grant's space-only line and final blank line, not normalized text.
+distribution/notices/LICENSE.emscripten whitespace=-blank-at-eol,-blank-at-eof
+# This unchanged upstream header witness retains two trailing spaces in documentation.
+distribution/notices/LICENSE.source-emscripten-header-03-emscripten whitespace=-blank-at-eol
+# Exact upstream QuickJS witnesses retain only their observed whitespace exceptions.
+distribution/notices/LICENSE.source-quickjs-core-01-cutils whitespace=-blank-at-eol
+distribution/notices/LICENSE.source-quickjs-core-03-engine-header whitespace=-blank-at-eol
+distribution/notices/LICENSE.source-quickjs-core-04-engine whitespace=-blank-at-eol
+distribution/notices/LICENSE.source-quickjs-core-06-regexp whitespace=-blank-at-eol
+distribution/notices/LICENSE.source-quickjs-core-11-libc whitespace=-blank-at-eol,-blank-at-eof
 # Curation proof is compared byte-for-byte against matching trusted source.
 distribution/payload-policy.json text eol=lf
 docs/openai-integration/LICENSE text eol=lf

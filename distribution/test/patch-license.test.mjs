@@ -9,6 +9,7 @@ import {createHash} from "node:crypto";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {isolatedEnvironment} from "../isolated-environment.mjs";
+import {supplementalNoticeFiles} from "../supplemental-notices.mjs";
 const read=path=>readFile(new URL(`../../${path}`,import.meta.url),"utf8");
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 test("native patch contributions have a complete MIT grant with non-personal attribution",async()=>{
@@ -43,14 +44,29 @@ test("builder copies both native grants and their scope notice from canonical so
 test("isolated CRLF Git checkout retains canonical patch grants and complete builder lines",async()=>{
  const root=await mkdtemp(join(tmpdir(),"patch-grant-checkout-")),env=isolatedEnvironment(join(root,"home"));let passed=false;
  try{
-  const git=(args,input)=>{const r=spawnSync("git",args,{cwd:root,env,input,windowsHide:true,encoding:null,timeout:30000,maxBuffer:2*1024*1024});assert.equal(r.status,0,r.stderr?.toString());assert.equal(r.error,undefined);return r.stdout.toString("utf8").trim();};
+  const git=(args,input)=>{const r=spawnSync("git",args,{cwd:root,env,input,windowsHide:true,encoding:null,timeout:30000,maxBuffer:2*1024*1024});assert.equal(r.status,0,Buffer.concat([r.stdout??Buffer.alloc(0),r.stderr??Buffer.alloc(0)]).toString("utf8"));assert.equal(r.error,undefined);return r.stdout.toString("utf8").trim();};
   // No commits, credentials, network or global configuration changes. Only this
   // synthetic repository's index/configuration and ordinary checkout are used.
   git(["init","--template="]);git(["config","--local","core.autocrlf","true"]);
-  const paths=[".gitattributes","host-patches/LICENSE","host-patches/NOTICE","distribution/build.mjs"],originals=new Map();
+  const supplemental=supplementalNoticeFiles(await readFile(new URL("../supplemental-notices.json",import.meta.url)));
+  const paths=[".gitattributes","host-patches/LICENSE","host-patches/NOTICE","distribution/build.mjs",...supplemental],originals=new Map();
   for(const path of paths){const bytes=await readFile(new URL(`../../${path}`,import.meta.url));originals.set(path,bytes);const oid=git(["hash-object","-w","--stdin"],bytes);git(["update-index","--add","--cacheinfo","100644",oid,path]);}
   git(["checkout-index","--all"]);
   for(const path of ["host-patches/LICENSE","host-patches/NOTICE"]){const bytes=await readFile(join(root,path));assert.equal(bytes.includes(13),false);assert.ok(bytes.equals(originals.get(path)));}
+  for(const path of supplemental)assert.ok((await readFile(join(root,path))).equals(originals.get(path)),path);
+  assert.equal(git(["check-attr","whitespace","--","distribution/notices/LICENSE.emscripten"]),"distribution/notices/LICENSE.emscripten: whitespace: -blank-at-eol,-blank-at-eof");
+  assert.equal(git(["check-attr","whitespace","--","distribution/notices/LICENSE.musl"]),"distribution/notices/LICENSE.musl: whitespace: unspecified");
+  assert.equal(git(["check-attr","whitespace","--","distribution/notices/LICENSE.source-emscripten-header-03-emscripten"]),"distribution/notices/LICENSE.source-emscripten-header-03-emscripten: whitespace: -blank-at-eol");
+  const whitespace=new Map([
+   ["distribution/notices/LICENSE.emscripten","-blank-at-eol,-blank-at-eof"],
+   ["distribution/notices/LICENSE.source-emscripten-header-03-emscripten","-blank-at-eol"],
+   ...["01-cutils","03-engine-header","04-engine","06-regexp"].map(name=>["distribution/notices/LICENSE.source-quickjs-core-"+name,"-blank-at-eol"]),
+   ["distribution/notices/LICENSE.source-quickjs-core-11-libc","-blank-at-eol,-blank-at-eof"],
+  ]);
+  // Exact per-file exceptions only: all other grants and witnesses retain defaults.
+  const checked=git(["check-attr","whitespace","--",...supplemental]).split(/\r?\n/);
+  assert.deepEqual(checked,supplemental.map(path=>path+": whitespace: "+(whitespace.get(path)??"unspecified")));
+  git(["diff","--cached","--check"]);
   const builder=await readFile(join(root,"distribution/build.mjs"),"utf8");assert.ok(builder.includes("\r\n"));
   const line=builder.split(/\r?\n/).find(s=>s.startsWith("for(const path of [")&&s.includes('"distribution/lib.mjs"'));assert.ok(line.endsWith("await copySource(path,join(out,path));"));passed=true;
  }finally{if(passed)await rm(root,{recursive:true,force:true});}

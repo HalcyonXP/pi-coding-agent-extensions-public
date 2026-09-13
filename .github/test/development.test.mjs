@@ -38,6 +38,9 @@ test("runtime and extension test suites serialize file-level adversarial tests",
   }
   assert.deepEqual(selectSuites(["types"])[0].args.slice(-2), ["-p", "openai-compatibility/tsconfig.json"]);
 });
+test("notice development includes the runtime-witness, legacy, inventory and checkout contracts", () => {
+ assert.deepEqual(selectSuites(["notice-coverage"])[0].args,["--test","--test-concurrency=1","distribution/test/supplemental-notices.test.mjs","distribution/test/runtime-notices.test.mjs","distribution/test/inventory.test.mjs","distribution/test/patch-license.test.mjs"]);
+});
 test("environment isolation is established before any child import and refuses profile reuse", t => {
   const dir = fixture(t), home = join(dir, "profile");
   const env = isolatedEnvironment(home, { PATH: "synthetic-path", NODE_OPTIONS: "--unexpected", OPENAI_API_KEY: "synthetic", GH_TOKEN: "synthetic", HTTP_PROXY: "synthetic", HOME: "unused", PI_CODING_AGENT_DIR: "unused", GIT_CONFIG_COUNT: "1", npm_config_registry: "unused" });

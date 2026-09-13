@@ -12,9 +12,9 @@ const digest=value=>text(value,/^[a-f0-9]{64}$/,64);
 const decode=(bytes,max)=>{assert.ok(bytes instanceof Uint8Array&&bytes.byteLength<=max);return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));};
 export function parseSupplementalNotices(bytes){
  const policy=decode(bytes,128*1024);
- keys(policy,["version","scope","entries"]);assert.equal(policy.version,2);assert.equal(policy.scope,"supplemental-notice-presence-only");
+ keys(policy,["version","scope","entries"]);assert.ok([2,3].includes(policy.version));assert.equal(policy.scope,"supplemental-notice-presence-only");
  assert.ok(Array.isArray(policy.entries)&&policy.entries.length>0&&policy.entries.length<=64);
- const seen=new Set(),files=new Map(),notices=new Map();
+ const seen=new Set(),files=new Map(),notices=new Map(),witnesses=new Map();
  const pin=(f,prefix,max)=>{
   keys(f,["path","bytes","sha256"]);safePath(f.path);assert.ok(f.path.startsWith(prefix));
   assert.ok(Number.isSafeInteger(f.bytes)&&f.bytes>0&&f.bytes<=max);digest(f.sha256);
@@ -26,6 +26,24 @@ export function parseSupplementalNotices(bytes){
   assert.ok(e.packagePath.endsWith("/"+e.name));
   const c=e.coverage;let identity=e.packagePath+"#package";
   if(c.kind==="package")keys(c,["kind"]);
+  else if(c.kind==="runtime-notice"){
+   assert.equal(policy.version,3,"Runtime notice requires schema v3");
+   keys(c,["kind","name","sourceRelease","consumers","noticeSource"]);
+   text(c.name,/^[a-z0-9][a-z0-9._-]*$/);text(c.sourceRelease,/^[A-Za-z][A-Za-z0-9._-]*-[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._-]+)?$/);
+   assert.ok(Array.isArray(c.consumers)&&c.consumers.length>0&&c.consumers.length<=16);
+   const local=new Set();for(const f of c.consumers){assert.ok(!local.has(f.path.toLowerCase()),"Duplicate runtime consumer");local.add(f.path.toLowerCase());pin(f,e.packagePath+"/",16*1024*1024);}
+   const n=c.noticeSource;
+   if(n.kind==="whole-file")keys(n,["kind"]);
+   else{
+    keys(n,["kind","sourceFile","offset"]);assert.equal(n.kind,"excerpt");
+    pin(n.sourceFile,"distribution/notices/LICENSE.source-",2*1024*1024);
+    assert.match(n.sourceFile.path,/^distribution\/notices\/LICENSE\.source-[A-Za-z0-9._-]+$/);
+    assert.ok(Number.isSafeInteger(n.offset)&&n.offset>=0&&n.offset+e.noticeBytes<=n.sourceFile.bytes,"Runtime notice excerpt outside source");
+    const key=n.sourceFile.path.toLowerCase(),sourcePin={file:n.sourceFile,upstream:e.upstream};
+    if(witnesses.has(key))assert.deepEqual(witnesses.get(key),sourcePin,"Conflicting source witness pins");else witnesses.set(key,sourcePin);
+   }
+   identity=e.packagePath+"#runtime-notice:"+c.name;
+  }
   else if(c.kind==="embedded-file"){
    keys(c,["kind","name","registry","sourcePackage","sourceVersion","registryArchiveSha256","sourceFile","consumer","offset","attribution"]);
    text(c.name,/^[A-Za-z0-9._-]+$/);assert.equal(c.registry,"crates.io");text(c.sourcePackage,/^[a-z0-9_-]+$/);
@@ -52,15 +70,23 @@ export function parseSupplementalNotices(bytes){
   digest(e.packageJsonSha256);text(e.npmIntegrity,/^sha512-[A-Za-z0-9+/]{86}==$/,95);
   assert.equal(Buffer.from(e.npmIntegrity.slice(7),"base64").toString("base64"),e.npmIntegrity.slice(7));
   safePath(e.noticePath);assert.match(e.noticePath,/^distribution\/notices\/LICENSE\.[A-Za-z0-9._-]+$/);
+  if(policy.version===3)assert.ok(!/^distribution\/notices\/LICENSE\.source-/i.test(e.noticePath),"Notice path reserved for source witnesses");
   assert.ok(Number.isSafeInteger(e.noticeBytes)&&e.noticeBytes>0&&e.noticeBytes<=64*1024);digest(e.noticeSha256);
   keys(e.upstream,["repository","commit","path","gitBlob"]);text(e.upstream.repository,/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
   text(e.upstream.commit,/^[a-f0-9]{40}$/,40);safePath(e.upstream.path);text(e.upstream.gitBlob,/^[a-f0-9]{40}$/,40);
   // upstream identifies the notice source, not a claim about the npm build's source commit.
   const noticeKey=e.noticePath.toLowerCase(),noticePin={path:e.noticePath,bytes:e.noticeBytes,sha256:e.noticeSha256,upstream:e.upstream};
+  if(c.kind==="runtime-notice"&&c.noticeSource.kind==="excerpt")noticePin.excerpt=c.noticeSource;
   if(notices.has(noticeKey))assert.deepEqual(notices.get(noticeKey),noticePin,"Conflicting shared notice pins");else notices.set(noticeKey,noticePin);
  }
  assert.ok(files.size<=512&&[...files.values()].reduce((n,f)=>n+f.bytes,0)<=32*1024*1024,"Supplemental file budget exceeded");
  return policy;
+}
+/** Canonical, unique delivery assets. Excerpt witnesses remain outside upstream packages. */
+export function supplementalNoticeFiles(bytes){
+ const policy=parseSupplementalNotices(bytes),paths=new Set();
+ for(const e of policy.entries){paths.add(e.noticePath);if(e.coverage.kind==="runtime-notice"&&e.coverage.noticeSource.kind==="excerpt")paths.add(e.coverage.noticeSource.sourceFile.path);}
+ return [...paths];
 }
 async function boundedFile(path,max){const s=await lstat(path);assert.ok(s.isFile()&&!s.isSymbolicLink()&&s.size<=max);const b=await readFile(path);assert.ok(b.length<=max);return b;}
 /** Input is an integrity-verified bundle or freshly curated, integrity-locked build tree.
@@ -79,7 +105,22 @@ export async function verifySupplementalNotices(root,policyBytes){
   assert.equal(lock.packages[e.packagePath]?.version,e.version);assert.equal(lock.packages[e.packagePath]?.integrity,e.npmIntegrity);
   const notice=await boundedFile(join(root,e.noticePath),64*1024);assert.equal(notice.length,e.noticeBytes);assert.equal(sha256(notice),e.noticeSha256);
   new TextDecoder("utf-8",{fatal:true}).decode(notice);
-  const blob=createHash("sha1").update(Buffer.from(`blob ${notice.length}\0`)).update(notice).digest("hex");
+  let source=notice;
+  if(e.coverage.kind==="runtime-notice"){
+   const c=e.coverage;
+   for(const f of c.consumers){
+    if(verifiedFiles.has(f.path))continue;
+    const bytes=await boundedFile(join(root,f.path),f.bytes);
+    assert.equal(bytes.length,f.bytes,"Runtime consumer size changed");assert.equal(sha256(bytes),f.sha256,"Runtime consumer bytes changed");verifiedFiles.add(f.path);
+   }
+   if(c.noticeSource.kind==="excerpt"){
+    const n=c.noticeSource,f=n.sourceFile;source=await boundedFile(join(root,f.path),f.bytes);
+    assert.equal(source.length,f.bytes,"Runtime notice source size changed");assert.equal(sha256(source),f.sha256,"Runtime notice source bytes changed");
+    new TextDecoder("utf-8",{fatal:true}).decode(source);
+    assert.ok(source.subarray(n.offset,n.offset+notice.length).equals(notice),"Runtime notice excerpt differs from source bytes");
+   }
+  }
+  const blob=createHash("sha1").update(Buffer.from(`blob ${source.length}\0`)).update(source).digest("hex");
   assert.equal(blob,e.upstream.gitBlob,"Supplemental notice differs from reviewed upstream blob");
   if(e.coverage.kind==="vendored-source")for(const f of [...e.coverage.sourceFiles,...e.coverage.declaredNativeConsumers]){
    if(verifiedFiles.has(f.path))continue;
@@ -95,5 +136,5 @@ export async function verifySupplementalNotices(root,policyBytes){
   }
   entries.push({packagePath:e.packagePath,name:e.name,version:e.version,noticePath:e.noticePath,noticeSha256:e.noticeSha256,coverage:e.coverage});
  }
- return {version:2,status:policy.scope,policySha256:sha256(policyBytes),entries};
+ return {version:policy.version,status:policy.scope,policySha256:sha256(policyBytes),entries};
 }

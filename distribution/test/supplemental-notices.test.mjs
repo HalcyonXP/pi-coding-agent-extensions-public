@@ -6,7 +6,7 @@ import {createHash} from "node:crypto";
 import {mkdtemp,mkdir,writeFile,readFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {parseSupplementalNotices,verifySupplementalNotices} from "../supplemental-notices.mjs";
+import {parseSupplementalNotices,verifySupplementalNotices,supplementalNoticeFiles} from "../supplemental-notices.mjs";
 import {sha256,writeManifest} from "../lib.mjs";
 import {auditBundle} from "../audit-bundle.mjs";
 const notice=Buffer.from("Synthetic notice fixture; not a license grant.\n");
@@ -27,13 +27,13 @@ async function fixture(policy=base()){
 }
 test("canonical supplemental source grants retain byte and upstream blob pins",async()=>{
  const bytes=await readFile(new URL("../supplemental-notices.json",import.meta.url)),p=parseSupplementalNotices(bytes);
- assert.equal(p.entries.length,6);const e=p.entries[0];assert.equal(e.name,"standardwebhooks");assert.equal(e.version,"1.1.1");assert.equal(e.upstream.path,"libraries/LICENSE");
+ assert.equal(p.version,3);assert.equal(p.entries.length,52);const e=p.entries[0];assert.equal(e.name,"standardwebhooks");assert.equal(e.version,"1.1.1");assert.equal(e.upstream.path,"libraries/LICENSE");
  const b=await readFile(new URL("../notices/LICENSE.standardwebhooks",import.meta.url));assert.equal(b.length,e.noticeBytes);assert.equal(sha256(b),e.noticeSha256);
  assert.equal(createHash("sha1").update(Buffer.from(`blob ${b.length}\0`)).update(b).digest("hex"),e.upstream.gitBlob);
  assert.match(b.toString(),/Copyright \(c\) 2023 Svix/);assert.match(b.toString(),/Permission is hereby granted/);
 });
 for(const [label,mutate] of [
- ["unknown field",p=>p.releaseReady=true],["unreviewed version",p=>p.version=3],["clearance claim",p=>p.scope="release-cleared"],
+ ["unknown field",p=>p.releaseReady=true],["unreviewed version",p=>p.version=4],["clearance claim",p=>p.scope="release-cleared"],
  ["empty rules",p=>p.entries=[]],["duplicate component",p=>p.entries.push(structuredClone(p.entries[0]))],
  ["traversal",p=>p.entries[0].packagePath="node_modules/../outside"],["wrong component path",p=>p.entries[0].packagePath="node_modules/other"],
  ["notice outside destination",p=>p.entries[0].noticePath="host-patches/LICENSE"],["oversized notice",p=>p.entries[0].noticeBytes=65537],
@@ -71,7 +71,7 @@ test("manifest cannot relabel a verified supplemental notice as release clearanc
 });
 test("builder explicitly copies canonical grants and validates the manifested record",async()=>{
  const source=await readFile(new URL("../build.mjs",import.meta.url),"utf8");
- assert.ok(source.includes('new Set(["distribution/supplemental-notices.json","distribution/supplemental-notices.mjs",...supplementalPolicy.entries.map(e=>e.noticePath)])'));assert.ok(source.includes('copySource(path,join(out,path))'));
+ assert.ok(source.includes('new Set(["distribution/supplemental-notices.json","distribution/supplemental-notices.mjs",...supplementalNoticeFiles(supplementalBytes)])'));assert.ok(source.includes('copySource(path,join(out,path))'));
  assert.ok(source.includes('assert.deepEqual(await verifySupplementalNotices(out,supplementalBytes),manifest.supplementalNotices)'));
 });
 // Vendored-source scope must remain distinct from its containing npm package.
