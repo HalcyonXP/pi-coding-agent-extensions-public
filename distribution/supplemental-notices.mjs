@@ -10,9 +10,14 @@ const keys=(value,expected)=>assert.deepEqual(Object.keys(value).sort(),expected
 const text=(value,pattern,max=214)=>{assert.equal(typeof value,"string");assert.ok(value.length<=max);assert.match(value,pattern);};
 const digest=value=>text(value,/^[a-f0-9]{64}$/,64);
 const decode=(bytes,max)=>{assert.ok(bytes instanceof Uint8Array&&bytes.byteLength<=max);return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));};
+// Reviewed publication locations only. Verification never requests these URLs.
+const publishedNoticeUrls=new Set([
+ "https://www.unicode.org/license.txt",
+ "https://www.unicode.org/Public/17.0.0/ucd/ReadMe.txt",
+]);
 export function parseSupplementalNotices(bytes){
  const policy=decode(bytes,128*1024);
- keys(policy,["version","scope","entries"]);assert.ok([2,3].includes(policy.version));assert.equal(policy.scope,"supplemental-notice-presence-only");
+ keys(policy,["version","scope","entries"]);assert.ok([2,3,4].includes(policy.version));assert.equal(policy.scope,"supplemental-notice-presence-only");
  assert.ok(Array.isArray(policy.entries)&&policy.entries.length>0&&policy.entries.length<=64);
  const seen=new Set(),files=new Map(),notices=new Map(),witnesses=new Map();
  const pin=(f,prefix,max)=>{
@@ -27,7 +32,7 @@ export function parseSupplementalNotices(bytes){
   const c=e.coverage;let identity=e.packagePath+"#package";
   if(c.kind==="package")keys(c,["kind"]);
   else if(c.kind==="runtime-notice"){
-   assert.equal(policy.version,3,"Runtime notice requires schema v3");
+   assert.ok(policy.version>=3,"Runtime notice requires schema v3 or newer");
    keys(c,["kind","name","sourceRelease","consumers","noticeSource"]);
    text(c.name,/^[a-z0-9][a-z0-9._-]*$/);text(c.sourceRelease,/^[A-Za-z][A-Za-z0-9._-]*-[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._-]+)?$/);
    assert.ok(Array.isArray(c.consumers)&&c.consumers.length>0&&c.consumers.length<=16);
@@ -70,11 +75,21 @@ export function parseSupplementalNotices(bytes){
   digest(e.packageJsonSha256);text(e.npmIntegrity,/^sha512-[A-Za-z0-9+/]{86}==$/,95);
   assert.equal(Buffer.from(e.npmIntegrity.slice(7),"base64").toString("base64"),e.npmIntegrity.slice(7));
   safePath(e.noticePath);assert.match(e.noticePath,/^distribution\/notices\/LICENSE\.[A-Za-z0-9._-]+$/);
-  if(policy.version===3)assert.ok(!/^distribution\/notices\/LICENSE\.source-/i.test(e.noticePath),"Notice path reserved for source witnesses");
+  if(policy.version>=3)assert.ok(!/^distribution\/notices\/LICENSE\.source-/i.test(e.noticePath),"Notice path reserved for source witnesses");
   assert.ok(Number.isSafeInteger(e.noticeBytes)&&e.noticeBytes>0&&e.noticeBytes<=64*1024);digest(e.noticeSha256);
-  keys(e.upstream,["repository","commit","path","gitBlob"]);text(e.upstream.repository,/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
-  text(e.upstream.commit,/^[a-f0-9]{40}$/,40);safePath(e.upstream.path);text(e.upstream.gitBlob,/^[a-f0-9]{40}$/,40);
-  // upstream identifies the notice source, not a claim about the npm build's source commit.
+  if(e.upstream.kind==="published-file"){
+   assert.equal(policy.version,4,"Published-file notice requires schema v4");
+   assert.ok(c.kind==="runtime-notice"&&c.noticeSource.kind==="whole-file","Published-file notice requires whole-file runtime scope");
+   keys(e.upstream,["kind","url","bytes","sha256"]);
+   assert.ok(publishedNoticeUrls.has(e.upstream.url),"Unreviewed published notice URL");
+   assert.ok(Number.isSafeInteger(e.upstream.bytes)&&e.upstream.bytes>0&&e.upstream.bytes<=64*1024);digest(e.upstream.sha256);
+   assert.equal(e.upstream.bytes,e.noticeBytes,"Published notice source size differs");
+   assert.equal(e.upstream.sha256,e.noticeSha256,"Published notice source digest differs");
+  }else{
+   keys(e.upstream,["repository","commit","path","gitBlob"]);text(e.upstream.repository,/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+   text(e.upstream.commit,/^[a-f0-9]{40}$/,40);safePath(e.upstream.path);text(e.upstream.gitBlob,/^[a-f0-9]{40}$/,40);
+  }
+  // upstream identifies the notice source, not build provenance or independent publisher authentication.
   const noticeKey=e.noticePath.toLowerCase(),noticePin={path:e.noticePath,bytes:e.noticeBytes,sha256:e.noticeSha256,upstream:e.upstream};
   if(c.kind==="runtime-notice"&&c.noticeSource.kind==="excerpt")noticePin.excerpt=c.noticeSource;
   if(notices.has(noticeKey))assert.deepEqual(notices.get(noticeKey),noticePin,"Conflicting shared notice pins");else notices.set(noticeKey,noticePin);
@@ -120,8 +135,13 @@ export async function verifySupplementalNotices(root,policyBytes){
     assert.ok(source.subarray(n.offset,n.offset+notice.length).equals(notice),"Runtime notice excerpt differs from source bytes");
    }
   }
-  const blob=createHash("sha1").update(Buffer.from(`blob ${source.length}\0`)).update(source).digest("hex");
-  assert.equal(blob,e.upstream.gitBlob,"Supplemental notice differs from reviewed upstream blob");
+  if(e.upstream.kind==="published-file"){
+   assert.equal(source.length,e.upstream.bytes,"Published notice source size changed");
+   assert.equal(sha256(source),e.upstream.sha256,"Published notice source bytes changed");
+  }else{
+   const blob=createHash("sha1").update(Buffer.from(`blob ${source.length}\0`)).update(source).digest("hex");
+   assert.equal(blob,e.upstream.gitBlob,"Supplemental notice differs from reviewed upstream blob");
+  }
   if(e.coverage.kind==="vendored-source")for(const f of [...e.coverage.sourceFiles,...e.coverage.declaredNativeConsumers]){
    if(verifiedFiles.has(f.path))continue;
    const bytes=await boundedFile(join(root,f.path),f.bytes);

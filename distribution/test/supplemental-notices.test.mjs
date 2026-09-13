@@ -27,13 +27,13 @@ async function fixture(policy=base()){
 }
 test("canonical supplemental source grants retain byte and upstream blob pins",async()=>{
  const bytes=await readFile(new URL("../supplemental-notices.json",import.meta.url)),p=parseSupplementalNotices(bytes);
- assert.equal(p.version,3);assert.equal(p.entries.length,52);const e=p.entries[0];assert.equal(e.name,"standardwebhooks");assert.equal(e.version,"1.1.1");assert.equal(e.upstream.path,"libraries/LICENSE");
+ assert.equal(p.version,4);assert.equal(p.entries.length,60);const e=p.entries[0];assert.equal(e.name,"standardwebhooks");assert.equal(e.version,"1.1.1");assert.equal(e.upstream.path,"libraries/LICENSE");
  const b=await readFile(new URL("../notices/LICENSE.standardwebhooks",import.meta.url));assert.equal(b.length,e.noticeBytes);assert.equal(sha256(b),e.noticeSha256);
  assert.equal(createHash("sha1").update(Buffer.from(`blob ${b.length}\0`)).update(b).digest("hex"),e.upstream.gitBlob);
  assert.match(b.toString(),/Copyright \(c\) 2023 Svix/);assert.match(b.toString(),/Permission is hereby granted/);
 });
 for(const [label,mutate] of [
- ["unknown field",p=>p.releaseReady=true],["unreviewed version",p=>p.version=4],["clearance claim",p=>p.scope="release-cleared"],
+ ["unknown field",p=>p.releaseReady=true],["unreviewed version",p=>p.version=5],["clearance claim",p=>p.scope="release-cleared"],
  ["empty rules",p=>p.entries=[]],["duplicate component",p=>p.entries.push(structuredClone(p.entries[0]))],
  ["traversal",p=>p.entries[0].packagePath="node_modules/../outside"],["wrong component path",p=>p.entries[0].packagePath="node_modules/other"],
  ["notice outside destination",p=>p.entries[0].noticePath="host-patches/LICENSE"],["oversized notice",p=>p.entries[0].noticeBytes=65537],
