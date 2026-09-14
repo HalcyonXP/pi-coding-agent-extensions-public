@@ -1,6 +1,6 @@
-# Code image inputs — Batch B working source
+# Code image inputs — accepted bounded Batch B subset
 
-This is development source, not a newly accepted installation or full Codex media parity. The pinned unified `image` helper accepts inline data URLs and image blocks. Pi now implements those bounded input forms through native protected publication, while retaining native reference forwarding. No image service, downloader, filesystem access or provider implementation is added to QuickJS.
+PR #33 accepted this bounded image subset through separate source/master/copied-handoff gates; the [milestone index](MILESTONES.md) records subsequent accepted boundaries. This is not full Codex media parity or certification of later working changes. The pinned unified `image` helper accepts inline data URLs and image blocks. Pi now implements those bounded input forms through native protected publication, while retaining native reference forwarding. No image service, downloader, filesystem access or provider implementation is added to QuickJS.
 
 ## Inputs and limits
 
@@ -42,7 +42,7 @@ else text(JSON.stringify(edited));
 
 `generatedImage({image_url,output_hint?})` publishes an image and optional **unverified output hint** together through native protected evidence. `image_url` accepts a canonical inline data URL under the same byte/container/canvas limits, or an existing owned `img_...` reference (a Pi adaptation). No HTTP/path fetch, generation or save occurs. `output_hint`, if present, must be a string of at most4096 UTF-8 bytes; empty strings remain explicit. Extra arguments/fields and accessors are refused. Guest-inline provenance remains visible when those images are forwarded. The fixed `GENERATED_IMAGE_INPUT_REQUIRED` diagnostic never echoes private arguments or inspects arbitrary exception properties.
 
-Working-source default `tools.imagegen` / `projectedTools.imagegen` now returns `{image_url,output_hint}` for recognized normal results. **`image_url` is an owned Pi reference, not upstream's inline data URL**: original image bytes remain outside the unchanged64KiB RPC boundary. `output_hint` selects a successful destination copy or the canonical path. The actual native result retains image bytes, all text and canonical/copy metadata; the tool still saves its immutable original before returning. `details.imagegen_result` is a consistency checksum, not a signature/authority. Only a matching finalized shape/checksum and successful native publication can add the `imagegen-v1` presentation hint.
+The PR33-accepted default `tools.imagegen` / `projectedTools.imagegen` returns `{image_url,output_hint}` for recognized normal results. **`image_url` is an owned Pi reference, not upstream's inline data URL**: original image bytes remain outside the unchanged64KiB RPC boundary. `output_hint` selects a successful destination copy or the canonical path. The actual native result retains image bytes, all text and canonical/copy metadata; the tool still saves its immutable original before returning. `details.imagegen_result` is a consistency checksum, not a signature/authority. Only a matching finalized shape/checksum and successful native publication can add the `imagegen-v1` presentation hint.
 
 Errors, post-hook changes, unknown fields, failed optional copies, unstamped results and oversized evidence views keep their full wrapper. The default return change requires an explicit caller migration:
 

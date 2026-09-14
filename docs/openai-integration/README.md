@@ -2,7 +2,7 @@
 
 This guide describes the public source's implementation and constraints, not an inherited private project's approval history. The target is **Codex-compatible observable tool behavior within Pi**, not merely similar names. See the pinned [compatibility contract and remaining gaps](CODEX-COMPATIBILITY.md). Read [architecture](ARCHITECTURE.md), [supported/deviating surface](FINAL-ACCEPTANCE.md), [validation](VALIDATION.md), [security](SECURITY.md), [local preview versus public release](LOCAL-PREVIEW.md) and [isolated installation](PRIVATE-RELEASE.md).
 
-Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, focused development commands and milestone acceptance. Functional completion and public redistribution remain separate.
+Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, focused development commands and milestone acceptance. The [accepted milestone index](MILESTONES.md) records the exact source/master/copied-handoff boundaries through PR #37. Functional completion and public redistribution remain separate.
 
 | Term | Meaning in this project |
 | --- | --- |
@@ -11,11 +11,11 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | Code mode | Independently opted-in paired exec/wait with a saved profile choice, bounded QuickJS cells and current native ownership; not ambient Node/V8 |
 | Native Code input | Raw-JavaScript custom provider tool, mapped by Pi to internal `{code}`; options in a first-line pragma, not top-level JSON fields. Wait remains JSON. See [input/result boundaries](NATIVE-CODE-CONTRACT.md). |
 | Code projection | Default `tools` guest view for recognized normal Unified results, with full native-wrapper fallback; `nativeTools` preserves raw access and `projectedTools` is an identical alias. Legacy scripts need migration; native evidence/authority is unchanged. See [projection contract](CODE-RESULT-PROJECTION.md). |
-| Web text projection | Working-source canonical `web_search` guest string after complete native publication and RPC admission; includes all literal text and opaque source associations. Not a Web reference, native citation renderer or new installed acceptance. |
+| Web text projection | PR33-accepted canonical `web_search` guest string after complete native publication and RPC admission; includes all literal text and opaque source associations. Not a Web reference or native citation renderer; later artifacts need separate acceptance. |
 | Web consistency stamp | `details.web_result` content/label checksum checked after hooks; not a signature or authority. A native post-publication hint permits the guest text view, never extra admission. |
-| Web admission profile | Saved schema choice requiring reload/restart. `verified-v1` and `experimental` remain context-free; working-source `experimental-context` explicitly opts into bounded native conversation disclosure. Not an installation profile or execution authority. [Contract](WEB-PROFILES.md). |
+| Web admission profile | Saved schema choice requiring reload/restart. `verified-v1` and `experimental` remain context-free; PR34-accepted `experimental-context` explicitly opts into bounded native conversation disclosure. Not an installation profile or execution authority. [Contract](WEB-PROFILES.md). |
 | Native text snapshot | Current-invocation-only user/assistant text captured after context hooks, confirmed against the native serialized request and successful completion. Not raw ancestry, a secret scrubber or authority inferred from matching text. |
-| Code notification | Working-source `await notify(value)`: additional native tool-result output tied to the original exec across waits. Active-turn queue acceptance, not model consumption, a toast, custom-message metadata promotion or another tool completion/usage event. |
+| Code notification | PR34-accepted primitive `await notify(value)`: additional native tool-result output tied to the original exec across waits. Active-turn queue acceptance, not model consumption, a toast, custom-message metadata promotion or another tool completion/usage event. |
 | Web service reference | Opaque remote `ref_id`, distinct from a native `ev_...` evidence reference. Opaque IDs/citation syntax are not currently admitted as continuation authority; public-URL open remains separate. |
 | Native grammar capability | Selected Pi model's explicit grammar-tool support; absence disables Code without a JSON-provider fallback, not an execution-authority grant |
 | Unified exec | Full-OS pipe-based shell delegation via exec_command/write_stdin; not a shell sandbox or PTY |
@@ -26,7 +26,9 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | Draining | Native resources/publication whose closure is not yet confirmed; still consumes admission |
 | Collector cancellation | Wakes the current Code exec/wait collection without waiting out its return timer; not confirmation of native closure or release of draining admission |
 | Profile | New isolated configuration/workspace bound to an immutable bundle; not an imported active installation |
-| Source acceptance | Exact-head local/hosted validation and labelled review; distinct from reproducible artifact and installed-profile acceptance |
+| Source acceptance | Exact-head local/hosted validation and labelled review; distinct from resulting-master and actual-copy acceptance |
+| Resulting-master acceptance | Fresh qualification of the integrated commit and its source-specific artifacts; equal trees do not reuse the source archive's acceptance |
+| Actual-copy acceptance | SDK, genuine CLI/profile and required cohorts executed against the actual copied/extracted bundle; not an active installation or public release |
 | AI-assisted self-review | A COMMENTED review pinned to head/base, not independent approval |
 | Public source | This repository's sanitized fresh history and implementation; not old private records, a paid entitlement guarantee or a prebuilt release |
 | Release contract | [Scope, externally trusted pins and delivery gates](RELEASE-CONTRACT.md); not authorization to publish assets |
@@ -73,11 +75,11 @@ Use the [delivery plan](DELIVERY-PLAN.md) for coherent implementation batches, f
 | ALL_TOOLS | Frozen per-cell `{name,description}` snapshot of eligible native tools, matching TOOL_NAMES; [discovery data](CODE-TOOL-METADATA.md), not schemas, callbacks, current entitlement or native authority |
 | Nested JSON-string argument | [Serialized object parsed inside QuickJS](CODE-COORDINATOR-COMPATIBILITY.md) before ordinary native validation, not arbitrary freeform input or tool authority |
 | Image-reference forwarding | Passing an img_ reference or projected PNG/JPEG/GIF/WebP block to image(); it must resolve to existing journaled same-context evidence, never caller-replaced bytes or network URLs |
-| Inline image publication | Working-source image() admission of canonical inline PNG/JPEG/GIF/WebP up to32KiB decoded. Native protected messages label guest provenance and issue references only after publication; not a native tool result or generation/save receipt. See [media inputs](MEDIA-INPUTS.md). |
+| Inline image publication | PR33-accepted image() admission of canonical inline PNG/JPEG/GIF/WebP up to32KiB decoded. Native protected messages label guest provenance and issue references only after publication; not a native tool result or generation/save receipt. See [media inputs](MEDIA-INPUTS.md). |
 | Generated-image publication | `generatedImage({image_url,output_hint?})` forwards owned/inline pixels with an unverified hint; no generation/save/fetch. Normal imagegen projection uses reference-valued image_url as explicit Pi adaptation. [Media contract](MEDIA-INPUTS.md). |
 | Helper failure | Fixed allowlisted classification of an unhandled helper-created error; not inspection of arbitrary guest exception text. See [helper feedback](CODE-COORDINATOR-COMPATIBILITY.md). |
 | Callable alias | Unambiguous hyphen-to-underscore tools entry dispatching the original native name; exact native entries win, metadata and authority stay unchanged. |
-| Coordinator disposal | Ends admission of queued coordinator callbacks and ignores late results; native scopes still close already-delegated work |
+| Coordinator disposal | Ends admission of queued coordinator callbacks and ignores late results; native scopes retain responsibility for already-delegated work, and cancellation alone does not confirm closure |
 
 The [pinned exposed-contract record](CODEX-TOOL-CONTRACTS.md) separates those surfaces and retains the PR #18 audit baseline. The [native Code contract](NATIVE-CODE-CONTRACT.md) and separate [direct Unified contract](NATIVE-UNIFIED-CONTRACT.md) describe deliberate direct-output transitions, SDK migration to structured details and unresolved nested/result work. [GitHub completion tracker #16](https://github.com/HalcyonXP/pi-coding-agent-extensions-public/issues/16) owns the remaining compatibility sequence; issue #3 remains the separate public-release tracker.
 
